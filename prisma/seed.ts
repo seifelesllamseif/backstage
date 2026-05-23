@@ -72,6 +72,14 @@ async function main(): Promise<void> {
   console.log("Creating 6 auth users + matching crew_member rows...");
   const idByEmail = new Map<string, string>();
   for (const p of PEOPLE) {
+    // INVARIANT: crew_member.id MUST equal the auth.users.id we just got
+    // back. This is the only place in the codebase that bridges Supabase
+    // Auth and Prisma — see schema.prisma's CrewMember model + decisions
+    // 0002 / 0016. Any future signup flow must follow the same pattern:
+    //   1. supabase.auth.admin.createUser (or signUp)
+    //   2. prisma.crewMember.create with `id: <returned auth user id>`
+    // The previous DB-level FK that enforced this is gone (slice 2); we
+    // rely on this invariant being honored by every writer.
     const { data, error } = await supabase.auth.admin.createUser({
       email: p.email,
       password: DEV_PASSWORD,
@@ -85,7 +93,7 @@ async function main(): Promise<void> {
     }
     await prisma.crewMember.create({
       data: {
-        id: data.user.id,
+        id: data.user.id, // ← auth user id, NOT a generated UUID
         companyId: company.id,
         email: p.email,
         fullName: p.fullName,

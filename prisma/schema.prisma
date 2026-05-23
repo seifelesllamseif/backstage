@@ -78,9 +78,15 @@ model Company {
 }
 
 model CrewMember {
-  // No @default: the id is the matching auth.users.id from Supabase Auth.
-  // The actual FK to auth.users is appended by hand to the init migration —
-  // see prisma/sql/crew_member_auth_fk.sql and decision 0002.
+  // INVARIANT: `id` is the matching `auth.users.id` from Supabase Auth.
+  // Never use a generated UUID here. Every code path that inserts a
+  // crew_member row MUST pass the auth user's id (see prisma/seed.ts and any
+  // future signup flow). No default — Prisma will refuse to insert without
+  // an explicit id, which is the safety belt that catches mistakes.
+  //
+  // This was enforced by a DB-level FK in slice 1; the FK was dropped in
+  // slice 2 because Prisma 7's drift detector fights cross-schema FKs to
+  // Supabase's auth tables. See decisions 0002 (superseded) and 0016.
   id             String     @id @db.Uuid
   companyId      String     @map("company_id") @db.Uuid
   email          String

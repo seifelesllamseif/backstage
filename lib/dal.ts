@@ -37,6 +37,12 @@ export const verifySession = cache(async () => {
 
 export const getCurrentCrewMember = cache(async () => {
   const claims = await verifySession();
+  // INVARIANT: crew_member.id === auth.users.id. Seed (and any future signup
+  // flow) creates the auth user first, then inserts a crew_member with the
+  // returned id. The cross-schema FK that enforced this at the DB level was
+  // dropped in slice 2 — see decisions 0002 and 0016. If this lookup ever
+  // misses, it means a code path created a crew_member with a wrong id, NOT
+  // that the user is logged in correctly.
   const userId = claims.sub as string;
 
   return prisma.crewMember.findUnique({
