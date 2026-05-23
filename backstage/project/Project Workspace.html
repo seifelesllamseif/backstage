@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Crew OS — Project workspace</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #f0eee9; font-family: "Geist", -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  * { box-sizing: border-box; }
+  #root { height: 100%; }
+  .pw-frame { width: 100%; height: 100%; overflow: hidden; }
+  .pw-intro { max-width: 1100px; margin: 32px auto 8px; padding: 0 28px; font-family: "Geist", -apple-system, system-ui, sans-serif; color: #2a251f; }
+  .pw-intro h1 { font-size: 22px; font-weight: 500; margin: 0 0 6px 0; letter-spacing: -0.01em; }
+  .pw-intro p  { font-size: 13px; color: rgba(60,50,40,0.7); margin: 0; max-width: 720px; line-height: 1.5; }
+  .pw-intro .meta { margin-top: 10px; display: flex; gap: 14px; font-size: 11px; color: rgba(60,50,40,0.55); flex-wrap: wrap; }
+  .pw-intro .meta span::before { content: '·'; margin-right: 14px; }
+  .pw-intro .meta span:first-child::before { content: ''; margin: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="ui.jsx"></script>
+<script type="text/babel" src="app-shell.jsx"></script>
+<script type="text/babel" src="project-header.jsx"></script>
+<script type="text/babel" src="project-board.jsx"></script>
+<script type="text/babel" src="project-task-panel.jsx"></script>
+<script type="text/babel" src="project-timeline.jsx"></script>
+<script type="text/babel" src="project-states.jsx"></script>
+
+<script type="text/babel" data-presets="env,react">
+function Workspace({ project, view, tasks, panel, viewer = 'full', timeline }) {
+  return (
+    <AppShell
+      active="projects"
+      user={{ name: 'Tomás Reyes' }}
+      topbarCrumbs={['Projects', project.name]}
+      topbarSubtitle={view === 'board' ? 'Board' : 'Timeline'}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+        <ProjectHeader project={project} view={view} />
+        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            {view === 'board'
+              ? <ProjectBoard
+                  project={project}
+                  tasks={tasks || []}
+                  openTaskId={panel ? panel.task.id : null}
+                  blockedTaskId={panel && panel.mode === 'gate' ? panel.task.id : null}
+                />
+              : <ProjectTimeline project={project} timeline={timeline} viewer={viewer} />
+            }
+          </div>
+          {panel && <TaskPanel task={panel.task} mode={panel.mode} />}
+        </div>
+      </div>
+    </AppShell>
+  );
+}
+
+const ARTBOARD_W = 1600;
+const ARTBOARD_H = 1100;
+
+function Page() {
+  return (
+    <React.Fragment>
+      <div className="pw-intro">
+        <h1>Project workspace</h1>
+        <p>
+          The home of one project's work — Board and Timeline behind a single switcher.
+          Same chrome and shared components as Cockpit. Cards link out to a focused task
+          detail; the timeline's visibility marker is honored.
+        </p>
+        <div className="meta">
+          <span>SKAM dark theme</span>
+          <span>Shared components only</span>
+          <span>Handoff gates Done — never a silent failure</span>
+        </div>
+      </div>
+      <DesignCanvas>
+        <DCSection id="board" title="Board view" subtitle="Aurora doc — board, task detail, Done gate, empty project">
+          <DCArtboard id="board-populated" label="Board — populated (happy path)" width={ARTBOARD_W} height={ARTBOARD_H}>
+            <div className="pw-frame" data-screen-label="Project · Board (populated)">
+              <Workspace project={AURORA} view="board" tasks={AURORA_TASKS} />
+            </div>
+          </DCArtboard>
+
+          <DCArtboard id="board-task-ready" label="Board — task detail, handoff ready" width={ARTBOARD_W} height={ARTBOARD_H}>
+            <div className="pw-frame" data-screen-label="Project · Board + task detail (ready)">
+              <Workspace
+                project={AURORA}
+                view="board"
+                tasks={AURORA_TASKS}
+                panel={{ task: TASK_READY, mode: 'ready' }}
+              />
+            </div>
+          </DCArtboard>
+
+          <DCArtboard id="board-done-gate" label="Board — Done gate (handoff incomplete)" width={ARTBOARD_W} height={ARTBOARD_H}>
+            <div className="pw-frame" data-screen-label="Project · Board + Done gate">
+              <Workspace
+                project={AURORA}
+                view="board"
+                tasks={AURORA_TASKS}
+                panel={{ task: TASK_GATE, mode: 'gate' }}
+              />
+            </div>
+          </DCArtboard>
+
+          <DCArtboard id="board-empty" label="Board — empty project (first-run)" width={ARTBOARD_W} height={ARTBOARD_H}>
+            <div className="pw-frame" data-screen-label="Project · Board (empty)">
+              <Workspace project={EMPTY_PROJECT} view="board" tasks={[]} />
+            </div>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="timeline" title="Timeline view" subtitle="Full leads view vs. reduced view for a non-permitted viewer">
+          <DCArtboard id="timeline-full" label="Timeline — leads view (sees everything)" width={ARTBOARD_W} height={ARTBOARD_H}>
+            <div className="pw-frame" data-screen-label="Project · Timeline (full)">
+              <Workspace project={AURORA} view="timeline" timeline={AURORA_TIMELINE} viewer="full" />
+            </div>
+          </DCArtboard>
+
+          <DCArtboard id="timeline-restricted" label="Timeline — restricted viewer (apprentice)" width={ARTBOARD_W} height={ARTBOARD_H}>
+            <div className="pw-frame" data-screen-label="Project · Timeline (restricted)">
+              <Workspace project={AURORA} view="timeline" timeline={AURORA_TIMELINE} viewer="restricted" />
+            </div>
+          </DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    </React.Fragment>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Page />);
+</script>
+</body>
+</html>
