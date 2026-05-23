@@ -9,4 +9,5 @@ alter table public.company            enable row level security;
 alter table public.crew_member        enable row level security;
 alter table public.project            enable row level security;
 alter table public.task               enable row level security;
+alter table public.handoff            enable row level security;
 alter table public._prisma_migrations enable row level security;

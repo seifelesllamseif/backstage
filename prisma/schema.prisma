@@ -1,9 +1,11 @@
 // Backstage — Prisma schema.
 //
-// Scope is intentionally slim: only the four slice-1 tables.
-// Source-of-truth specs:
+// Scope: slice-1 tables (company, crew_member, project, task) plus the
+// slice-2 handoff. Source-of-truth specs:
 //   docs/backstage-os-slice-1-plan.md §4
+//   docs/backstage-os-slice-2-plan.md §4
 //   docs/decisions/0004-prisma-schema-scope.md
+//   docs/decisions/0015-slice-2-handoff-architecture.md
 //
 // Boundary: the `auth.users` table is owned by Supabase and is NOT
 // modeled here. crew_member.id receives its value from Supabase Auth
@@ -16,6 +18,11 @@ generator client {
 
 // url + directUrl live in prisma.config.ts at the repo root.
 // See docs/decisions/0007-prisma-7-adapter-pattern.md.
+//
+// Single-schema (public). The original `crew_member.id → auth.users.id` FK
+// from decision 0002 was dropped during slice 2 because Prisma 7's drift
+// detection couldn't tolerate the cross-schema constraint without enumerating
+// every Supabase auth table — see decision 0016 for the revised boundary.
 datasource db {
   provider = "postgresql"
 }
@@ -47,6 +54,15 @@ enum TaskStatus {
   @@map("task_status")
 }
 
+enum HandoffStatus {
+  in_progress
+  blocked
+  ready_for_review
+  done
+
+  @@map("handoff_status")
+}
+
 model Company {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name      String
@@ -56,6 +72,7 @@ model Company {
   crewMembers CrewMember[]
   projects    Project[]
   tasks       Task[]
+  handoffs    Handoff[]
 
   @@map("company")
 }
@@ -75,6 +92,8 @@ model CrewMember {
   company       Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   assignedTasks Task[]  @relation("TaskAssignee")
   createdTasks  Task[]  @relation("TaskCreatedBy")
+  handoffsFrom  Handoff[] @relation("HandoffFrom")
+  handoffsTo    Handoff[] @relation("HandoffTo")
 
   @@unique([companyId, email])
   @@map("crew_member")
@@ -112,10 +131,43 @@ model Task {
   project  Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   assignee CrewMember? @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   creator  CrewMember? @relation("TaskCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  handoff  Handoff?
 
   @@index([companyId])
   @@index([projectId])
   @@index([assigneeId])
   @@index([status])
   @@map("task")
+}
+
+model Handoff {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId     String        @map("company_id") @db.Uuid
+  taskId        String        @unique @map("task_id") @db.Uuid
+  fromMemberId  String?       @map("from_member_id") @db.Uuid
+  toMemberId    String?       @map("to_member_id") @db.Uuid
+  status        HandoffStatus @default(in_progress)
+
+  // Seven nullable text fields. `is_complete` is computed in TypeScript via
+  // lib/handoff.ts (all seven non-null + non-empty after trim). See
+  // docs/decisions/0015-slice-2-handoff-architecture.md.
+  whatItIs       String? @map("what_it_is")
+  currentStatus  String? @map("current_status")
+  doneSoFar      String? @map("done_so_far")
+  stillLeft      String? @map("still_left")
+  fileLinks      String? @map("file_links")
+  gotchas        String?
+  whoToAsk       String? @map("who_to_ask")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company    Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  task       Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fromMember CrewMember? @relation("HandoffFrom", fields: [fromMemberId], references: [id], onDelete: SetNull)
+  toMember   CrewMember? @relation("HandoffTo", fields: [toMemberId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([toMemberId])
+  @@map("handoff")
 }

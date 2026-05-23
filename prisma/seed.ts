@@ -10,6 +10,7 @@
 import WebSocket from "ws";
 import { createClient } from "@supabase/supabase-js";
 import { prisma } from "../lib/prisma";
+import { seedSlice2Handoffs } from "./slice-2-handoffs";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -153,8 +154,13 @@ async function main(): Promise<void> {
     });
   }
 
+  console.log("Creating slice-2 handoff samples...");
+  const handoffs = await seedSlice2Handoffs(prisma, company.id);
+
   console.log("");
-  console.log(`Seeded SKAM — 6 people, 2 projects, ${tasks.length} tasks.`);
+  console.log(
+    `Seeded SKAM — 6 people, 2 projects, ${tasks.length} tasks, ${handoffs.inserted} handoffs.`,
+  );
   console.log("");
   console.log(`Login password (all users): ${DEV_PASSWORD}`);
   console.log("");

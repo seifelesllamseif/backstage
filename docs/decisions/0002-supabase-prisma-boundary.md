@@ -1,7 +1,16 @@
 ---
-status: accepted
+status: superseded
 decided_on: 2026-05-23
+superseded_by: 0016
 ---
+
+> **Superseded in part by [0016](0016-drop-crew-member-auth-fk.md).** The
+> spirit of this decision still applies — Supabase owns `auth.*`, Prisma owns
+> `public.*`, and `crew_member.id` matches the `auth.users.id` from sign-up.
+> What changed: the cross-schema FK that physically tied them together was
+> dropped during slice 2 because Prisma 7's drift detection couldn't tolerate
+> it without enumerating every Supabase auth table. The invariant is now
+> enforced in application code only.
 
 # 0002 — Supabase Auth ↔ Prisma boundary
 
