@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "analyze": "ANALYZE=true next build",
+    "postinstall": "prisma generate --no-hints",
     "prepare": "husky",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

@@ -40,15 +40,9 @@ git push -u origin main
 
 Vercel auto-builds on push to `main`. First build is a few minutes.
 
-If the build fails with `Cannot find module '.prisma/client'`, add a postinstall hook so `prisma generate` runs during install:
+`package.json` carries a `postinstall: prisma generate --no-hints` hook so the typed Prisma client is generated during install on every machine. Without it, Vercel's pnpm 10 ignores Prisma's own postinstall scripts and the build fails type-checking (`Parameter 'task' implicitly has an 'any' type`) because `PrismaClient.<model>` falls back to `any` without the generated types. We learned this the hard way on the first deploy attempt.
 
-```json
-"scripts": {
-  "postinstall": "prisma generate"
-}
-```
-
-If it fails with `DATABASE_URL is not set` during build, the env var isn't visible to the Production build — re-check step 3 and confirm the var is enabled for the Production scope.
+If the build still fails with `DATABASE_URL is not set` *at build time*, the env var isn't visible to the Production scope — re-check step 3 and confirm the var is enabled for Production (not just Preview/Development).
 
 ### 5. Tell Supabase the new URL
 
