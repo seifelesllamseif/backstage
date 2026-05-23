@@ -2,27 +2,17 @@ import Link from "next/link";
 import { format, isBefore, startOfDay } from "date-fns";
 import { prisma } from "@/lib/prisma";
 import { getCurrentCrewMember } from "@/lib/dal";
-import { signOut } from "@/app/login/actions";
-import type { TaskStatus } from "@/lib/business-logic";
+import { StatusPill } from "@/components/ui/status-pill";
+import { PersonChip } from "@/components/ui/person-chip";
 import {
   countMissingFields,
   isHandoffComplete,
   HANDOFF_STATUS_LABELS,
 } from "@/lib/handoff";
 
-// Slice-1 step 6 + slice-2 §6.3: Crew Cockpit. Three blocks:
-//   1. Header strip
-//   2. My tasks (slice 1)
-//   3. Handoffs — to fill + received (slice 2)
-// Onboarding / allocation / roadmap are later slices.
-
-const STATUS_LABELS: Record<Exclude<TaskStatus, "canceled" | "done">, string> = {
-  backlog: "Backlog",
-  unscoped: "Unscoped",
-  todo: "To do",
-  in_progress: "In progress",
-  in_review: "In review",
-};
+// Crew Cockpit, restyled per decision 0017. Slice-1/2 scope: header strip,
+// my-tasks block, handoffs block (to-fill + received). Sidebar is up in
+// the (authenticated) shell, so this page renders just the content column.
 
 export default async function CockpitPage() {
   const member = await getCurrentCrewMember();
@@ -71,105 +61,72 @@ export default async function CockpitPage() {
     }),
   ]);
 
-  // To-fill is the subset of my-task handoffs that are incomplete.
   const toFill = toFillRaw.filter((h) => !isHandoffComplete(h));
-
   const today = startOfDay(new Date());
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 p-6">
-      <header className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <span
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-muted text-sm font-medium text-muted-foreground"
-            aria-hidden
-          >
-            {member.avatarInitials ?? "—"}
-          </span>
-          <div>
-            <h1 className="text-lg font-medium">{member.fullName}</h1>
-            <p className="text-xs text-muted-foreground">{member.accessTier}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 text-sm">
-          <Link
-            href="/projects"
-            className="text-muted-foreground hover:text-foreground"
-          >
-            Projects
-          </Link>
-          <form action={signOut}>
-            <button
-              type="submit"
-              className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-muted"
-            >
-              Sign out
-            </button>
-          </form>
-        </div>
+    <main className="mx-auto flex max-w-[980px] flex-col gap-6 px-8 py-8">
+      <header className="flex items-center justify-between gap-4 py-1">
+        <PersonChip
+          name={member.fullName}
+          initials={member.avatarInitials ?? undefined}
+          size="lg"
+          self
+        />
+        <span className="text-xs text-muted-foreground">{member.accessTier}</span>
       </header>
 
-      <section className="flex flex-col gap-3">
-        <header className="flex items-baseline justify-between">
-          <h2 className="text-sm font-medium">My tasks</h2>
+      <section className="overflow-hidden rounded-xl border border-border bg-card">
+        <header className="flex items-baseline justify-between border-b border-divider px-5 py-3.5">
+          <h2 className="text-base font-medium tracking-tight">My tasks</h2>
           <span className="text-xs text-muted-foreground">
             {tasks.length} open
           </span>
         </header>
 
         {tasks.length === 0 ? (
-          <p className="rounded-md border border-border bg-card p-6 text-sm text-muted-foreground">
+          <p className="px-5 py-6 text-sm text-muted-foreground">
             Nothing on your plate. Open the board to pick up something or wait
             for a task to land here.
           </p>
         ) : (
-          <ul className="flex flex-col gap-2">
+          <ul className="divide-y divide-divider">
             {tasks.map((task) => {
               const isOverdue =
                 task.dueDate !== null && isBefore(task.dueDate, today);
-              const statusLabel =
-                task.status in STATUS_LABELS
-                  ? STATUS_LABELS[task.status as keyof typeof STATUS_LABELS]
-                  : task.status;
-
               return (
                 <li
                   key={task.id}
-                  className="flex items-center gap-3 rounded-md border border-border bg-card p-3 text-sm"
+                  className="flex items-center gap-3 px-5 py-2.5 text-sm hover:bg-muted/40"
                 >
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-                    {statusLabel}
-                  </span>
-
+                  <StatusPill status={task.status} />
                   <Link
-                    href={`/projects/${task.projectId}/tasks/${task.id}`}
+                    href={`/projects/${task.projectId}?task=${task.id}`}
                     className="flex-1 truncate hover:underline"
                     title={task.title}
                   >
                     {task.title}
                   </Link>
-
                   <Link
                     href={`/projects/${task.projectId}`}
-                    className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-                    title="View board"
+                    className="rounded-full bg-muted px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground"
                   >
                     {task.project.name}
                   </Link>
-
                   {task.dueDate ? (
                     <span
                       className={
                         isOverdue
-                          ? "text-xs text-destructive"
-                          : "text-xs text-muted-foreground"
+                          ? "w-14 text-right text-xs text-destructive"
+                          : "w-14 text-right text-xs text-muted-foreground"
                       }
                     >
                       {format(task.dueDate, "MMM d")}
                     </span>
                   ) : (
-                    <span className="text-xs text-muted-foreground">—</span>
+                    <span className="w-14 text-right text-xs text-foreground/40">
+                      —
+                    </span>
                   )}
                 </li>
               );
@@ -178,44 +135,44 @@ export default async function CockpitPage() {
         )}
       </section>
 
-      <section className="flex flex-col gap-3">
-        <header className="flex items-baseline justify-between">
-          <h2 className="text-sm font-medium">Handoffs</h2>
+      <section className="overflow-hidden rounded-xl border border-border bg-card">
+        <header className="flex items-baseline justify-between border-b border-divider px-5 py-3.5">
+          <h2 className="text-base font-medium tracking-tight">Handoffs</h2>
           <span className="text-xs text-muted-foreground">
             {toFill.length} to fill · {received.length} received
           </span>
         </header>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-medium text-muted-foreground">
+        <div className="grid divide-x divide-divider sm:grid-cols-2">
+          <div className="flex flex-col">
+            <h3 className="px-5 pb-2 pt-4 text-[11px] uppercase tracking-wide text-muted-foreground">
               To fill
             </h3>
             {toFill.length === 0 ? (
-              <p className="rounded-md border border-border bg-card p-4 text-xs text-muted-foreground">
+              <p className="px-5 pb-5 text-xs text-muted-foreground">
                 Nothing to fill.
               </p>
             ) : (
-              <ul className="flex flex-col gap-2">
+              <ul className="flex flex-col gap-px">
                 {toFill.map((h) => {
                   const missing = countMissingFields(h);
                   return (
                     <li
                       key={h.id}
-                      className="flex flex-col gap-1 rounded-md border border-border bg-card p-3 text-sm"
+                      className="flex flex-col gap-1 px-5 py-2.5 hover:bg-muted/40"
                     >
                       <Link
-                        href={`/projects/${h.task.projectId}/tasks/${h.task.id}`}
-                        className="truncate hover:underline"
+                        href={`/projects/${h.task.projectId}?task=${h.task.id}`}
+                        className="truncate text-sm hover:underline"
                         title={h.task.title}
                       >
                         {h.task.title}
                       </Link>
-                      <div className="flex items-center gap-2 text-[11px]">
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                      <div className="flex items-center gap-1.5 text-[10px]">
+                        <span className="rounded-full bg-muted px-1.5 py-0.5 text-muted-foreground">
                           {missing} field{missing === 1 ? "" : "s"} missing
                         </span>
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-destructive">
+                        <span className="rounded-full bg-destructive/15 px-1.5 py-0.5 text-destructive">
                           Blocks Done
                         </span>
                       </div>
@@ -226,34 +183,41 @@ export default async function CockpitPage() {
             )}
           </div>
 
-          <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-medium text-muted-foreground">
+          <div className="flex flex-col">
+            <h3 className="px-5 pb-2 pt-4 text-[11px] uppercase tracking-wide text-muted-foreground">
               Received
             </h3>
             {received.length === 0 ? (
-              <p className="rounded-md border border-border bg-card p-4 text-xs text-muted-foreground">
+              <p className="px-5 pb-5 text-xs text-muted-foreground">
                 Nothing received.
               </p>
             ) : (
-              <ul className="flex flex-col gap-2">
+              <ul className="flex flex-col gap-px">
                 {received.map((h) => (
                   <li
                     key={h.id}
-                    className="flex flex-col gap-1 rounded-md border border-border bg-card p-3 text-sm"
+                    className="flex flex-col gap-1 px-5 py-2.5 hover:bg-muted/40"
                   >
                     <Link
-                      href={`/projects/${h.task.projectId}/tasks/${h.task.id}`}
-                      className="truncate hover:underline"
+                      href={`/projects/${h.task.projectId}?task=${h.task.id}`}
+                      className="truncate text-sm hover:underline"
                       title={h.task.title}
                     >
                       {h.task.title}
                     </Link>
                     <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                      <span>
-                        from {h.fromMember?.fullName ?? "unknown"}
-                      </span>
+                      {h.fromMember ? (
+                        <PersonChip
+                          name={h.fromMember.fullName}
+                          initials={h.fromMember.avatarInitials ?? undefined}
+                          size="sm"
+                          muted
+                        />
+                      ) : (
+                        <span>from unknown</span>
+                      )}
                       <span>·</span>
-                      <span className="rounded-full bg-muted px-2 py-0.5">
+                      <span className="rounded-full bg-muted px-1.5 py-0.5">
                         {HANDOFF_STATUS_LABELS[h.status]}
                       </span>
                     </div>
