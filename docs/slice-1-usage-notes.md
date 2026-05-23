@@ -43,7 +43,36 @@ Specific patterns to log explicitly when they happen:
   *for what*. Specifics matter; "for a quick reaction" and "to assign work
   faster" are very different findings.
 
-### 4. Don't touch the code
+### 3b. Watch-fors (slice 2 — handoffs + Done gate)
+
+- **Gate-gaming.** Someone hits the Done gate, doesn't want to write seven
+  fields, and types `x` / `n/a` / `tbd` into the missing ones to clear the
+  gate. The handoff passes `is_complete`; the next person opens it and reads
+  garbage. **This is the failure mode that means slice 2's founding pain
+  isn't solved.** Specifically watch for: fields under ~20 characters,
+  "see attached", "ask me", anything that obviously isn't real handoff
+  content. Log as `whatsapp` — the work *is* going elsewhere (the next
+  person's head, or a Slack DM to ask).
+- **Which fields get skipped?** If `gotchas` and `who to ask` are
+  consistently the empty ones, maybe those should be optional or merged.
+  If `what it is` gets skipped, the task title is doing that work and the
+  field is redundant. Either is a Slice 2 shape change, not a Slice 3
+  feature.
+- **Does anyone use the Edit toggle on a complete handoff?** If yes — what
+  did they go back to fix? Typo, wrong assignee, new info? Tells us
+  whether the right shape later is "edit everything" or a tighter "amend"
+  surface.
+
+### 4. Findings can mean rework, not just new work
+
+A `whatsapp`-category finding from slice 2 — people gaming the gate, fields
+routinely garbage, the next person still doing WhatsApp archaeology — is
+**not** a "we'll get to it" Slice 2 improvement. It's evidence the slice
+didn't solve its founding pain, and the right response is to redo slice 2's
+shape (fewer fields, smarter hints, different gate), not to start Slice 3.
+Don't carry a known-broken slice forward.
+
+### 5. Don't touch the code
 
 Except for day-blocking bugs (fix on `bugfix/<thing>`, merge to main, log
 here). Every other change muddies the data you're measuring. The itch will
