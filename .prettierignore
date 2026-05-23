@@ -1,0 +1,9 @@
+.turbo
+dist
+node_modules
+.next
+build
+pnpm-lock.yaml
+.github
+DIRECTORY.md
+.source
