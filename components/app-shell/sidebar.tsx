@@ -2,20 +2,30 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, FolderKanban, type LucideIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Home, FolderKanban, LogOut, type LucideIcon } from "lucide-react";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+} from "@/components/ui/sidebar";
 import { signOut } from "@/app/login/actions";
-import { PersonChip } from "@/components/ui/person-chip";
 
-// Persistent left sidebar. Ported from design/app-shell.jsx with only the
-// built nav items per decision 0017. Crew / Knowledge / Vault entries are
-// intentionally absent — those features don't exist yet.
+// AppSidebar — shadcn-sidebar-based, replacing the hand-rolled version.
+// Two built nav items per decision 0017 (no dead links). collapsible="icon"
+// so desktop users can collapse to a narrow icon strip; mobile renders as
+// a Sheet via the SidebarTrigger in the inset header.
 
 type NavItem = {
   href: string;
   label: string;
   icon: LucideIcon;
-  /** Match this prefix as well as the exact href. */
   prefix?: string;
 };
 
@@ -24,7 +34,7 @@ const NAV: readonly NavItem[] = [
   { href: "/projects", label: "Projects", icon: FolderKanban, prefix: "/projects" },
 ];
 
-export function Sidebar({
+export function AppSidebar({
   member,
 }: {
   member: {
@@ -34,77 +44,101 @@ export function Sidebar({
   };
 }) {
   const pathname = usePathname();
+  const initials = member.avatarInitials ?? deriveInitials(member.fullName);
 
   return (
-    <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-border bg-background">
-      <div className="flex items-center gap-2.5 px-4 pb-2 pt-4">
-        <span
-          className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-[13px] font-medium tracking-wider text-accent-foreground"
-          aria-hidden
-        >
-          B
-        </span>
-        <div className="flex flex-col leading-tight">
-          <span className="text-[13px] font-medium">Backstage</span>
-          <span className="text-[10px] text-muted-foreground">SKAM studio</span>
+    <Sidebar collapsible="icon">
+      <SidebarHeader>
+        <div className="flex items-center gap-2.5 px-2 py-1.5">
+          <span
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent text-[13px] font-medium tracking-wider text-accent-foreground"
+            aria-hidden
+          >
+            B
+          </span>
+          <div className="flex min-w-0 flex-col leading-tight group-data-[collapsible=icon]:hidden">
+            <span className="truncate text-[13px] font-medium">Backstage</span>
+            <span className="truncate text-[10px] text-muted-foreground">
+              SKAM studio
+            </span>
+          </div>
         </div>
-      </div>
+      </SidebarHeader>
 
-      <nav className="flex-1 px-2 py-3">
-        <ul className="flex flex-col gap-0.5">
-          {NAV.map((item) => {
-            const Icon = item.icon;
-            const active = item.prefix
-              ? pathname === item.href || pathname.startsWith(`${item.prefix}/`)
-              : pathname === item.href;
-            return (
-              <li key={item.href}>
-                <Link
-                  href={item.href}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
-                    active
-                      ? "bg-muted text-foreground"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <Icon
-                    className={cn(
-                      "h-3.5 w-3.5",
-                      active ? "text-foreground" : "text-muted-foreground",
-                    )}
-                    aria-hidden
-                  />
-                  <span>{item.label}</span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {NAV.map((item) => {
+                const Icon = item.icon;
+                const active = item.prefix
+                  ? pathname === item.href ||
+                    pathname.startsWith(`${item.prefix}/`)
+                  : pathname === item.href;
+                return (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={active}
+                      tooltip={item.label}
+                    >
+                      <Link href={item.href}>
+                        <Icon />
+                        <span>{item.label}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
 
-      <div className="border-t border-divider px-3 py-3">
-        <div className="flex items-center justify-between gap-2">
-          <PersonChip
-            name={member.fullName}
-            initials={member.avatarInitials ?? undefined}
-            size="md"
-            self
-          />
-          <form action={signOut}>
-            <button
-              type="submit"
-              className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
-              title="Sign out"
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip={`${member.fullName} · ${member.accessTier}`}
+              className="cursor-default"
             >
-              Sign out
-            </button>
-          </form>
-        </div>
-        <p className="mt-1.5 pl-8 text-[10px] text-muted-foreground">
-          {member.accessTier}
-        </p>
-      </div>
-    </aside>
+              <span
+                className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-muted text-[10px] font-medium text-muted-foreground"
+                aria-hidden
+              >
+                {initials}
+                <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-accent ring-2 ring-sidebar" />
+              </span>
+              <span className="flex min-w-0 flex-col leading-tight">
+                <span className="truncate text-[12px]">{member.fullName}</span>
+                <span className="truncate text-[10px] text-muted-foreground">
+                  {member.accessTier}
+                </span>
+              </span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+
+          <SidebarMenuItem>
+            <form action={signOut} className="w-full">
+              <SidebarMenuButton type="submit" tooltip="Sign out">
+                <LogOut />
+                <span>Sign out</span>
+              </SidebarMenuButton>
+            </form>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+
+      <SidebarRail />
+    </Sidebar>
   );
+}
+
+function deriveInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 }
