@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, FolderKanban, LogOut, type LucideIcon } from "lucide-react";
+import { Home, FolderKanban, LogOut, UserRound, type LucideIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -32,6 +32,7 @@ type NavItem = {
 const NAV: readonly NavItem[] = [
   { href: "/cockpit", label: "Cockpit", icon: Home },
   { href: "/projects", label: "Projects", icon: FolderKanban, prefix: "/projects" },
+  { href: "/profile", label: "Profile", icon: UserRound, prefix: "/people" },
 ];
 
 export function AppSidebar({
