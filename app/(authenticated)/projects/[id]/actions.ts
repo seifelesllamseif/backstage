@@ -1,18 +1,38 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { notFound } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentCrewMember } from "@/lib/dal";
 import { taskStatuses } from "@/lib/business-logic";
+import { countMissingFields, isHandoffComplete } from "@/lib/handoff";
 
-// Task CRUD server actions for slice 1 step 5.
-// Authz: any signed-in crew_member in the same company. Tier-gating is for
-// project archive (see ../actions.ts) and project create. See decision 0013.
+// Task CRUD server actions.
+// Authz: any signed-in crew_member in the same company. Tier-gating lives on
+// project create/archive (see ../actions.ts). The Done gate enforces that a
+// task can't transition to status='done' without a complete handoff — see
+// decision 0015.
 
 export type CreateTaskState = { error: string } | undefined;
-export type UpdateTaskState = { error: string } | undefined;
+
+export type UpdateTaskState =
+  | {
+      error: string;
+      reason?: "handoff-incomplete";
+      missingCount?: number;
+      taskUrl?: string;
+    }
+  | undefined;
+
+export type StatusChangeResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: "handoff-incomplete" | "generic";
+      message: string;
+      missingCount?: number;
+      taskUrl?: string;
+    };
 
 const TaskStatusEnum = z.enum(taskStatuses);
 
@@ -38,10 +58,26 @@ async function loadProjectInCompany(projectId: string, companyId: string) {
   });
 }
 
-async function loadTaskInCompany(taskId: string, companyId: string) {
+async function loadTaskWithHandoff(taskId: string, companyId: string) {
   return prisma.task.findFirst({
     where: { id: taskId, companyId },
-    select: { id: true, projectId: true, companyId: true },
+    select: {
+      id: true,
+      projectId: true,
+      companyId: true,
+      status: true,
+      handoff: {
+        select: {
+          whatItIs: true,
+          currentStatus: true,
+          doneSoFar: true,
+          stillLeft: true,
+          fileLinks: true,
+          gotchas: true,
+          whoToAsk: true,
+        },
+      },
+    },
   });
 }
 
@@ -78,15 +114,39 @@ export async function createTask(
   return undefined;
 }
 
-export async function updateTaskStatus(taskId: string, status: string): Promise<void> {
+export async function updateTaskStatus(
+  taskId: string,
+  status: string,
+): Promise<StatusChangeResult> {
   const member = await getCurrentCrewMember();
-  if (!member) return;
+  if (!member) {
+    return { ok: false, reason: "generic", message: "Not signed in." };
+  }
 
   const parsed = TaskStatusEnum.safeParse(status);
-  if (!parsed.success) return;
+  if (!parsed.success) {
+    return { ok: false, reason: "generic", message: "Bad status value." };
+  }
 
-  const task = await loadTaskInCompany(taskId, member.companyId);
-  if (!task) return;
+  const task = await loadTaskWithHandoff(taskId, member.companyId);
+  if (!task) {
+    return { ok: false, reason: "generic", message: "Task not found." };
+  }
+
+  if (parsed.data === "done" && task.status !== "done") {
+    if (!isHandoffComplete(task.handoff)) {
+      const missing = countMissingFields(task.handoff);
+      return {
+        ok: false,
+        reason: "handoff-incomplete",
+        message: task.handoff
+          ? `Fill ${missing} more handoff field${missing === 1 ? "" : "s"} before moving to Done.`
+          : "Start a handoff and fill all 7 fields before moving to Done.",
+        missingCount: missing,
+        taskUrl: `/projects/${task.projectId}/tasks/${task.id}`,
+      };
+    }
+  }
 
   await prisma.task.update({
     where: { id: task.id },
@@ -94,6 +154,8 @@ export async function updateTaskStatus(taskId: string, status: string): Promise<
   });
 
   revalidatePath(`/projects/${task.projectId}`);
+  revalidatePath("/cockpit");
+  return { ok: true };
 }
 
 export async function updateTask(
@@ -117,8 +179,25 @@ export async function updateTask(
     return { error: "Couldn't save — check the inputs." };
   }
 
-  const task = await loadTaskInCompany(parsed.data.taskId, member.companyId);
+  const task = await loadTaskWithHandoff(parsed.data.taskId, member.companyId);
   if (!task) return { error: "Task not found." };
+
+  // Done gate — same rule as updateTaskStatus.
+  if (
+    parsed.data.status === "done" &&
+    task.status !== "done" &&
+    !isHandoffComplete(task.handoff)
+  ) {
+    const missing = countMissingFields(task.handoff);
+    return {
+      error: task.handoff
+        ? `Move to Done is blocked: fill ${missing} more handoff field${missing === 1 ? "" : "s"} below.`
+        : "Move to Done is blocked: start a handoff below and fill all 7 fields first.",
+      reason: "handoff-incomplete",
+      missingCount: missing,
+      taskUrl: `/projects/${task.projectId}/tasks/${task.id}`,
+    };
+  }
 
   await prisma.task.update({
     where: { id: task.id },
@@ -139,5 +218,6 @@ export async function updateTask(
 
   revalidatePath(`/projects/${task.projectId}`);
   revalidatePath(`/projects/${task.projectId}/tasks/${task.id}`);
+  revalidatePath("/cockpit");
   return undefined;
 }

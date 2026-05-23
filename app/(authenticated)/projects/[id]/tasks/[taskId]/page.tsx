@@ -2,9 +2,11 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCurrentCrewMember } from "@/lib/dal";
 import { EditTaskForm } from "./edit-task-form";
+import { HandoffSection } from "./handoff-section";
 
-// Slice-1 step 5: task edit page. Plain server-rendered form for now;
-// UI polish + design fidelity comes in step 7 per decision 0013.
+// Slice-1 step 5 + slice-2 handoff section. Plain server-rendered forms for
+// now; UI polish + detail-panel design fidelity lands in a later pass per
+// decisions 0013 and 0015.
 
 export default async function TaskEditPage({
   params,
@@ -24,6 +26,9 @@ export default async function TaskEditPage({
       projectId,
       companyId: member.companyId,
     },
+    include: {
+      handoff: true,
+    },
   });
   if (!task) {
     notFound();
@@ -40,11 +45,13 @@ export default async function TaskEditPage({
       <header>
         <h1 className="text-xl font-medium">Edit task</h1>
         <p className="text-sm text-muted-foreground">
-          Plain editor for slice 1. Detail panel UI lands in step 7.
+          Plain editor for slice 1. Detail panel UI lands in a later pass.
         </p>
       </header>
 
       <EditTaskForm task={task} assignees={assignees} projectId={projectId} />
+
+      <HandoffSection taskId={task.id} handoff={task.handoff} />
     </main>
   );
 }
