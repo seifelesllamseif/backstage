@@ -92,6 +92,12 @@ model CrewMember {
   email          String
   fullName       String     @map("full_name")
   avatarInitials String?    @map("avatar_initials")
+  avatarUrl      String?    @map("avatar_url")
+  bio            String?
+  socialInstagram String?   @map("social_instagram")
+  socialLinkedin  String?   @map("social_linkedin")
+  socialWhatsapp  String?   @map("social_whatsapp")
+  languages      String[]   @default([])
   accessTier     AccessTier @default(member) @map("access_tier")
   createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
