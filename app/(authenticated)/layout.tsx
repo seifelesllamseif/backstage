@@ -1,9 +1,10 @@
 import { verifySession } from "@/lib/dal";
+import { Shell } from "@/components/app-shell/shell";
 
-// All routes inside the (authenticated) group are gated here. verifySession()
-// redirects to /login if the JWT is missing or invalid. This is the real
-// security gate; the proxy.ts redirect is a UX optimisation on top of it.
-// See decision 0010.
+// Every route inside the (authenticated) group renders inside Shell —
+// the persistent sidebar + content layout. verifySession() runs first as
+// the security gate (decision 0010); Shell then fetches the crew_member
+// once and feeds it to the sidebar.
 
 export default async function AuthenticatedLayout({
   children,
@@ -11,5 +12,5 @@ export default async function AuthenticatedLayout({
   children: React.ReactNode;
 }) {
   await verifySession();
-  return <>{children}</>;
+  return <Shell>{children}</Shell>;
 }
