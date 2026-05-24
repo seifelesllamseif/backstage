@@ -60,12 +60,16 @@ export default async function PersonProfilePage({
       projectId: t.projectId,
     }));
 
+  const isSelf = member.id === me.id;
+  const canEdit = isSelf || me.accessTier === "admin";
+
   return (
     <ProfileBento
       member={member}
       tasks={tasks}
       upcoming={upcoming}
-      isSelf={member.id === me.id}
+      isSelf={isSelf}
+      canEdit={canEdit}
     />
   );
 }

@@ -52,11 +52,13 @@ export function ProfileBento({
   tasks,
   upcoming,
   isSelf,
+  canEdit,
 }: {
   member: Member;
   tasks: Task[];
   upcoming: { id: string; title: string; dueDate: Date; projectId: string }[];
   isSelf: boolean;
+  canEdit: boolean;
 }) {
   const today = new Date();
   const todayDate = format(today, "MMM d").toUpperCase();
@@ -97,7 +99,7 @@ export function ProfileBento({
           variants={fade}
           initial="hidden"
           animate="visible"
-          className={`${card} md:col-span-5 px-6 py-5 flex items-start justify-between`}
+          className={`${card} md:col-span-5 px-6 py-5 flex items-start justify-between gap-4`}
         >
           <div>
             <h1 className="text-3xl sm:text-4xl font-semibold uppercase tracking-wide">
@@ -108,6 +110,14 @@ export function ProfileBento({
               {isSelf ? " · you" : null}
             </p>
           </div>
+          {canEdit && (
+            <Link
+              href={`/people/${member.id}/edit`}
+              className="shrink-0 rounded-md border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              {isSelf ? "Edit profile" : "Edit (admin)"}
+            </Link>
+          )}
         </motion.section>
 
         {/* Photo card */}
