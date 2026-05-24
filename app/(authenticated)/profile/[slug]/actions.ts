@@ -80,7 +80,7 @@ export async function updateProfile(
   const isSelf = target.id === me.id;
   const isAdmin = me.accessTier === "admin";
   if (!isSelf && !isAdmin) {
-    redirect(target.slug ? `/people/${target.slug}` : `/cockpit`);
+    redirect(target.slug ? `/profile/${target.slug}` : `/cockpit`);
   }
 
   await prisma.crewMember.update({
@@ -96,7 +96,7 @@ export async function updateProfile(
   });
 
   if (target.slug) {
-    revalidatePath(`/people/${target.slug}`);
+    revalidatePath(`/profile/${target.slug}`);
   }
   return undefined;
 }

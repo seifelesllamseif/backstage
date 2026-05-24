@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentCrewMember } from "@/lib/dal";
 
-// /profile — bounces to the current user's /people/[slug] page.
+// /profile (no slug) — bounces to the current user's /profile/[slug] page.
 // See decision 0018.
 
 export default async function ProfileRedirectPage() {
@@ -14,5 +14,5 @@ export default async function ProfileRedirectPage() {
     // rather than redirect to a 404.
     redirect("/cockpit");
   }
-  redirect(`/people/${member.slug}`);
+  redirect(`/profile/${member.slug}`);
 }

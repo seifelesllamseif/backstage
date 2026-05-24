@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentCrewMember } from "@/lib/dal";
 import { ProfileBento } from "./profile-bento";
 
-// /people/[slug] — bento profile page for any crew_member in the current
+// /profile/[slug] — bento profile page for any crew_member in the current
 // company, addressed by url-safe slug instead of UUID. See decision 0018.
 
 export default async function PersonProfilePage({

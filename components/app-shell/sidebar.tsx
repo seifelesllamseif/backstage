@@ -32,7 +32,7 @@ type NavItem = {
 const NAV: readonly NavItem[] = [
   { href: "/cockpit", label: "Cockpit", icon: Home },
   { href: "/projects", label: "Projects", icon: FolderKanban, prefix: "/projects" },
-  { href: "/profile", label: "Profile", icon: UserRound, prefix: "/people" },
+  { href: "/profile", label: "Profile", icon: UserRound, prefix: "/profile" },
 ];
 
 export function AppSidebar({

@@ -17,7 +17,7 @@ export const authRoutes: string[] = ['/login']
  * These routes will be hidden till the user is authenticated
  * @type {string[]}
  */
-export const protectedRoutes: string[] = ['/cockpit', '/projects', '/people', '/profile']
+export const protectedRoutes: string[] = ['/cockpit', '/projects', '/profile']
 
 /**
  * The base route of the API application:
