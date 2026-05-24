@@ -6,15 +6,12 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentCrewMember } from "@/lib/dal";
 
-// Profile edit server actions. Authz: self OR admin tier can edit any
-// member's profile. See decision 0018 (Edit access — deferred this pass,
-// shipped in the follow-on).
+// Profile edit server action. Self OR admin. See decision 0018.
+// The form lives inline on the profile bento — there's no separate
+// edit page.
 
 export type UpdateProfileState = { error: string } | undefined;
 
-// URL fields accept empty (cleared) or any non-empty string that starts
-// with http(s)://. Looser than strict z.url() so we don't reject pasted
-// `wa.me/...` short-links etc — but still rejects obvious garbage.
 const optionalUrl = z
   .string()
   .trim()
@@ -33,7 +30,6 @@ const UpdateProfileSchema = z.object({
   socialInstagram: optionalUrl,
   socialLinkedin: optionalUrl,
   socialWhatsapp: optionalUrl,
-  // Comma-separated input, parsed below.
   languagesRaw: z.string().max(500).optional().nullable(),
 });
 
@@ -73,18 +69,22 @@ export async function updateProfile(
     return { error: firstIssue ?? "Couldn't save — check the inputs." };
   }
 
-  const targetId = parsed.data.memberId;
-  const isSelf = targetId === me.id;
-  const isAdmin = me.accessTier === "admin";
-  if (!isSelf && !isAdmin) {
-    // Don't 403; redirect (server actions look ugly with thrown errors).
-    redirect(`/people/${targetId}`);
+  const target = await prisma.crewMember.findFirst({
+    where: { id: parsed.data.memberId, companyId: me.companyId },
+    select: { id: true, slug: true },
+  });
+  if (!target) {
+    return { error: "Profile not found in your company." };
   }
 
-  // updateMany so a member from another company silently no-ops instead of
-  // throwing — same pattern as archiveProject.
-  const result = await prisma.crewMember.updateMany({
-    where: { id: targetId, companyId: me.companyId },
+  const isSelf = target.id === me.id;
+  const isAdmin = me.accessTier === "admin";
+  if (!isSelf && !isAdmin) {
+    redirect(target.slug ? `/people/${target.slug}` : `/cockpit`);
+  }
+
+  await prisma.crewMember.update({
+    where: { id: target.id },
     data: {
       avatarUrl: nullableTrim(parsed.data.avatarUrl),
       bio: nullableTrim(parsed.data.bio),
@@ -94,10 +94,9 @@ export async function updateProfile(
       languages: parseLanguages(parsed.data.languagesRaw),
     },
   });
-  if (result.count === 0) {
-    return { error: "Profile not found in your company." };
-  }
 
-  revalidatePath(`/people/${targetId}`);
-  redirect(`/people/${targetId}`);
+  if (target.slug) {
+    revalidatePath(`/people/${target.slug}`);
+  }
+  return undefined;
 }

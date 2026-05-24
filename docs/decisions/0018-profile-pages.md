@@ -15,9 +15,11 @@ The reference is single-user (the founder's own home). Adapting to a multi-perso
 
 ### Routing
 
-- **`/people/[id]`** — every member's profile, browseable by anyone in the company.
-- **`/profile`** — redirects to `/people/{currentMember.id}`. The sidebar links here so a single nav entry serves everyone.
+- **`/people/[slug]`** — every member's profile, browseable by anyone in the company. `slug` is a url-safe handle derived from `full_name` at signup (see `lib/slug.ts`); unique per company.
+- **`/profile`** — redirects to `/people/{currentMember.slug}`. The sidebar links here so a single nav entry serves everyone.
 - The directory list at `/people` (everyone with avatar/role/tier) is **deferred** — comes when Slice 3's Crew Board lands or earlier if usage shows a need.
+
+> Original draft of this decision used `/people/[id]` (UUID). Switched to slugs after the first review — UUIDs in URLs are ugly and leak nothing of value. Slugs are populated for existing members by a manual migration (`20260524000000_add_member_slug`); the column is `String?` in Prisma until a follow-up migration tightens to `NOT NULL`.
 
 ### Schema additions to `crew_member`
 
@@ -54,9 +56,11 @@ Reference's seven sections → Backstage's six (no gallery card; no quote card):
 
 Framer-motion fade-in on mount (per the reference). One new runtime dep (`framer-motion`). Animations are decorative; the page works fine with JS disabled / motion-reduced.
 
-### Edit access — deferred this pass
+### Edit access — inline on the bento
 
-This pass ships the **view**. Editing your own bio/socials/languages/avatar lands in a follow-on commit. Until then, profile content comes from seed data only; admins can poke fields directly via Prisma Studio if they need to change values.
+Self OR admin can edit. There's no separate edit route — the bento has an "Edit profile" / "Edit (admin)" button that toggles the About / Languages / Socials / Avatar cards into input fields inside a single form. One Save action; one Cancel button that reverts. The same primitives stay (Tasks / Today / Handoffs cards never become editable).
+
+> Original draft of this decision deferred editing to a follow-on commit and proposed `/people/[id]/edit` as a separate page. Switched to inline-on-bento because (a) a separate route for ~6 fields was overhead, and (b) editing-in-place is the standard pattern for personal profiles. The dedicated `/people/[slug]/edit` page is gone.
 
 ### Sidebar
 

@@ -3,22 +3,22 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentCrewMember } from "@/lib/dal";
 import { ProfileBento } from "./profile-bento";
 
-// /people/[id] — bento profile page for any crew_member in the current
-// company. See docs/decisions/0018-profile-pages.md.
+// /people/[slug] — bento profile page for any crew_member in the current
+// company, addressed by url-safe slug instead of UUID. See decision 0018.
 
 export default async function PersonProfilePage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: Promise<{ slug: string }>;
 }) {
-  const { id } = await params;
+  const { slug } = await params;
   const me = await getCurrentCrewMember();
   if (!me) {
     throw new Error("No crew_member row for the current auth user.");
   }
 
   const member = await prisma.crewMember.findFirst({
-    where: { id, companyId: me.companyId },
+    where: { slug, companyId: me.companyId },
   });
   if (!member) {
     notFound();
