@@ -90,6 +90,13 @@ model CrewMember {
   id             String     @id @db.Uuid
   companyId      String     @map("company_id") @db.Uuid
   email          String
+  // URL-safe handle, lowercase, dash-separated. Unique per company.
+  // Generated from full_name at signup; stable across name changes
+  // unless explicitly rotated. See lib/slug.ts.
+  // Nullable at the DB level for backfill purposes — app code always
+  // populates it on insert; a follow-up migration will enforce NOT NULL
+  // once we're sure every row has one.
+  slug           String?
   fullName       String     @map("full_name")
   avatarInitials String?    @map("avatar_initials")
   avatarUrl      String?    @map("avatar_url")
@@ -108,6 +115,7 @@ model CrewMember {
   handoffsTo    Handoff[] @relation("HandoffTo")
 
   @@unique([companyId, email])
+  @@unique([companyId, slug])
   @@map("crew_member")
 }
 

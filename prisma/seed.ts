@@ -10,6 +10,7 @@
 import WebSocket from "ws";
 import { createClient } from "@supabase/supabase-js";
 import { prisma } from "../lib/prisma";
+import { slugify } from "../lib/slug";
 import { seedSlice2Handoffs } from "./slice-2-handoffs";
 import { seedProfileFields } from "./profile-data";
 
@@ -97,6 +98,7 @@ async function main(): Promise<void> {
         id: data.user.id, // ← auth user id, NOT a generated UUID
         companyId: company.id,
         email: p.email,
+        slug: slugify(p.fullName, p.email),
         fullName: p.fullName,
         avatarInitials: p.initials,
         accessTier: p.tier,
