@@ -1,15 +1,18 @@
 'use client'
 
+import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import {
-  Search,
+  ChevronDown,
   Filter,
   Plus,
-  SlidersHorizontal,
-  Sun,
-  Moon
+  Search,
+  SlidersHorizontal
 } from 'lucide-react'
-import { useDashTheme } from './theme'
+import { AnimatedThemeToggler, useDashTheme } from './theme'
 import type { GroupBy } from './DashboardShell'
+
+export type QuickFilter = 'open' | 'due' | 'review' | 'done'
 
 interface TopbarProps {
   query: string
@@ -27,6 +30,8 @@ interface TopbarProps {
   projects: { id: string; name: string }[]
   currentProjectId: string | null
   onProjectChange: (projectId: string | null) => void
+  activeQuickFilter: QuickFilter | null
+  onQuickFilter: (kind: QuickFilter) => void
 }
 
 const TABS: { id: 'board' | 'list' | 'timeline'; label: string }[] = [
@@ -56,35 +61,92 @@ export default function Topbar({
   onToggleGroup,
   projects,
   currentProjectId,
-  onProjectChange
+  onProjectChange,
+  activeQuickFilter,
+  onQuickFilter
 }: TopbarProps) {
-  const { t, mode, toggle } = useDashTheme()
+  const { t } = useDashTheme()
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false)
+  const projectMenuRef = useRef<HTMLDivElement>(null)
+  const currentProject = currentProjectId
+    ? projects.find((p) => p.id === currentProjectId) ?? null
+    : null
+
+  useEffect(() => {
+    if (!projectMenuOpen) return
+    const onDocClick = (e: MouseEvent) => {
+      if (!projectMenuRef.current?.contains(e.target as Node)) {
+        setProjectMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [projectMenuOpen])
+
   return (
     <header
       className={`flex items-center justify-between gap-4 border-b px-4 h-12 shrink-0 ${t.topbar}`}
     >
       <div className="flex items-center gap-4 min-w-0">
-        <div className={`flex items-center gap-1 text-xs ${t.textMuted}`}>
-          <span className={t.textSubtle}>Workspace</span>
+        <div className={`flex items-center gap-1.5 text-xs ${t.textMuted}`}>
+          <Link
+            href="/dashboard"
+            className={`${t.textSubtle} hover:opacity-80 transition`}
+          >
+            Verbivore
+          </Link>
           <span className={t.textFaint}>/</span>
-          <span className={t.text}>Tasks</span>
+          {currentProject ? (
+            <div className="relative" ref={projectMenuRef}>
+              <button
+                onClick={() => setProjectMenuOpen((o) => !o)}
+                className={`flex items-center gap-1 ${t.text} hover:opacity-80 transition`}
+                title="Switch project"
+              >
+                <span className="truncate max-w-[180px]">
+                  {currentProject.name}
+                </span>
+                <ChevronDown
+                  className={`size-3 ${t.textSubtle} transition-transform ${
+                    projectMenuOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+              {projectMenuOpen && (
+                <div
+                  className={`absolute left-0 top-7 z-40 w-60 rounded-md border shadow-xl py-1 max-h-72 overflow-auto ${t.detail}`}
+                >
+                  <button
+                    onClick={() => {
+                      onProjectChange(null)
+                      setProjectMenuOpen(false)
+                    }}
+                    className={`w-full text-left px-3 py-1.5 text-xs ${t.tab}`}
+                  >
+                    All projects
+                  </button>
+                  <div className={`my-1 border-t ${t.borderSoft}`} />
+                  {projects.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        onProjectChange(p.id)
+                        setProjectMenuOpen(false)
+                      }}
+                      className={`w-full text-left px-3 py-1.5 text-xs truncate ${
+                        p.id === currentProjectId ? t.btnActive : t.tab
+                      }`}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <span className={t.text}>All tasks</span>
+          )}
         </div>
-
-        <select
-          value={currentProjectId ?? ''}
-          onChange={(e) =>
-            onProjectChange(e.target.value ? e.target.value : null)
-          }
-          className={`hidden md:inline-block h-8 rounded-md border px-2 text-xs focus:outline-none transition ${t.input}`}
-          title="Filter by project"
-        >
-          <option value="">All projects</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
 
         <div
           className={`hidden md:flex items-center gap-1 rounded-md border p-0.5 ${t.border}`}
@@ -104,13 +166,36 @@ export default function Topbar({
       </div>
 
       <div className="flex items-center gap-2">
-        <div
-          className={`hidden lg:flex items-center gap-4 mr-2 text-[11px] ${t.textMuted}`}
-        >
-          <Stat label="Open" value={totals.open} />
-          <Stat label="Due" value={totals.due} accent />
-          <Stat label="Review" value={totals.review} />
-          <Stat label="Done" value={totals.done} />
+        <div className="hidden sm:flex items-center gap-1 mr-1 md:mr-2">
+          <StatButton
+            kind="open"
+            label="Open"
+            value={totals.open}
+            active={activeQuickFilter === 'open'}
+            onClick={() => onQuickFilter('open')}
+          />
+          <StatButton
+            kind="due"
+            label="Due"
+            value={totals.due}
+            accent
+            active={activeQuickFilter === 'due'}
+            onClick={() => onQuickFilter('due')}
+          />
+          <StatButton
+            kind="review"
+            label="Review"
+            value={totals.review}
+            active={activeQuickFilter === 'review'}
+            onClick={() => onQuickFilter('review')}
+          />
+          <StatButton
+            kind="done"
+            label="Done"
+            value={totals.done}
+            active={activeQuickFilter === 'done'}
+            onClick={() => onQuickFilter('done')}
+          />
         </div>
 
         <label className="relative hidden sm:flex items-center">
@@ -162,17 +247,9 @@ export default function Topbar({
           )}
         </div>
 
-        <button
-          onClick={toggle}
+        <AnimatedThemeToggler
           className={`h-8 w-8 rounded-md border flex items-center justify-center transition ${t.btn}`}
-          title={mode === 'light' ? 'Switch to dark' : 'Switch to light'}
-        >
-          {mode === 'light' ? (
-            <Moon className="size-3.5" />
-          ) : (
-            <Sun className="size-3.5" />
-          )}
-        </button>
+        />
 
         <button
           onClick={onNewTask}
@@ -186,26 +263,43 @@ export default function Topbar({
   )
 }
 
-function Stat({
+function StatButton({
+  kind,
   label,
   value,
-  accent
+  accent,
+  active,
+  onClick
 }: {
+  kind: QuickFilter
   label: string
   value: number
   accent?: boolean
+  active: boolean
+  onClick: () => void
 }) {
   const { t } = useDashTheme()
   return (
-    <span className="inline-flex items-baseline gap-1">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={`${label}: ${value}${active ? ' (active — click to clear)' : ''}`}
+      className={`h-8 px-2 rounded-md border text-[11px] inline-flex items-center gap-1.5 transition ${
+        active ? t.btnActive : t.btn
+      }`}
+      data-kind={kind}
+    >
       <span
         className={`tabular-nums font-medium ${accent ? t.accentText : t.text}`}
       >
         {value}
       </span>
-      <span className={`uppercase tracking-wider text-[10px] ${t.textSubtle}`}>
+      <span
+        className={`hidden md:inline uppercase tracking-wider text-[10px] ${t.textSubtle}`}
+      >
         {label}
       </span>
-    </span>
+    </button>
   )
 }

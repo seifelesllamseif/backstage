@@ -1,5 +1,7 @@
 'use client'
 
+import Image from 'next/image'
+import Link from 'next/link'
 import {
   Inbox,
   LayoutGrid,
@@ -58,7 +60,11 @@ export default function Sidebar({
   const a = useTaskActions()
   const team = useTeam()
 
-  const memberMenu = (e: React.MouseEvent, memberId: string, memberName: string) => {
+  const memberMenu = (
+    e: React.MouseEvent,
+    memberId: string,
+    memberName: string
+  ) => {
     open(e, [
       {
         id: 'filter',
@@ -96,21 +102,30 @@ export default function Sidebar({
 
   return (
     <aside
-      className={`h-full overflow-y-auto flex flex-col gap-5 border-r px-3 py-4 min-w-0 ${t.sidebar}`}
+      className={`flex h-full min-w-0 flex-col gap-5 overflow-y-auto border-r px-3 py-4 ${t.sidebar}`}
     >
-      <div className="flex items-center gap-2 px-2">
-        <div className="size-6 rounded bg-red-500 flex items-center justify-center text-white text-[11px] font-bold">
-          S
-        </div>
+      <Link
+        href="/dashboard"
+        className={`-mx-1 flex items-center gap-2 rounded-md px-2 py-1 transition ${t.rowHover}`}
+        title="Back to all tasks"
+      >
+        <Image
+          src="/logo-icon.png"
+          alt="Verbivore"
+          width={24}
+          height={24}
+          className="size-6 rounded"
+          priority
+        />
         <div className="flex flex-col leading-none">
           <span
-            className={`text-[11px] uppercase tracking-[0.25em] ${t.textMuted}`}
+            className={`text-[11px] tracking-[0.25em] uppercase ${t.textMuted}`}
           >
-            Skam
+            Verbivore
           </span>
           <span className={`text-xs ${t.text}`}>Workspace</span>
         </div>
-      </div>
+      </Link>
 
       <nav className="flex flex-col gap-0.5">
         <SidebarItem
@@ -144,7 +159,7 @@ export default function Sidebar({
 
       <div className="flex flex-col gap-1">
         <div
-          className={`px-2 text-[10px] uppercase tracking-[0.22em] mb-1 ${t.textMuted}`}
+          className={`mb-1 px-2 text-[10px] tracking-[0.22em] uppercase ${t.textMuted}`}
         >
           Status
         </div>
@@ -153,7 +168,7 @@ export default function Sidebar({
           onClick={() => onStatusFilter(null)}
         >
           <span
-            className={`size-3.5 rounded-full inline-block ${
+            className={`inline-block size-3.5 rounded-full ${
               statusFilter === null ? 'bg-zinc-400' : 'bg-zinc-300'
             }`}
           />
@@ -174,7 +189,7 @@ export default function Sidebar({
 
       <div className="flex flex-col gap-1">
         <div
-          className={`px-2 text-[10px] uppercase tracking-[0.22em] mb-1 flex items-center gap-2 ${t.textMuted}`}
+          className={`mb-1 flex items-center gap-2 px-2 text-[10px] tracking-[0.22em] uppercase ${t.textMuted}`}
         >
           <Users className="size-3" /> Team
         </div>
@@ -183,7 +198,7 @@ export default function Sidebar({
           onClick={() => onAssigneeFilter(null)}
         >
           <span
-            className={`size-5 rounded-full text-[9px] font-semibold flex items-center justify-center ${
+            className={`flex size-5 items-center justify-center rounded-full text-[9px] font-semibold ${
               t.text
             } ${assigneeFilter === null ? 'bg-zinc-200' : 'bg-zinc-100'}`}
           >

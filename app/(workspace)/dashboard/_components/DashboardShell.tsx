@@ -3,21 +3,32 @@
 import { useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { toast } from 'sonner'
 import { ArrowLeft, Plus, RotateCcw, Sun, Moon } from 'lucide-react'
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  closestCorners,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent
+} from '@dnd-kit/core'
 import {
   addComment as addCommentAction,
   createDashboardTask,
+  deleteComment as deleteCommentAction,
   deleteDashboardTask,
   duplicateDashboardTask,
+  editComment as editCommentAction,
+  moveDashboardTask,
   updateDashboardTaskAssignee,
   updateDashboardTaskPriority,
   updateDashboardTaskStatus
 } from '../actions'
-import type {
-  BoardAssignee,
-  BoardTask,
-  Cycle
-} from './boardData'
+import type { BoardAssignee, BoardTask, Cycle } from './boardData'
 import {
   STATUSES,
   STATUS_BY_ID,
@@ -26,6 +37,9 @@ import {
   PRIORITY_LABEL
 } from './status'
 import BoardColumn from './BoardColumn'
+import TaskCard from './TaskCard'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import { VisuallyHidden } from 'radix-ui'
 import Sidebar from './Sidebar'
 import Topbar from './Topbar'
 import TaskDetail, { TaskActivity, TaskComment } from './TaskDetail'
@@ -56,8 +70,15 @@ export interface DashboardInitial {
   tasks: BoardTask[]
   members: BoardAssignee[]
   cycles: Cycle[]
-  projects: { id: string; name: string }[]
+  projects: {
+    id: string
+    name: string
+    kind: 'standard' | 'operations'
+    isArchived: boolean
+  }[]
   labels: { id: string; name: string }[]
+  commentsByTask: Record<string, TaskComment[]>
+  activityByTask: Record<string, TaskActivity[]>
   currentMember: {
     id: string
     fullName: string
@@ -82,9 +103,11 @@ function nextId(prefix: string) {
   return `${prefix}-${Date.now()}-${idCounter}`
 }
 
-export default function DashboardShellWrapper(props: { initial: DashboardInitial }) {
+export default function DashboardShellWrapper(props: {
+  initial: DashboardInitial
+}) {
   return (
-    <DashboardThemeProvider initial="light">
+    <DashboardThemeProvider>
       <ContextMenuProvider>
         <TeamProvider members={props.initial.members}>
           <DashboardShellInner {...props} />
@@ -108,18 +131,23 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   // Ensure the signed-in user is always discoverable even if they have no
   // tasks in this slice (mapMembers returns everyone, but we fall back to a
   // synthesized record so role/avatar still render).
-  const currentUser: BoardAssignee =
-    team.find((m) => m.id === currentUserId) ?? {
-      id: currentUserId,
-      initials: initial.currentMember.fullName.slice(0, 2).toUpperCase(),
-      name: initial.currentMember.fullName,
-      color: 'bg-zinc-500/80',
-      role: initial.currentMember.accessTier
-    }
+  const currentUser: BoardAssignee = team.find(
+    (m) => m.id === currentUserId
+  ) ?? {
+    id: currentUserId,
+    initials: initial.currentMember.fullName.slice(0, 2).toUpperCase(),
+    name: initial.currentMember.fullName,
+    color: 'bg-zinc-500/80',
+    role: initial.currentMember.accessTier
+  }
 
   const [tasks, setTasks] = useState<BoardTask[]>(initial.tasks)
-  const [comments, setComments] = useState<Record<string, TaskComment[]>>({})
-  const [activity, setActivity] = useState<Record<string, TaskActivity[]>>({})
+  const [comments, setComments] = useState<Record<string, TaskComment[]>>(
+    initial.commentsByTask
+  )
+  const [activity, setActivity] = useState<Record<string, TaskActivity[]>>(
+    initial.activityByTask
+  )
 
   const [view, setView] = useState<View>('all')
   const [tab, setTab] = useState<'board' | 'list' | 'timeline'>('board')
@@ -129,13 +157,22 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
 
   const [filterOpen, setFilterOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<TaskStatus | null>(null)
-  const [priorityFilter, setPriorityFilter] = useState<TaskPriority | null>(null)
+  const [priorityFilter, setPriorityFilter] = useState<TaskPriority | null>(
+    null
+  )
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
   const [tagFilter, setTagFilter] = useState<string | null>(null)
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [newTaskColumn, setNewTaskColumn] = useState<TaskStatus>('todo')
+
+  // Require 6px of movement before drag activates — single clicks on
+  // cards keep opening the drawer (no accidental drags).
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+  )
 
   const [density, setDensity] = useState<'compact' | 'cozy'>('cozy')
   const [wipLimit, setWipLimit] = useState(0)
@@ -255,12 +292,18 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           )
         }
         if (res.reason === 'handoff-incomplete' && res.taskUrl) {
-          // Temporary: alert until sonner toasts land in 3a step 5.
-          // The taskUrl points at the slice-1 edit page where handoffs
-          // can be filled.
-          if (typeof window !== 'undefined') {
-            window.alert(`${res.message}\n\nOpen: ${res.taskUrl}`)
-          }
+          // Slice-2 gate (decision 0015, 0022). taskUrl points at the
+          // handoff editor (slice-1 edit page).
+          const url = res.taskUrl
+          toast.error(res.message, {
+            action: {
+              label: 'Fill handoff',
+              onClick: () => router.push(url)
+            },
+            duration: 8000
+          })
+        } else {
+          toast.error(res.message)
         }
       }
     })
@@ -273,12 +316,17 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     logActivityLocal(id, `Priority set to ${PRIORITY_LABEL[p]}`)
     startTransition(async () => {
       const res = await updateDashboardTaskPriority(id, p)
-      if ('error' in res) console.error('updatePriority:', res.error)
+      if ('error' in res) {
+        console.error('updatePriority:', res.error)
+        toast.error("Couldn't update priority.")
+      }
     })
   }
 
   const updateAssignee = (id: string, assigneeId: string | null) => {
-    const member = assigneeId ? team.find((m) => m.id === assigneeId) : undefined
+    const member = assigneeId
+      ? team.find((m) => m.id === assigneeId)
+      : undefined
     setTasks((cur) =>
       cur.map((task) =>
         task.id === id ? { ...task, assignee: member ?? undefined } : task
@@ -287,7 +335,10 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     logActivityLocal(id, member ? `Assigned to ${member.name}` : 'Unassigned')
     startTransition(async () => {
       const res = await updateDashboardTaskAssignee(id, assigneeId)
-      if ('error' in res) console.error('updateAssignee:', res.error)
+      if ('error' in res) {
+        console.error('updateAssignee:', res.error)
+        toast.error("Couldn't update assignee.")
+      }
     })
   }
 
@@ -301,6 +352,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           {
             id: nextId('cm'),
             author: currentUser.name,
+            authorId: currentUserId,
+            authorInitials: currentUser.initials,
             body,
             at: nowLabel(),
             mentions
@@ -325,15 +378,60 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     })
     startTransition(async () => {
       const res = await addCommentAction(id, body, mentions)
-      if ('error' in res) console.error('addComment:', res.error)
+      if ('error' in res) {
+        console.error('addComment:', res.error)
+        toast.error("Couldn't post comment.")
+      }
+    })
+  }
+
+  const editComment = (commentId: string, body: string) => {
+    // Optimistic: update body + mark editedAt locally so the "(edited)"
+    // tag flips immediately.
+    const nowIso = new Date().toISOString()
+    setComments((cur) => {
+      const next: typeof cur = {}
+      for (const [taskId, list] of Object.entries(cur)) {
+        next[taskId] = list.map((c) =>
+          c.id === commentId ? { ...c, body, editedAt: nowIso } : c
+        )
+      }
+      return next
+    })
+    startTransition(async () => {
+      const res = await editCommentAction(commentId, body)
+      if ('error' in res) {
+        console.error('editComment:', res.error)
+        toast.error(res.error)
+      }
+    })
+  }
+
+  const deleteComment = (commentId: string) => {
+    // Optimistic: remove from local state. On server failure, restore.
+    let snapshot: typeof comments | null = null
+    setComments((cur) => {
+      snapshot = cur
+      const next: typeof cur = {}
+      for (const [taskId, list] of Object.entries(cur)) {
+        next[taskId] = list.filter((c) => c.id !== commentId)
+      }
+      return next
+    })
+    startTransition(async () => {
+      const res = await deleteCommentAction(commentId)
+      if ('error' in res) {
+        console.error('deleteComment:', res.error)
+        if (snapshot) setComments(snapshot)
+        toast.error(res.error)
+      }
     })
   }
 
   const createTask = (
     draft: Omit<BoardTask, 'id' | 'ref' | 'createdAt' | 'updatedAt'>
   ) => {
-    const targetProjectId =
-      initial.currentProjectId ?? initial.defaultProjectId
+    const targetProjectId = initial.currentProjectId ?? initial.defaultProjectId
     if (!targetProjectId) {
       console.error('createTask: no project available; create a project first.')
       return
@@ -378,8 +476,10 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       if ('error' in res) {
         console.error('createTask:', res.error)
         setTasks((cur) => cur.filter((t) => t.id !== tempId))
+        toast.error("Couldn't create task.")
         return
       }
+      toast.success('Task created')
       const serverTask = res.task
       setTasks((cur) =>
         cur.map((t) =>
@@ -404,6 +504,130 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     })
   }
 
+  // ─── Drag and drop ──────────────────────────────────────────────────
+  // Column droppable IDs are `col:<status>`. onDragOver moves the card's
+  // status in local state as the cursor crosses columns, so the dashed
+  // drop-slot follows the cursor (instead of staying in the source
+  // column). onDragCancel restores the pre-drag snapshot.
+
+  const COL_PREFIX = 'col:'
+  const SORT_STEP = 1024
+  const dragSnapshotRef = useRef<BoardTask[] | null>(null)
+
+  const byOrder = (a: BoardTask, b: BoardTask) =>
+    (a.sortOrder ?? Number.MAX_SAFE_INTEGER) -
+    (b.sortOrder ?? Number.MAX_SAFE_INTEGER)
+
+  const onDragStart = (event: DragStartEvent) => {
+    setActiveDragId(String(event.active.id))
+    dragSnapshotRef.current = tasks
+  }
+
+  const onDragOver = (event: DragOverEvent) => {
+    const { active, over } = event
+    if (!over) return
+    const activeId = String(active.id)
+    const overId = String(over.id)
+    if (activeId === overId) return
+
+    setTasks((cur) => {
+      const activeTask = cur.find((t) => t.id === activeId)
+      if (!activeTask) return cur
+
+      let targetStatus: TaskStatus
+      if (overId.startsWith(COL_PREFIX)) {
+        targetStatus = overId.slice(COL_PREFIX.length) as TaskStatus
+      } else {
+        const overTask = cur.find((t) => t.id === overId)
+        if (!overTask) return cur
+        targetStatus = overTask.status
+      }
+
+      if (activeTask.status === targetStatus) return cur
+
+      return cur.map((t) =>
+        t.id === activeId ? { ...t, status: targetStatus } : t
+      )
+    })
+  }
+
+  const onDragCancel = () => {
+    if (dragSnapshotRef.current) setTasks(dragSnapshotRef.current)
+    dragSnapshotRef.current = null
+    setActiveDragId(null)
+  }
+
+  const onDragEnd = (event: DragEndEvent) => {
+    setActiveDragId(null)
+    const snapshot = dragSnapshotRef.current
+    dragSnapshotRef.current = null
+
+    const activeId = String(event.active.id)
+    const overId = event.over?.id != null ? String(event.over.id) : null
+
+    // Drop missed any target — revert to pre-drag state.
+    if (!overId) {
+      if (snapshot) setTasks(snapshot)
+      return
+    }
+
+    // Use the post-onDragOver state for the target column.
+    const moved = tasks.find((t) => t.id === activeId)
+    if (!moved) return
+    const toStatus = moved.status
+
+    // Compute insertion index within the destination column.
+    const colSiblings = tasks
+      .filter((t) => t.status === toStatus && t.id !== activeId)
+      .sort(byOrder)
+    let toIndex: number
+    if (overId.startsWith(COL_PREFIX)) {
+      toIndex = colSiblings.length
+    } else {
+      const idx = colSiblings.findIndex((t) => t.id === overId)
+      toIndex = idx < 0 ? colSiblings.length : idx
+    }
+
+    // Renumber the destination column locally so the optimistic order
+    // matches what the server will persist.
+    setTasks((cur) => {
+      const colTaskIds = cur
+        .filter((t) => t.status === toStatus && t.id !== activeId)
+        .sort(byOrder)
+        .map((t) => t.id)
+      const clamped = Math.max(0, Math.min(toIndex, colTaskIds.length))
+      const reordered = [
+        ...colTaskIds.slice(0, clamped),
+        activeId,
+        ...colTaskIds.slice(clamped)
+      ]
+      const sortMap = new Map(reordered.map((id, i) => [id, i * SORT_STEP]))
+      return cur.map((t) =>
+        sortMap.has(t.id) ? { ...t, sortOrder: sortMap.get(t.id)! } : t
+      )
+    })
+
+    startTransition(async () => {
+      const res = await moveDashboardTask(activeId, toStatus, toIndex)
+      if (!res.ok) {
+        console.error('moveDashboardTask:', res.message)
+        if (snapshot) setTasks(snapshot)
+        if (res.reason === 'handoff-incomplete' && res.taskUrl) {
+          const url = res.taskUrl
+          toast.error(res.message, {
+            action: {
+              label: 'Fill handoff',
+              onClick: () => router.push(url)
+            },
+            duration: 8000
+          })
+        } else {
+          toast.error(res.message)
+        }
+      }
+    })
+  }
+
   const openNewTask = (status?: TaskStatus) => {
     setNewTaskColumn(status ?? 'todo')
     setNewTaskOpen(true)
@@ -411,6 +635,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
 
   const deleteTask = (id: string) => {
     const snapshot = tasks
+    const removed = snapshot.find((t) => t.id === id)
     setTasks((cur) => cur.filter((task) => task.id !== id))
     if (selectedId === id) setSelectedId(null)
     startTransition(async () => {
@@ -418,7 +643,33 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       if ('error' in res) {
         console.error('deleteTask:', res.error)
         setTasks(snapshot)
+        toast.error("Couldn't delete task.")
+        return
       }
+      toast(`Deleted "${removed?.title ?? 'task'}"`, {
+        action: {
+          label: 'Undo',
+          // Undo by recreating the row server-side. Optimistic: put the card
+          // back immediately so the user sees it return even if the server
+          // round-trip is slow.
+          onClick: () => {
+            if (!removed) return
+            setTasks((cur) => [removed, ...cur])
+            startTransition(async () => {
+              await createDashboardTask({
+                title: removed.title,
+                status: removed.status,
+                priority: removed.priority,
+                projectId:
+                  initial.currentProjectId ?? initial.defaultProjectId ?? '',
+                assigneeId: removed.assignee?.id ?? null,
+                dueDate: null,
+                labelIds: []
+              })
+            })
+          }
+        }
+      })
     })
   }
 
@@ -483,7 +734,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   }
 
   const selected = selectedId
-    ? tasks.find((task) => task.id === selectedId) ?? null
+    ? (tasks.find((task) => task.id === selectedId) ?? null)
     : null
 
   const globalActivity = useMemo(() => {
@@ -498,31 +749,48 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     return all.reverse()
   }, [activity, tasks])
 
+  // Sort within each column: explicit sortOrder first (3b drag/drop),
+  // createdAt as the fallback for rows that pre-date the migration.
+  const byColumnOrder = (a: BoardTask, b: BoardTask) => {
+    const aRank = a.sortOrder ?? Number.MAX_SAFE_INTEGER
+    const bRank = b.sortOrder ?? Number.MAX_SAFE_INTEGER
+    if (aRank !== bRank) return aRank - bRank
+    return b.createdAt.localeCompare(a.createdAt)
+  }
+
   const groups: { key: string; label: string; items: BoardTask[] }[] =
     groupBy === 'status'
       ? STATUSES.map((s) => ({
           key: s.id,
           label: s.label,
-          items: filtered.filter((task) => task.status === s.id)
+          items: filtered
+            .filter((task) => task.status === s.id)
+            .sort(byColumnOrder)
         }))
       : groupBy === 'priority'
         ? (['urgent', 'high', 'medium', 'low', 'none'] as TaskPriority[]).map(
             (p) => ({
               key: p,
               label: PRIORITY_LABEL[p],
-              items: filtered.filter((task) => task.priority === p)
+              items: filtered
+                .filter((task) => task.priority === p)
+                .sort(byColumnOrder)
             })
           )
         : [
             ...team.map((m) => ({
               key: m.id,
               label: m.name,
-              items: filtered.filter((task) => task.assignee?.id === m.id)
+              items: filtered
+                .filter((task) => task.assignee?.id === m.id)
+                .sort(byColumnOrder)
             })),
             {
               key: 'unassigned',
               label: 'Unassigned',
-              items: filtered.filter((task) => !task.assignee)
+              items: filtered
+                .filter((task) => !task.assignee)
+                .sort(byColumnOrder)
             }
           ]
 
@@ -546,10 +814,44 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     router.push(qs ? `/dashboard?${qs}` : '/dashboard')
   }
 
+  const activeQuickFilter: 'open' | 'due' | 'review' | 'done' | null =
+    priorityFilter === 'urgent' && !statusFilter
+      ? 'due'
+      : statusFilter === 'in_review' && !priorityFilter
+        ? 'review'
+        : statusFilter === 'done' && !priorityFilter
+          ? 'done'
+          : !statusFilter &&
+              !priorityFilter &&
+              !assigneeFilter &&
+              !tagFilter &&
+              !query.trim()
+            ? 'open'
+            : null
+
+  const onQuickFilter = (kind: 'open' | 'due' | 'review' | 'done') => {
+    if (kind === 'open') {
+      resetFilters()
+      return
+    }
+    if (kind === 'due') {
+      setStatusFilter(null)
+      setPriorityFilter(priorityFilter === 'urgent' ? null : 'urgent')
+      return
+    }
+    if (kind === 'review') {
+      setPriorityFilter(null)
+      setStatusFilter(statusFilter === 'in_review' ? null : 'in_review')
+      return
+    }
+    setPriorityFilter(null)
+    setStatusFilter(statusFilter === 'done' ? null : 'done')
+  }
+
   return (
     <TaskActionsProvider value={actions}>
       <div
-        className={`fixed inset-0 font-[var(--font-favorit)] flex flex-col overflow-hidden ${t.page}`}
+        className={`fixed inset-0 flex flex-col overflow-hidden font-[var(--font-favorit)] ${t.page}`}
       >
         <div
           onWheel={(e) => {
@@ -557,10 +859,9 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
             const scroller = document.querySelector<HTMLElement>(
               '[data-archive-scroll]'
             )
-            if (scroller)
-              scroller.scrollBy({ top: e.deltaY, behavior: 'auto' })
+            if (scroller) scroller.scrollBy({ top: e.deltaY, behavior: 'auto' })
           }}
-          className={`flex items-center justify-between px-4 h-11 border-b text-xs shrink-0 ${t.topbar}`}
+          className={`flex h-11 shrink-0 items-center justify-between border-b px-4 text-xs ${t.topbar}`}
         >
           <Link
             href="/portfolio"
@@ -570,15 +871,15 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
             Back to overview
           </Link>
           <span
-            className={`uppercase tracking-[0.25em] text-[10px] ${t.textMuted}`}
+            className={`text-[10px] tracking-[0.25em] uppercase ${t.textMuted}`}
           >
-            Skam · Task Handoff
+            Verbivore · Task Handoff
           </span>
           <CurrentUserBadge user={currentUser} isAdmin={isAdmin} />
         </div>
 
-        <div className="flex flex-1 min-h-0">
-          <div className="w-56 shrink-0 min-h-0">
+        <div className="flex min-h-0 flex-1">
+          <div className="min-h-0 w-56 shrink-0">
             <Sidebar
               activeView={
                 view === 'projects' ||
@@ -600,7 +901,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
             />
           </div>
 
-          <div className="relative flex flex-col flex-1 min-w-0 min-h-0">
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             <Topbar
               query={query}
               onQuery={setQuery}
@@ -617,9 +918,11 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               }}
               groupOpen={groupOpen}
               onToggleGroup={() => setGroupOpen((v) => !v)}
-              projects={initial.projects}
+              projects={initial.projects.filter((p) => !p.isArchived)}
               currentProjectId={initial.currentProjectId}
               onProjectChange={onProjectChange}
+              activeQuickFilter={activeQuickFilter}
+              onQuickFilter={onQuickFilter}
             />
 
             <FilterPanel
@@ -650,7 +953,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 if (!scroller || scroller.contains(e.target as Node)) return
                 scroller.scrollBy({ top: e.deltaY, behavior: 'auto' })
               }}
-              className={`flex-1 min-h-0 overflow-hidden ${view === 'archive' ? 'p-0' : 'p-3'}`}
+              className={`min-h-0 flex-1 overflow-hidden ${view === 'archive' ? 'p-0' : 'p-3'}`}
               onContextMenu={(e) => {
                 const targetIsCard = (e.target as HTMLElement).closest(
                   'button[data-card]'
@@ -708,31 +1011,57 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               {(view === 'all' || view === 'mine' || view === 'inbox') && (
                 <>
                   {tab === 'board' && (
-                    <div className="h-full flex gap-3 min-h-0 overflow-x-auto pb-1">
-                      {groups.map((g) => {
-                        const status =
-                          groupBy === 'status'
-                            ? (STATUS_BY_ID[g.key as TaskStatus] ??
-                              STATUSES[0])
-                            : undefined
-                        return (
-                          <BoardColumn
-                            key={g.key}
-                            title={g.label}
-                            statusId={status?.id}
-                            tasks={g.items}
-                            onSelect={setSelectedId}
-                            onAdd={
-                              groupBy === 'status'
-                                ? () => openNewTask(g.key as TaskStatus)
-                                : undefined
-                            }
-                            density={density}
-                            wipLimit={wipLimit}
-                          />
-                        )
-                      })}
-                    </div>
+                    <DndContext
+                      id="dashboard-board"
+                      sensors={sensors}
+                      collisionDetection={closestCorners}
+                      onDragStart={onDragStart}
+                      onDragOver={onDragOver}
+                      onDragEnd={onDragEnd}
+                      onDragCancel={onDragCancel}
+                    >
+                      {/* Scrollbars hidden (chrome + firefox + ie) but scroll
+                          still works via wheel/trackpad. No gradient hint. */}
+                      <div className="flex h-full min-h-0 [scrollbar-width:none] gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                        {groups.map((g) => {
+                          const status =
+                            groupBy === 'status'
+                              ? (STATUS_BY_ID[g.key as TaskStatus] ??
+                                STATUSES[0])
+                              : undefined
+                          return (
+                            <BoardColumn
+                              key={g.key}
+                              title={g.label}
+                              statusId={status?.id}
+                              tasks={g.items}
+                              selectedTaskId={selectedId}
+                              onSelect={setSelectedId}
+                              onAdd={
+                                groupBy === 'status'
+                                  ? () => openNewTask(g.key as TaskStatus)
+                                  : undefined
+                              }
+                              density={density}
+                              wipLimit={wipLimit}
+                              droppableId={`col:${status?.id ?? g.key}`}
+                            />
+                          )
+                        })}
+                      </div>
+                      <DragOverlay dropAnimation={null}>
+                        {activeDragId
+                          ? (() => {
+                              const t = tasks.find((x) => x.id === activeDragId)
+                              return t ? (
+                                <div className="rotate-1 opacity-95 shadow-2xl">
+                                  <TaskCard task={t} draggable={false} />
+                                </div>
+                              ) : null
+                            })()
+                          : null}
+                      </DragOverlay>
+                    </DndContext>
                   )}
                   {tab === 'list' && (
                     <ListView tasks={filtered} onSelect={setSelectedId} />
@@ -743,10 +1072,15 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 </>
               )}
 
-              {view === 'projects' && <ProjectsPanel tasks={visibleTasks} />}
-              {view === 'updates' && (
-                <UpdatesPanel activity={globalActivity} />
+              {view === 'projects' && (
+                <ProjectsPanel
+                  tasks={visibleTasks}
+                  projects={initial.projects}
+                  currentUserId={currentUserId}
+                  accessTier={initial.currentMember.accessTier}
+                />
               )}
+              {view === 'updates' && <UpdatesPanel activity={globalActivity} />}
               {view === 'symbols' && <SymbolsPanel />}
               {view === 'archive' && (
                 <ArchivePanel
@@ -773,16 +1107,39 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               )}
             </main>
 
-            <TaskDetail
-              task={selected}
-              comments={selected ? comments[selected.id] ?? [] : []}
-              activity={selected ? activity[selected.id] ?? [] : []}
-              onClose={() => setSelectedId(null)}
-              onChangeStatus={updateStatus}
-              onChangePriority={updatePriority}
-              onChangeAssignee={updateAssignee}
-              onAddComment={addComment}
-            />
+            <Sheet
+              open={!!selected}
+              onOpenChange={(open) => {
+                if (!open) setSelectedId(null)
+              }}
+            >
+              <SheetContent
+                side="right"
+                className={`w-full p-0 sm:!max-w-[440px] ${t.detail}`}
+              >
+                <VisuallyHidden.Root>
+                  <SheetTitle>
+                    {selected ? selected.title : 'Task detail'}
+                  </SheetTitle>
+                </VisuallyHidden.Root>
+                {selected && (
+                  <TaskDetail
+                    task={selected}
+                    comments={comments[selected.id] ?? []}
+                    activity={activity[selected.id] ?? []}
+                    currentUserId={currentUserId}
+                    isAdmin={isAdmin}
+                    onClose={() => setSelectedId(null)}
+                    onChangeStatus={updateStatus}
+                    onChangePriority={updatePriority}
+                    onChangeAssignee={updateAssignee}
+                    onAddComment={addComment}
+                    onEditComment={editComment}
+                    onDeleteComment={deleteComment}
+                  />
+                )}
+              </SheetContent>
+            </Sheet>
           </div>
         </div>
 
@@ -813,7 +1170,7 @@ function CurrentUserBadge({
       <Avatar user={user} size={22} />
       <span className={`text-xs ${t.text} hidden sm:inline`}>{user.name}</span>
       <span
-        className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
+        className={`rounded px-1.5 py-0.5 text-[9px] tracking-wider uppercase ${
           isAdmin
             ? 'bg-red-500/15 text-red-500'
             : `${t.surfaceMuted} ${t.textMuted}`
@@ -835,10 +1192,10 @@ function ListView({
   const { t } = useDashTheme()
   return (
     <div
-      className={`h-full rounded-xl border overflow-hidden flex flex-col ${t.column}`}
+      className={`flex h-full flex-col overflow-hidden rounded-xl border ${t.column}`}
     >
       <div
-        className={`grid grid-cols-[80px_1fr_120px_140px_60px_80px] gap-3 px-3 py-2 text-[10px] uppercase tracking-wider border-b ${t.textSubtle} ${t.columnHeader}`}
+        className={`grid grid-cols-[80px_1fr_120px_140px_60px_80px] gap-3 border-b px-3 py-2 text-[10px] tracking-wider uppercase ${t.textSubtle} ${t.columnHeader}`}
       >
         <span>Ref</span>
         <span>Title</span>
@@ -852,24 +1209,22 @@ function ListView({
           <button
             key={task.id}
             onClick={() => onSelect(task.id)}
-            className={`w-full grid grid-cols-[80px_1fr_120px_140px_60px_80px] gap-3 px-3 py-2.5 text-xs items-center border-b text-left transition ${t.dividerSoft} ${t.rowHover}`}
+            className={`grid w-full grid-cols-[80px_1fr_120px_140px_60px_80px] items-center gap-3 border-b px-3 py-2.5 text-left text-xs transition ${t.dividerSoft} ${t.rowHover}`}
           >
             <span
-              className={`uppercase tracking-wider text-[10px] ${t.textSubtle}`}
+              className={`text-[10px] tracking-wider uppercase ${t.textSubtle}`}
             >
               {task.ref}
             </span>
             <span className={`truncate ${t.text}`}>{task.title}</span>
-            <span className={t.textMuted}>
-              {task.status.replace('_', ' ')}
-            </span>
+            <span className={t.textMuted}>{task.status.replace('_', ' ')}</span>
             <span
               className={`flex items-center gap-1.5 truncate ${t.textMuted}`}
             >
               {task.assignee ? (
                 <>
                   <span
-                    className={`size-4 rounded-full text-[8px] font-semibold flex items-center justify-center text-white shrink-0 ${task.assignee.color}`}
+                    className={`flex size-4 shrink-0 items-center justify-center rounded-full text-[8px] font-semibold text-white ${task.assignee.color}`}
                   >
                     {task.assignee.initials}
                   </span>
@@ -884,7 +1239,7 @@ function ListView({
           </button>
         ))}
         {tasks.length === 0 && (
-          <p className={`px-3 py-6 text-xs italic text-center ${t.textSubtle}`}>
+          <p className={`px-3 py-6 text-center text-xs italic ${t.textSubtle}`}>
             No tasks match these filters.
           </p>
         )}
