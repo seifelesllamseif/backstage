@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentCrewMember } from "@/lib/dal";
+import { PROFILE_THEMES } from "@/lib/profile-themes";
 
 // Profile edit server action. Self OR admin. See decision 0018.
 // The form lives inline on the profile bento — there's no separate
@@ -31,6 +32,7 @@ const UpdateProfileSchema = z.object({
   socialLinkedin: optionalUrl,
   socialWhatsapp: optionalUrl,
   languagesRaw: z.string().max(500).optional().nullable(),
+  profileTheme: z.enum(PROFILE_THEMES).optional().nullable(),
 });
 
 function parseLanguages(raw: string | null | undefined): string[] {
@@ -63,6 +65,7 @@ export async function updateProfile(
     socialLinkedin: formData.get("socialLinkedin") ?? null,
     socialWhatsapp: formData.get("socialWhatsapp") ?? null,
     languagesRaw: formData.get("languagesRaw") ?? null,
+    profileTheme: formData.get("profileTheme") ?? null,
   });
   if (!parsed.success) {
     const firstIssue = parsed.error.issues[0]?.message;
@@ -92,6 +95,9 @@ export async function updateProfile(
       socialLinkedin: nullableTrim(parsed.data.socialLinkedin),
       socialWhatsapp: nullableTrim(parsed.data.socialWhatsapp),
       languages: parseLanguages(parsed.data.languagesRaw),
+      ...(parsed.data.profileTheme
+        ? { profileTheme: parsed.data.profileTheme }
+        : {}),
     },
   });
 
