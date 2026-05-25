@@ -4,6 +4,8 @@ import { getCurrentCrewMember } from "@/lib/dal";
 import { fetchDashboardData } from "../../dashboard/actions";
 import DashboardShell from "../../dashboard/_components/DashboardShell";
 import {
+  groupActivityByTask,
+  groupCommentsByTask,
   mapCycles,
   mapMembers,
   mapTasks,
@@ -39,6 +41,8 @@ export default async function ProjectBoardPage({
   const members = mapMembers(data.members);
   const tasks = mapTasks(data.tasks, members, data.members);
   const cycles = mapCycles(data.cycles, tasks);
+  const commentsByTask = groupCommentsByTask(data.comments);
+  const activityByTask = groupActivityByTask(data.activity);
 
   return (
     <DashboardShell
@@ -46,8 +50,15 @@ export default async function ProjectBoardPage({
         tasks,
         members,
         cycles,
-        projects: data.projects.map((p) => ({ id: p.id, name: p.name })),
+        projects: data.projects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          kind: p.kind,
+          isArchived: p.isArchived,
+        })),
         labels: data.labels.map((l) => ({ id: l.id, name: l.name })),
+        commentsByTask,
+        activityByTask,
         currentMember: {
           id: data.currentMember.id,
           fullName: data.currentMember.fullName,

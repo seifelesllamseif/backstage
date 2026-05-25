@@ -32,10 +32,17 @@ export interface BoardTask {
   status: TaskStatus
   priority: TaskPriority
   assignee?: BoardAssignee
+  projectId?: string
   tags?: string[]
   due?: string
+  // ISO date string of the actual due date — used to derive the
+  // "overdue" / "due-soon" color states without re-parsing `due`.
+  dueAt?: string
   createdAt: string
   updatedAt: string
+  // Persisted within-column ordering (slice 3b drag/drop). Smaller =
+  // higher. Nullable on rows that pre-date the sort_order migration.
+  sortOrder?: number
   relations?: TaskRelation[]
   checklist?: ChecklistItem[]
 }

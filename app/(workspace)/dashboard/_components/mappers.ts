@@ -16,6 +16,7 @@ import type {
   ChecklistItem,
 } from "./boardData";
 import type { TaskStatus, TaskPriority, RelationKind } from "./status";
+import type { TaskComment, TaskActivity } from "./TaskDetail";
 
 // Stable color rotation for assignees keyed by index.
 const COLOR_RING = [
@@ -104,8 +105,16 @@ export function mapTask(
     status: task.status as TaskStatus,
     priority: task.priority as TaskPriority,
     assignee,
+    projectId: task.projectId ?? undefined,
     tags: tags.length ? tags : undefined,
     due: formatDueDate(task.dueDate),
+    dueAt: task.dueDate
+      ? (task.dueDate instanceof Date
+          ? task.dueDate
+          : new Date(task.dueDate as unknown as string)
+        ).toISOString()
+      : undefined,
+    sortOrder: task.sortOrder ?? undefined,
     createdAt:
       task.createdAt instanceof Date
         ? task.createdAt.toISOString().slice(0, 10)
@@ -187,4 +196,141 @@ export function mapCycle(cycle: DashCycle, allTasks: BoardTask[]): Cycle {
 
 export function mapCycles(cycles: DashCycle[], allTasks: BoardTask[]): Cycle[] {
   return cycles.map((c) => mapCycle(c, allTasks));
+}
+
+// ─── Comments + Activity ─────────────────────────────────────────────────
+
+type DbComment = {
+  id: string;
+  taskId: string;
+  body: string;
+  createdAt: Date | string;
+  editedAt: Date | string | null;
+  mentions: string[];
+  author: { id: string; fullName: string; avatarInitials: string | null } | null;
+};
+
+type DbActivity = {
+  id: string;
+  entityId: string | null;
+  action: string;
+  createdAt: Date | string;
+  metadata: unknown;
+  actor: { id: string; fullName: string; avatarInitials: string | null } | null;
+};
+
+function formatTimestamp(d: Date | string): string {
+  const date = typeof d === "string" ? new Date(d) : d;
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function groupCommentsByTask(
+  comments: DbComment[],
+): Record<string, TaskComment[]> {
+  const out: Record<string, TaskComment[]> = {};
+  for (const c of comments) {
+    const list = out[c.taskId] ?? [];
+    const authorName = c.author?.fullName ?? "Someone";
+    list.push({
+      id: c.id,
+      author: authorName,
+      authorId: c.author?.id ?? null,
+      authorInitials:
+        c.author?.avatarInitials ?? initialsFromName(authorName),
+      body: c.body,
+      at: formatTimestamp(c.createdAt),
+      editedAt: c.editedAt
+        ? (c.editedAt instanceof Date
+            ? c.editedAt
+            : new Date(c.editedAt)
+          ).toISOString()
+        : undefined,
+      mentions: c.mentions,
+    });
+    out[c.taskId] = list;
+  }
+  return out;
+}
+
+// Maps a DB activity row to the dashboard's TaskActivity. The frontend
+// only renders a small set of kinds; anything else is bucketed as 'status'
+// so the timeline renders without losing the event.
+function activityKindFor(action: string): TaskActivity["kind"] {
+  if (action.startsWith("comment.")) return "comment";
+  if (action === "task.created") return "created";
+  if (action === "task.priority_changed") return "priority";
+  if (action === "task.assignee_changed") return "assignee";
+  if (action === "task.attachment_added") return "attachment";
+  return "status";
+}
+
+function formatStatus(v: unknown): string {
+  return String(v).replace(/_/g, " ");
+}
+
+function activityTextFor(row: DbActivity): string {
+  const who = row.actor?.fullName ?? "Someone";
+  const meta = (row.metadata as Record<string, unknown> | null) ?? null;
+  const from = meta?.from;
+  const to = meta?.to;
+  switch (row.action) {
+    case "task.created":
+      return `${who} created the task`;
+    case "task.status_changed":
+      if (from != null && to != null) {
+        return `${who} moved this from ${formatStatus(from)} to ${formatStatus(to)}`;
+      }
+      // Old-format rows from before the from/to migration.
+      if (meta?.status) return `${who} set status to ${formatStatus(meta.status)}`;
+      return `${who} changed status`;
+    case "task.priority_changed":
+      if (from != null && to != null) {
+        return `${who} changed priority from ${from} to ${to}`;
+      }
+      if (meta?.priority) return `${who} set priority to ${meta.priority}`;
+      return `${who} changed priority`;
+    case "task.assignee_changed": {
+      const fromName = meta?.fromName ?? null;
+      const toName = meta?.toName ?? null;
+      if (toName && fromName) return `${who} reassigned from ${fromName} to ${toName}`;
+      if (toName) return `${who} assigned this to ${toName}`;
+      if (fromName) return `${who} unassigned ${fromName}`;
+      return `${who} reassigned the task`;
+    }
+    case "task.duplicated":
+      return `${who} duplicated this task`;
+    case "task.deleted":
+      return `${who} deleted the task`;
+    case "comment.added":
+      return `${who} left a comment`;
+    case "comment.edited":
+      return `${who} edited a comment`;
+    case "comment.deleted":
+      return `${who} deleted a comment`;
+    default:
+      return `${who} · ${row.action}`;
+  }
+}
+
+export function groupActivityByTask(
+  activity: DbActivity[],
+): Record<string, TaskActivity[]> {
+  const out: Record<string, TaskActivity[]> = {};
+  for (const a of activity) {
+    if (!a.entityId) continue;
+    const list = out[a.entityId] ?? [];
+    list.push({
+      id: a.id,
+      kind: activityKindFor(a.action),
+      text: activityTextFor(a),
+      at: formatTimestamp(a.createdAt),
+    });
+    out[a.entityId] = list;
+  }
+  return out;
 }
