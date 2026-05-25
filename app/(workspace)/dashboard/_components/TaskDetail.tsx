@@ -1,7 +1,18 @@
 'use client'
 
 import { useState } from 'react'
-import { X, MessageSquare, Paperclip, GitBranch } from 'lucide-react'
+import { MessageSquare, Paperclip, GitBranch, Pencil, Trash2, Check } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger
+} from '@/components/ui/alert-dialog'
 import MentionInput, { renderMentionedBody } from './MentionInput'
 import { BoardTask } from './boardData'
 import { useTeam } from './TeamContext'
@@ -16,8 +27,15 @@ import { useDashTheme } from './theme'
 export interface TaskComment {
   id: string
   author: string
+  // DB id of the author (null if the author has been deleted). Used by
+  // the drawer to decide whether to show edit/delete on the row.
+  authorId: string | null
+  // Initials for the author avatar in the drawer.
+  authorInitials: string
   body: string
   at: string
+  // ISO string when the comment was last edited; undefined if never.
+  editedAt?: string
   mentions?: string[]
 }
 
@@ -32,11 +50,15 @@ interface TaskDetailProps {
   task: BoardTask | null
   comments: TaskComment[]
   activity: TaskActivity[]
+  currentUserId: string
+  isAdmin: boolean
   onClose: () => void
   onChangeStatus: (id: string, s: TaskStatus) => void
   onChangePriority: (id: string, p: TaskPriority) => void
   onChangeAssignee: (id: string, assigneeId: string | null) => void
   onAddComment: (id: string, body: string, mentions?: string[]) => void
+  onEditComment: (commentId: string, body: string) => void
+  onDeleteComment: (commentId: string) => void
 }
 
 const PRIORITIES: TaskPriority[] = ['urgent', 'high', 'medium', 'low', 'none']
@@ -45,36 +67,38 @@ export default function TaskDetail({
   task,
   comments,
   activity,
+  currentUserId,
+  isAdmin,
   onClose,
   onChangeStatus,
   onChangePriority,
   onChangeAssignee,
-  onAddComment
+  onAddComment,
+  onEditComment,
+  onDeleteComment
 }: TaskDetailProps) {
   const { t } = useDashTheme()
   const team = useTeam()
   const [statusOpen, setStatusOpen] = useState(false)
   const [prioOpen, setPrioOpen] = useState(false)
   const [assigneeOpen, setAssigneeOpen] = useState(false)
+  // Comment currently being edited (id) + its draft body. Only one
+  // comment edits at a time in the drawer.
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState('')
 
   if (!task) return null
   const status = STATUS_BY_ID[task.status]
 
+  // Outer chrome (position, overlay, close button, ESC handling, focus
+  // trap) is provided by the parent <Sheet> in DashboardShell. This
+  // component is content-only.
   return (
-    <div
-      className={`absolute inset-y-0 right-0 w-full sm:w-[400px] border-l backdrop-blur-xl z-30 flex flex-col ${t.detail}`}
-    >
+    <div className={`flex flex-col h-full ${t.detail}`}>
       <div className={`flex items-center justify-between px-4 h-12 border-b ${t.border}`}>
         <span className={`text-[10px] uppercase tracking-[0.22em] ${t.textSubtle}`}>
           {task.ref}
         </span>
-        <button
-          onClick={onClose}
-          className={`size-7 rounded-md flex items-center justify-center transition ${t.btn}`}
-          aria-label="Close detail"
-        >
-          <X className="size-3.5" />
-        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-5">
@@ -229,20 +253,125 @@ export default function TaskDetail({
             {comments.length === 0 && (
               <p className={`text-xs italic ${t.textSubtle}`}>No comments yet.</p>
             )}
-            {comments.map((c) => (
-              <div
-                key={c.id}
-                className={`rounded-md border px-3 py-2 text-xs ${t.border} ${t.surfaceMuted}`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className={`font-medium ${t.text}`}>{c.author}</span>
-                  <span className={`text-[10px] ${t.textSubtle}`}>{c.at}</span>
+            {comments.map((c) => {
+              const canManage =
+                isAdmin || (c.authorId !== null && c.authorId === currentUserId)
+              const isEditing = editingId === c.id
+              return (
+                <div
+                  key={c.id}
+                  className={`group rounded-md border px-3 py-2 text-xs ${t.border} ${t.surfaceMuted}`}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span
+                        className={`shrink-0 size-5 rounded-full flex items-center justify-center text-[9px] font-semibold ${t.surface} border ${t.border} ${t.text}`}
+                        aria-hidden
+                      >
+                        {c.authorInitials}
+                      </span>
+                      <span className={`font-medium truncate ${t.text}`}>
+                        {c.author}
+                      </span>
+                      {c.editedAt && (
+                        <span className={`text-[10px] italic ${t.textSubtle}`}>
+                          (edited)
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className={`text-[10px] ${t.textSubtle}`}>{c.at}</span>
+                      {canManage && !isEditing && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingId(c.id)
+                              setEditDraft(c.body)
+                            }}
+                            aria-label="Edit comment"
+                            className={`size-5 rounded opacity-0 group-hover:opacity-100 transition flex items-center justify-center ${t.btn}`}
+                          >
+                            <Pencil className="size-3" />
+                          </button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <button
+                                type="button"
+                                aria-label="Delete comment"
+                                className={`size-5 rounded opacity-0 group-hover:opacity-100 transition flex items-center justify-center ${t.btn}`}
+                              >
+                                <Trash2 className="size-3" />
+                              </button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete comment?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This comment will be permanently removed.
+                                  Activity log keeps the deletion event.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => onDeleteComment(c.id)}
+                                >
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {isEditing ? (
+                    <div className="flex flex-col gap-1.5">
+                      <textarea
+                        value={editDraft}
+                        onChange={(e) => setEditDraft(e.target.value)}
+                        rows={Math.min(6, Math.max(2, editDraft.split('\n').length))}
+                        autoFocus
+                        className={`w-full resize-y rounded border px-2 py-1.5 text-xs ${t.input}`}
+                      />
+                      <div className="flex items-center gap-1.5 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingId(null)
+                            setEditDraft('')
+                          }}
+                          className={`h-6 px-2 rounded text-[11px] ${t.btn}`}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const trimmed = editDraft.trim()
+                            if (!trimmed || trimmed === c.body) {
+                              setEditingId(null)
+                              return
+                            }
+                            onEditComment(c.id, trimmed)
+                            setEditingId(null)
+                          }}
+                          className={`h-6 px-2 rounded text-[11px] inline-flex items-center gap-1 ${t.accent}`}
+                        >
+                          <Check className="size-3" />
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className={`${t.textMuted} leading-snug whitespace-pre-wrap`}>
+                      {renderMentionedBody(c.body, team)}
+                    </p>
+                  )}
                 </div>
-                <p className={`${t.textMuted} leading-snug`}>
-                  {renderMentionedBody(c.body, team)}
-                </p>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
 

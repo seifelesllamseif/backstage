@@ -17,7 +17,12 @@ export const authRoutes: string[] = ['/login']
  * These routes will be hidden till the user is authenticated
  * @type {string[]}
  */
-export const protectedRoutes: string[] = ['/cockpit', '/projects', '/profile']
+export const protectedRoutes: string[] = [
+  '/dashboard',
+  '/cockpit',
+  '/projects',
+  '/profile'
+]
 
 /**
  * The base route of the API application:
@@ -36,7 +41,7 @@ export const DEFAULT_LOGIN_ROUTE: string = '/login'
  * The default redirect route after a successful login
  * @type {string}
  */
-export const DEFAULT_REDIRECT_ROUTE: string = '/cockpit'
+export const DEFAULT_REDIRECT_ROUTE: string = '/dashboard'
 
 // TODO (multi-tenant, post-slice-1): when Backstage adds a second tenant,
 // this file is also the place for MAIN_DOMAIN_SUBDOMAINS, PRODUCTION_DOMAINS,

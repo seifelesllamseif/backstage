@@ -1,6 +1,8 @@
 'use client'
 
 import { Copy, Trash2, ExternalLink, Files, Filter } from 'lucide-react'
+import { useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { BoardTask } from './boardData'
 import { useTeam } from './TeamContext'
 import {
@@ -21,18 +23,75 @@ import { useTaskActions } from './actions'
 
 interface TaskCardProps {
   task: BoardTask
+  selected?: boolean
+  // When false, the card is rendered as a plain element (no sortable
+  // hooks). Used for the DragOverlay rendering and the list view.
+  draggable?: boolean
   onClick?: () => void
 }
 
 const PRIORITIES: TaskPriority[] = ['urgent', 'high', 'medium', 'low', 'none']
 
-export default function TaskCard({ task, onClick }: TaskCardProps) {
+type DueState = 'overdue' | 'due-soon' | 'normal' | 'none'
+
+function dueState(
+  dueAt: string | undefined,
+  status: TaskStatus
+): DueState {
+  if (!dueAt) return 'none'
+  if (status === 'done' || status === 'canceled' || status === 'duplicate') {
+    return 'normal'
+  }
+  const ms = new Date(dueAt).getTime() - Date.now()
+  if (ms < 0) return 'overdue'
+  // due within 48h
+  if (ms < 1000 * 60 * 60 * 48) return 'due-soon'
+  return 'normal'
+}
+
+const DUE_TEXT_CLASS: Record<DueState, string> = {
+  overdue: 'text-rose-600 dark:text-rose-300 font-medium',
+  'due-soon': 'text-amber-600 dark:text-amber-300',
+  normal: '',
+  none: ''
+}
+
+export default function TaskCard({
+  task,
+  selected,
+  draggable = true,
+  onClick
+}: TaskCardProps) {
   const { t } = useDashTheme()
   const { open } = useContextMenu()
   const a = useTaskActions()
   const team = useTeam()
   const status = STATUS_BY_ID[task.status]
   const pill = t.pillStatus[task.status]
+  const due = dueState(task.dueAt, task.status)
+
+  const sortable = useSortable({ id: task.id, disabled: !draggable })
+  const dndStyle: React.CSSProperties = draggable
+    ? {
+        transform: CSS.Transform.toString(sortable.transform),
+        transition: sortable.transition
+      }
+    : {}
+
+  // While being dragged: keep the slot but render it as an empty
+  // dashed-border ghost so the user sees exactly where the card will
+  // land. The floating copy follows the cursor via DragOverlay.
+  if (draggable && sortable.isDragging) {
+    return (
+      <div
+        ref={sortable.setNodeRef}
+        style={dndStyle}
+        {...sortable.attributes}
+        className="rounded-lg border-2 border-dashed border-red-400/60 bg-red-500/5 px-3 py-2.5 min-h-[78px]"
+        aria-hidden
+      />
+    )
+  }
 
   const handleContext = (e: React.MouseEvent) => {
     open(e, [
@@ -116,10 +175,19 @@ export default function TaskCard({ task, onClick }: TaskCardProps) {
 
   return (
     <button
+      ref={draggable ? sortable.setNodeRef : undefined}
+      style={dndStyle}
+      {...(draggable ? sortable.attributes : {})}
+      {...(draggable ? sortable.listeners : {})}
       onClick={onClick}
       onContextMenu={handleContext}
       data-card
-      className={`group w-full text-left rounded-lg border transition px-3 py-2.5 flex flex-col gap-2 ${t.card}`}
+      data-selected={selected ? 'true' : undefined}
+      className={`group w-full text-left rounded-lg border transition px-3 py-2.5 flex flex-col gap-2 ${t.card} ${
+        selected
+          ? 'ring-2 ring-red-500/40 border-red-400 dark:border-red-400/60 shadow-sm'
+          : ''
+      } ${draggable ? 'touch-none' : ''}`}
     >
       <div className="flex items-center justify-between gap-2">
         <span
@@ -173,7 +241,16 @@ export default function TaskCard({ task, onClick }: TaskCardProps) {
         <div className="flex items-center gap-2">
           {task.due && (
             <span
-              className={`text-[10px] uppercase tracking-wider ${t.textMuted}`}
+              title={
+                due === 'overdue'
+                  ? 'Overdue'
+                  : due === 'due-soon'
+                    ? 'Due within 48h'
+                    : undefined
+              }
+              className={`text-[10px] uppercase tracking-wider ${
+                DUE_TEXT_CLASS[due] || t.textMuted
+              }`}
             >
               {task.due}
             </span>

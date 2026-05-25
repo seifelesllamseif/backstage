@@ -1,6 +1,11 @@
 'use client'
 
-import { Plus, Filter, Trash2 } from 'lucide-react'
+import { Plus, Filter, Trash2, Inbox } from 'lucide-react'
+import { useDroppable } from '@dnd-kit/core'
+import {
+  SortableContext,
+  verticalListSortingStrategy
+} from '@dnd-kit/sortable'
 import { BoardTask } from './boardData'
 import { TaskStatus } from './status'
 import StatusIcon from './StatusIcon'
@@ -13,25 +18,38 @@ interface BoardColumnProps {
   title: string
   statusId?: TaskStatus
   tasks: BoardTask[]
+  selectedTaskId?: string | null
   onSelect: (id: string) => void
   onAdd?: () => void
   density?: 'compact' | 'cozy'
   wipLimit?: number
+  // dnd-kit droppable id for the column body. Drag/drop only activates
+  // when this is provided (board view); list/timeline views skip it.
+  droppableId?: string
 }
 
 export default function BoardColumn({
   title,
   statusId,
   tasks,
+  selectedTaskId,
   onSelect,
   onAdd,
   density = 'cozy',
-  wipLimit = 0
+  wipLimit = 0,
+  droppableId
 }: BoardColumnProps) {
   const { t } = useDashTheme()
   const { open } = useContextMenu()
   const a = useTaskActions()
   const overLimit = wipLimit > 0 && tasks.length > wipLimit
+
+  // Always call hooks unconditionally; pass a placeholder id when DnD
+  // is disabled (which can't collide with the col:<status> namespace).
+  const { setNodeRef, isOver } = useDroppable({
+    id: droppableId ?? `__no-dnd:${title}`,
+    disabled: !droppableId
+  })
 
   const columnMenu = (e: React.MouseEvent) => {
     open(e, [
@@ -64,8 +82,11 @@ export default function BoardColumn({
 
   return (
     <div
+      ref={setNodeRef}
       onContextMenu={columnMenu}
-      className={`flex flex-col w-[260px] shrink-0 rounded-xl border backdrop-blur-sm ${t.column}`}
+      className={`flex flex-col w-[260px] shrink-0 rounded-xl border backdrop-blur-sm transition ${t.column} ${
+        isOver ? 'ring-2 ring-red-500/30 ring-offset-0' : ''
+      }`}
     >
       <div
         className={`flex items-center justify-between px-3 py-2.5 border-b ${t.columnHeader}`}
@@ -99,23 +120,43 @@ export default function BoardColumn({
         )}
       </div>
       <div
-        className={`flex flex-col overflow-y-auto flex-1 min-h-0 ${
+        className={`flex flex-col overflow-y-auto flex-1 min-h-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden ${
           density === 'compact' ? 'gap-1 p-1.5' : 'gap-2 p-2'
         }`}
       >
-        {tasks.map((task) => (
-          <TaskCard
-            key={task.id}
-            task={task}
-            onClick={() => onSelect(task.id)}
+        <SortableContext
+          items={tasks.map((task) => task.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          {tasks.map((task) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              selected={selectedTaskId === task.id}
+              draggable={Boolean(droppableId)}
+              onClick={() => onSelect(task.id)}
+            />
+          ))}
+        </SortableContext>
+        {tasks.length === 0 && isOver && (
+          <div
+            className="rounded-lg border-2 border-dashed border-red-400/60 bg-red-500/5 px-3 py-2.5 min-h-[78px]"
+            aria-hidden
           />
-        ))}
-        {tasks.length === 0 && (
-          <p
-            className={`text-xs italic px-2 py-4 text-center ${t.textSubtle}`}
+        )}
+        {tasks.length === 0 && !isOver && (
+          <button
+            type="button"
+            onClick={onAdd ?? (() => statusId && a.addInColumn(statusId))}
+            className={`group flex flex-col items-center justify-center gap-1.5 rounded-md border border-dashed py-6 text-center transition ${t.border} ${t.textSubtle} hover:${t.text}`}
+            aria-label={`Add task to ${title}`}
           >
-            Empty
-          </p>
+            <Inbox className="size-4 opacity-60 group-hover:opacity-100" />
+            <span className="text-[11px]">Nothing in {title.toLowerCase()}</span>
+            <span className={`text-[10px] ${t.textFaint}`}>
+              Click to add a task
+            </span>
+          </button>
         )}
       </div>
     </div>

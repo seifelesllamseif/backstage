@@ -8,10 +8,10 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: 'SKAM Team',
-    template: 'SKAM Team | %s'
+    default: 'VerbivoreTeam',
+    template: 'VerbivoreTeam | %s'
   },
-  description: 'The internal portal for the SKAM team.',
+  description: 'The internal portal for the Verbivoreteam.',
   icons: {
     icon: [
       {

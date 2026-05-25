@@ -13,7 +13,9 @@ interface NewTaskModalProps {
   defaultStatus?: TaskStatus
   members: BoardAssignee[]
   onClose: () => void
-  onCreate: (task: Omit<BoardTask, 'id' | 'ref' | 'createdAt' | 'updatedAt'>) => void
+  onCreate: (
+    task: Omit<BoardTask, 'id' | 'ref' | 'createdAt' | 'updatedAt'>
+  ) => void
 }
 
 const PRIORITIES: TaskPriority[] = ['urgent', 'high', 'medium', 'low', 'none']
@@ -73,17 +75,19 @@ export default function NewTaskModal({
       <div
         className={`relative w-full max-w-lg rounded-xl border shadow-2xl ${t.detail}`}
       >
-        <div className={`flex items-center justify-between px-5 h-12 border-b ${t.border}`}>
+        <div
+          className={`flex h-12 items-center justify-between border-b px-5 ${t.border}`}
+        >
           <h3 className={`text-sm font-medium ${t.text}`}>Create task</h3>
           <button
             onClick={onClose}
-            className={`size-7 rounded-md flex items-center justify-center transition ${t.btn}`}
+            className={`flex size-7 items-center justify-center rounded-md transition ${t.btn}`}
           >
             <X className="size-3.5" />
           </button>
         </div>
 
-        <div className="p-5 flex flex-col gap-4">
+        <div className="flex flex-col gap-4 p-5">
           <input
             autoFocus
             value={title}
@@ -92,12 +96,12 @@ export default function NewTaskModal({
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit()
             }}
             placeholder="Task title…"
-            className={`h-10 rounded-md border px-3 text-sm focus:outline-none focus:border-zinc-400 dark:focus:border-white/30 transition ${t.input}`}
+            className={`h-10 rounded-md border px-3 text-sm transition focus:border-zinc-400 focus:outline-none dark:focus:border-white/30 ${t.input}`}
           />
 
           <textarea
-            placeholder="Add a brief — what does the next person need?"
-            className={`min-h-20 rounded-md border px-3 py-2 text-xs focus:outline-none focus:border-zinc-400 dark:focus:border-white/30 transition resize-none ${t.input}`}
+            placeholder="Add a brief - what does the next person need?"
+            className={`min-h-20 resize-none rounded-md border px-3 py-2 text-xs transition focus:border-zinc-400 focus:outline-none dark:focus:border-white/30 ${t.input}`}
           />
 
           <div className="grid grid-cols-2 gap-3">
@@ -168,22 +172,20 @@ export default function NewTaskModal({
               </span>
               <span className="inline-flex items-center gap-1">
                 <PriorityIcon priority={priority} />
-                <span className={t.textMuted}>
-                  {PRIORITY_LABEL[priority]}
-                </span>
+                <span className={t.textMuted}>{PRIORITY_LABEL[priority]}</span>
               </span>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={onClose}
-                className={`h-9 px-3 rounded-md border text-xs transition ${t.btn}`}
+                className={`h-9 rounded-md border px-3 text-xs transition ${t.btn}`}
               >
                 Cancel
               </button>
               <button
                 onClick={submit}
                 disabled={!title.trim()}
-                className={`h-9 px-3 rounded-md text-xs transition disabled:opacity-40 ${t.accent}`}
+                className={`h-9 rounded-md px-3 text-xs transition disabled:opacity-40 ${t.accent}`}
               >
                 Create
               </button>
@@ -205,7 +207,7 @@ function Field({
   const { t } = useDashTheme()
   return (
     <label className="flex flex-col gap-1">
-      <span className={`text-[10px] uppercase tracking-wider ${t.textMuted}`}>
+      <span className={`text-[10px] tracking-wider uppercase ${t.textMuted}`}>
         {label}
       </span>
       {children}

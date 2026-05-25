@@ -183,6 +183,10 @@ model Task {
   priority    TaskPriority @default(none)
   ref         String?      // Human-readable display ID, e.g. "SKAM-101"
   seqNumber   Int?         @map("seq_number") // Auto-increment per project for ref
+  // Within-column ordering for the /dashboard board (decision 0022, slice 3b
+  // drag-and-drop). Smaller = higher in the column. Nullable: rows seeded
+  // before the migration use createdAt as the fallback order.
+  sortOrder   Int?         @map("sort_order")
   assigneeId  String?      @map("assignee_id") @db.Uuid
   dueDate     DateTime?    @map("due_date") @db.Date
   createdBy   String?      @map("created_by") @db.Uuid
@@ -260,13 +264,16 @@ model TaskChecklistItem {
 }
 
 model TaskComment {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  companyId String   @map("company_id") @db.Uuid
-  taskId    String   @map("task_id") @db.Uuid
-  authorId  String?  @map("author_id") @db.Uuid
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String    @map("company_id") @db.Uuid
+  taskId    String    @map("task_id") @db.Uuid
+  authorId  String?   @map("author_id") @db.Uuid
   body      String
-  mentions  String[] @default([])
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  mentions  String[]  @default([])
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  // Set when the author (or an admin) edits the comment. Null means
+  // never edited — render an "(edited)" tag when non-null.
+  editedAt  DateTime? @map("edited_at") @db.Timestamptz(6)
 
   company Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   task    Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)

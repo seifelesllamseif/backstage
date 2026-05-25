@@ -10,6 +10,8 @@ import { verifySession } from "@/lib/dal";
 // verifySession() call — but does NOT wrap with <Shell>. The (authenticated)
 // group is kept for /cockpit and /projects (list) which still use the
 // shadcn sidebar; this group is for full-bleed surfaces.
+//
+// The sonner <Toaster /> lives in the root layout — see app/layout.tsx.
 
 export default async function WorkspaceLayout({
   children,
