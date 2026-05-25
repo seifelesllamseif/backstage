@@ -228,6 +228,13 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   }
 
   const updateStatus = (id: string, s: TaskStatus) => {
+    // Track the prior status so we can revert if the server rejects the
+    // change — most commonly the slice-2 handoff gate blocking a move to
+    // Done (decision 0015, 0022). Surfacing a proper toast for the
+    // rejection lands in 3a step 5; until then, the card snapping back
+    // to its prior column is the user-visible signal.
+    const prev = tasks.find((t) => t.id === id)
+    const prevStatus = prev?.status
     setTasks((cur) =>
       cur.map((task) =>
         task.id === id
@@ -238,7 +245,24 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     logActivityLocal(id, `Status set to ${STATUS_BY_ID[s].label}`)
     startTransition(async () => {
       const res = await updateDashboardTaskStatus(id, s)
-      if ('error' in res) console.error('updateStatus:', res.error)
+      if (!res.ok) {
+        console.error('updateStatus:', res.message)
+        if (prevStatus !== undefined) {
+          setTasks((cur) =>
+            cur.map((task) =>
+              task.id === id ? { ...task, status: prevStatus } : task
+            )
+          )
+        }
+        if (res.reason === 'handoff-incomplete' && res.taskUrl) {
+          // Temporary: alert until sonner toasts land in 3a step 5.
+          // The taskUrl points at the slice-1 edit page where handoffs
+          // can be filled.
+          if (typeof window !== 'undefined') {
+            window.alert(`${res.message}\n\nOpen: ${res.taskUrl}`)
+          }
+        }
+      }
     })
   }
 

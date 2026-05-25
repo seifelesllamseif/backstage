@@ -3,7 +3,22 @@
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { getCurrentCrewMember } from '@/lib/dal'
+import { countMissingFields, isHandoffComplete } from '@/lib/handoff'
 import type { TaskStatus, TaskPriority, RelationKind } from '@prisma/client'
+
+// Shared shape for any status mutation that runs through the slice-2
+// handoff gate (decision 0015, 0022). Keep this in sync with the
+// slice-1 board's StatusChangeResult in projects/[id]/actions.ts —
+// when 3b lands drag-and-drop, both surfaces consume this contract.
+export type StatusChangeResult =
+  | { ok: true }
+  | {
+      ok: false
+      reason: 'handoff-incomplete' | 'generic'
+      message: string
+      missingCount?: number
+      taskUrl?: string
+    }
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -162,12 +177,53 @@ export async function createDashboardTask(data: {
 export async function updateDashboardTaskStatus(
   taskId: string,
   status: TaskStatus
-) {
+): Promise<StatusChangeResult> {
   const member = await getCurrentCrewMember()
-  if (!member) return { error: 'Not signed in.' }
+  if (!member) {
+    return { ok: false, reason: 'generic', message: 'Not signed in.' }
+  }
+
+  const task = await prisma.task.findFirst({
+    where: { id: taskId, companyId: member.companyId },
+    select: {
+      id: true,
+      projectId: true,
+      status: true,
+      handoff: {
+        select: {
+          whatItIs: true,
+          currentStatus: true,
+          doneSoFar: true,
+          stillLeft: true,
+          fileLinks: true,
+          gotchas: true,
+          whoToAsk: true
+        }
+      }
+    }
+  })
+  if (!task) {
+    return { ok: false, reason: 'generic', message: 'Task not found.' }
+  }
+
+  // Done gate (slice-2 invariant, decision 0015).
+  if (status === 'done' && task.status !== 'done') {
+    if (!isHandoffComplete(task.handoff)) {
+      const missing = countMissingFields(task.handoff)
+      return {
+        ok: false,
+        reason: 'handoff-incomplete',
+        message: task.handoff
+          ? `Fill ${missing} more handoff field${missing === 1 ? '' : 's'} before moving to Done.`
+          : 'Start a handoff and fill all 7 fields before moving to Done.',
+        missingCount: missing,
+        taskUrl: `/projects/${task.projectId}/tasks/${task.id}`
+      }
+    }
+  }
 
   await prisma.task.update({
-    where: { id: taskId },
+    where: { id: task.id },
     data: { status }
   })
 
@@ -176,10 +232,11 @@ export async function updateDashboardTaskStatus(
     member.id,
     'task.status_changed',
     'task',
-    taskId,
+    task.id,
     { status }
   )
   revalidatePath('/dashboard')
+  revalidatePath(`/projects/${task.projectId}`)
   return { ok: true }
 }
 
