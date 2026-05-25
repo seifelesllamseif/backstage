@@ -37,12 +37,20 @@ where handoff editing lives (until 3b folds that into the drawer).
 URL shape stays as-is — `?project=<uuid>` on `/dashboard`. No slug
 migration this slice.
 
-The global authenticated shell wrapper
-(`components/app-shell/shell.tsx`) is removed entirely:
-`DashboardShell` provides its own chrome, the `(profile)` route
-group already has its own shell-less layout (decision 0021), and
-nothing else needs the old sidebar. `(authenticated)/layout.tsx`
-collapses to a `verifySession()` + `children` passthrough.
+The full-bleed routes (`/dashboard` and `/projects/[id]`) move into a
+new `(workspace)` route group with a shell-less layout
+(`verifySession()` + children passthrough, mirroring the `(profile)`
+pattern from decision 0021). The global `<Shell>` is kept and stays
+wrapped around the routes that remain in the `(authenticated)` group
+(`/cockpit`, `/projects` list). The previously-commented-out shell
+wrapper from `components/app-shell/shell.tsx` is uncommented — that
+was a transitional hack while `/dashboard` was the only consumer; now
+that `/dashboard` lives in its own group, the global shell can serve
+the routes that still need it.
+
+A `/dashboard` link is added to the global `AppSidebar` so users on
+`/cockpit` or `/projects` (list) can reach the primary surface
+without typing the URL.
 
 ## Why this and not the alternatives
 
@@ -87,13 +95,16 @@ slice-2 would have blocked.
 
 ## Consequences
 
-- `components/app-shell/` (sidebar, shell, related primitives) is
-  deleted entirely. shadcn sidebar primitives in `components/ui/` are
-  kept — they may be used elsewhere later.
-- Slice-1 board components in `app/(authenticated)/projects/[id]/`
-  (`status-select.tsx`, `task-panel.tsx`, `add-task-form.tsx`,
-  and the bespoke `page.tsx`) are deleted. The `tasks/[taskId]/`
-  edit page is retained.
+- `components/app-shell/` is kept (serves `/cockpit` and `/projects`
+  list). Its `shell.tsx` is uncommented; `sidebar.tsx` gains a
+  `/dashboard` nav item.
+- Slice-1 board components moved to `(workspace)/projects/[id]/`
+  (`status-select.tsx`, `task-panel.tsx`, `add-task-form.tsx`) are
+  deleted — the new `page.tsx` renders `DashboardShell` and has no
+  consumers for them. The `tasks/[taskId]/` edit page is retained
+  and reverted from being a redirect (decision 0017 assumed the
+  slide-over had a handoff editor; the dashboard drawer doesn't
+  yet — 3b polish folds this in).
 - `lib/business-logic.ts::boardColumns` is unused after the refactor
   but kept for now; the dashboard uses its own `STATUSES` source of
   truth (`dashboard/_components/status.ts`). A later pass should
