@@ -1,33 +1,34 @@
-"use client";
+'use client'
 
-import Link from "next/link";
-import { useRef, useState, useTransition } from "react";
-import { taskStatuses, type TaskStatus } from "@/lib/business-logic";
-import { updateTaskStatus, type StatusChangeResult } from "./actions";
+import Link from 'next/link'
+import { useRef, useState, useTransition } from 'react'
+import { taskStatuses, type TaskStatus } from '@/lib/business-logic'
+import { updateTaskStatus, type StatusChangeResult } from './actions'
 
 const LABELS: Record<TaskStatus, string> = {
-  backlog: "Backlog",
-  unscoped: "Unscoped",
-  todo: "To do",
-  in_progress: "In progress",
-  in_review: "In review",
-  done: "Done",
-  canceled: "Canceled",
-};
+  backlog: 'Backlog',
+  unscoped: 'Unscoped',
+  todo: 'To do',
+  in_progress: 'In progress',
+  in_review: 'In review',
+  done: 'Done',
+  canceled: 'Canceled',
+  duplicate: 'Duplicate'
+}
 
 export function StatusSelect({
   taskId,
-  current,
+  current
 }: {
-  taskId: string;
-  current: TaskStatus;
+  taskId: string
+  current: TaskStatus
 }) {
-  const [pending, startTransition] = useTransition();
+  const [pending, startTransition] = useTransition()
   const [error, setError] = useState<{
-    message: string;
-    taskUrl?: string;
-  } | null>(null);
-  const selectRef = useRef<HTMLSelectElement>(null);
+    message: string
+    taskUrl?: string
+  } | null>(null)
+  const selectRef = useRef<HTMLSelectElement>(null)
 
   return (
     <div className="flex flex-col gap-1">
@@ -36,29 +37,29 @@ export function StatusSelect({
         defaultValue={current}
         disabled={pending}
         aria-label="Status"
-        className="rounded border border-border bg-background px-1.5 py-0.5 text-[11px] disabled:opacity-50"
+        className="border-border bg-background rounded border px-1.5 py-0.5 text-[11px] disabled:opacity-50"
         onChange={(e) => {
-          const next = e.target.value;
-          setError(null);
+          const next = e.target.value
+          setError(null)
           startTransition(async () => {
             const result: StatusChangeResult = await updateTaskStatus(
               taskId,
-              next,
-            );
+              next
+            )
             if (!result.ok) {
               // Revert the visible select to the actual stored status.
-              if (selectRef.current) selectRef.current.value = current;
+              if (selectRef.current) selectRef.current.value = current
               setError({
                 message: result.message,
                 taskUrl:
-                  result.reason === "handoff-incomplete"
+                  result.reason === 'handoff-incomplete'
                     ? result.taskUrl
-                    : undefined,
-              });
+                    : undefined
+              })
             }
             // On success: revalidatePath causes the parent to re-render with
             // the new status, which becomes the new `current`.
-          });
+          })
         }}
       >
         {taskStatuses.map((status) => (
@@ -69,18 +70,15 @@ export function StatusSelect({
       </select>
 
       {error && (
-        <div className="flex flex-col gap-0.5 text-[11px] text-destructive">
+        <div className="text-destructive flex flex-col gap-0.5 text-[11px]">
           <span>{error.message}</span>
           {error.taskUrl && (
-            <Link
-              href={error.taskUrl}
-              className="underline hover:no-underline"
-            >
+            <Link href={error.taskUrl} className="underline hover:no-underline">
               Fill handoff →
             </Link>
           )}
         </div>
       )}
     </div>
-  );
+  )
 }
