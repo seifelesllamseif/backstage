@@ -12,6 +12,13 @@ import { STATUSES } from './status'
 // dueDate strings — those become per-row warnings during normalization,
 // not hard parse failures, so a single misspelled enum doesn't reject
 // an otherwise-good batch.
+const RawRelationSchema = z
+  .object({
+    kind: z.string().nullish(),
+    ref: z.string().nullish()
+  })
+  .passthrough()
+
 const RawTaskSchema = z
   .object({
     title: z
@@ -23,7 +30,8 @@ const RawTaskSchema = z
     priority: z.string().nullish(),
     assignee: z.string().nullish(),
     labels: z.array(z.string()).nullish(),
-    dueDate: z.string().nullish()
+    dueDate: z.string().nullish(),
+    relations: z.array(RawRelationSchema).nullish()
   })
   .passthrough()
 
@@ -46,6 +54,9 @@ export function buildBulkTaskPrompt(ctx: {
   projectName?: string | null
   members: { name: string }[]
   labels: { name: string }[]
+  // Existing tasks the AI can reference in relations. Listed as ref +
+  // title so the AI can pick the right target.
+  existingTasks?: { ref: string; title: string }[]
 }): string {
   const memberLines =
     ctx.members.length > 0
@@ -58,6 +69,14 @@ export function buildBulkTaskPrompt(ctx: {
   const projectLine = ctx.projectName
     ? `\nProject: ${ctx.projectName}\n`
     : ''
+  const existingTasks = ctx.existingTasks ?? []
+  const taskLines =
+    existingTasks.length > 0
+      ? existingTasks
+          .slice(0, 30)
+          .map((task) => `  - ${task.ref}: ${task.title}`)
+          .join('\n')
+      : '  (none — leave relations as [])'
 
   return `You are helping bulk-create tasks for a project management app.
 Reply with ONLY a JSON object — no prose, no markdown code fences.
@@ -72,7 +91,10 @@ Output shape:
       "priority": "${VALID_PRIORITIES.join(' | ')}",
       "assignee": "exact full name from list below, or null",
       "labels": ["exact label names from list below"],
-      "dueDate": "YYYY-MM-DD or null"
+      "dueDate": "YYYY-MM-DD or null",
+      "relations": [
+        { "kind": "blocked_by | blocks | parent | sub_issue | triage", "ref": "exact existing task ref" }
+      ]
     }
   ]
 }
@@ -83,6 +105,7 @@ Rules:
 - assignee MUST come from the list below (or be null). Don't invent people.
 - If an assignee is mentioned by first name only and unambiguous, use the full name from the list.
 - For labels: prefer names from the list below, but new short labels (1-2 words) are OK if they genuinely fit. The user reviews them before they get created.
+- For relations: only reference existing task refs from the list below. Leave the array empty if nothing relates. Use "parent" / "sub_issue" for hierarchy, "blocks" / "blocked_by" for dependency, "triage" only when the task explicitly needs categorization.
 
 Available assignees:
 ${memberLines}
@@ -90,12 +113,22 @@ ${memberLines}
 Available labels (prefer these):
 ${labelLines}
 
+Existing tasks you can relate to (by ref):
+${taskLines}
+
 My request (replace this line with what you need done):
 <describe the tasks here — paragraphs, bullets, anything>
 `
 }
 
 // ─── Parser ───────────────────────────────────────────────────────────────
+
+type RelationKindLite =
+  | 'blocked_by'
+  | 'blocks'
+  | 'parent'
+  | 'sub_issue'
+  | 'triage'
 
 export type ParsedBulkTask = {
   title: string
@@ -110,6 +143,10 @@ export type ParsedBulkTask = {
   // Labels the AI mentioned but we couldn't resolve — surfaced as warnings.
   unknownLabels: string[]
   dueDate: string | null
+  // Resolved relations: kind + target ref. Refs the AI hallucinated end
+  // up in `unknownRelations` so the preview can flag them.
+  relations: { kind: RelationKindLite; ref: string }[]
+  unknownRelations: { kind: string; ref: string }[]
   warnings: string[]
 }
 
@@ -122,6 +159,9 @@ export function parseBulkTaskJson(
   ctx: {
     members: { id: string; name: string }[]
     labels: { id: string; name: string }[]
+    // Existing task refs we can validate relations against. Refs not in
+    // this set become unknownRelations.
+    existingTaskRefs?: string[]
   }
 ): ParseResult {
   const trimmed = stripCodeFences(text.trim())
@@ -156,6 +196,16 @@ export function parseBulkTaskJson(
   }
   const labelByLower = new Map<string, { id: string; name: string }>()
   for (const l of ctx.labels) labelByLower.set(l.name.toLowerCase(), l)
+  const validRefs = new Set(
+    (ctx.existingTaskRefs ?? []).map((r) => r.toLowerCase())
+  )
+  const validRelationKinds: ReadonlySet<RelationKindLite> = new Set([
+    'blocked_by',
+    'blocks',
+    'parent',
+    'sub_issue',
+    'triage'
+  ] as const)
 
   const tasks: ParsedBulkTask[] = validated.data.tasks.map((r) => {
     const warnings: string[] = []
@@ -215,6 +265,34 @@ export function parseBulkTaskJson(
 
     const description = r.description?.trim() ? r.description.trim() : null
 
+    const relations: { kind: RelationKindLite; ref: string }[] = []
+    const unknownRelations: { kind: string; ref: string }[] = []
+    if (Array.isArray(r.relations)) {
+      for (const raw of r.relations) {
+        const kindRaw = (raw?.kind ?? '').trim().toLowerCase().replace(/-/g, '_')
+        const refRaw = (raw?.ref ?? '').trim()
+        if (!kindRaw && !refRaw) continue
+        if (!validRelationKinds.has(kindRaw as RelationKindLite) || !refRaw) {
+          unknownRelations.push({ kind: kindRaw, ref: refRaw })
+          warnings.push(
+            `Skipped relation { kind: "${kindRaw}", ref: "${refRaw}" } — unknown kind or empty ref.`
+          )
+          continue
+        }
+        if (
+          validRefs.size > 0 &&
+          !validRefs.has(refRaw.toLowerCase())
+        ) {
+          unknownRelations.push({ kind: kindRaw, ref: refRaw })
+          warnings.push(
+            `Skipped relation to "${refRaw}" — that ref doesn't exist.`
+          )
+          continue
+        }
+        relations.push({ kind: kindRaw as RelationKindLite, ref: refRaw })
+      }
+    }
+
     return {
       title: r.title,
       description,
@@ -225,6 +303,8 @@ export function parseBulkTaskJson(
       labelIds,
       unknownLabels,
       dueDate,
+      relations,
+      unknownRelations,
       warnings
     }
   })

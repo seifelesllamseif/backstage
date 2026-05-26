@@ -587,7 +587,7 @@ function ProjectCard({
       </div>
       <div className={`h-1.5 overflow-hidden rounded-full ${t.surfaceMuted}`}>
         <div
-          className="h-full bg-red-500 transition-all"
+          className="h-full bg-teal-500 transition-all"
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -1393,7 +1393,7 @@ export function SettingsPanel({
             onClick={() => setNotifyOnAssign(!notifyOnAssign)}
             className={`relative h-6 w-11 rounded-full border transition ${
               notifyOnAssign
-                ? 'border-red-500 bg-red-500'
+                ? 'border-teal-500 bg-teal-500'
                 : t.surfaceMuted + ' ' + t.border
             }`}
           >
@@ -1411,7 +1411,7 @@ export function SettingsPanel({
             aria-pressed={showHints}
             className={`relative h-6 w-11 rounded-full border transition ${
               showHints
-                ? 'border-red-500 bg-red-500'
+                ? 'border-teal-500 bg-teal-500'
                 : t.surfaceMuted + ' ' + t.border
             }`}
           >

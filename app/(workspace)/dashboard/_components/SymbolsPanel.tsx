@@ -69,13 +69,21 @@ const CYCLE_STATUSES: {
   label: string
   desc: string
 }[] = [
-  { id: 'upcoming', label: 'Upcoming', desc: "Phase that hasn't started yet." },
+  {
+    id: 'upcoming',
+    label: 'Upcoming',
+    desc: "Sprint that hasn't started yet."
+  },
   {
     id: 'current',
     label: 'Current',
-    desc: 'The phase being worked right now.'
+    desc: 'The sprint being worked right now.'
   },
-  { id: 'completed', label: 'Completed', desc: 'Past phase, kept for history.' }
+  {
+    id: 'completed',
+    label: 'Completed',
+    desc: 'Past sprint, kept for history.'
+  }
 ]
 
 const LINK_KINDS: {
@@ -271,8 +279,8 @@ export default function SymbolsPanel({
         </Section>
 
         <Section
-          title="Cycle statuses"
-          hint="Lifecycle of a phase in the Cycles tab."
+          title="Sprint statuses"
+          hint="Lifecycle of a sprint in the Sprints tab."
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {CYCLE_STATUSES.map((c) => (

@@ -185,7 +185,7 @@ export default function CyclesPanel({
         toast.error(res.error)
         return
       }
-      toast.success('Cycle created.')
+      toast.success('Sprint created.')
       setShowNew(false)
       router.refresh()
     })
@@ -216,7 +216,7 @@ export default function CyclesPanel({
         toast.error(res.error)
         return
       }
-      toast.success('Cycle updated.')
+      toast.success('Sprint updated.')
       setEditingId(null)
       router.refresh()
     })
@@ -231,7 +231,7 @@ export default function CyclesPanel({
         toast.error(res.error)
         return
       }
-      toast.success('Cycle deleted.')
+      toast.success('Sprint deleted.')
       setPendingDelete(null)
       router.refresh()
     })
@@ -318,11 +318,11 @@ export default function CyclesPanel({
         <div className="flex flex-col gap-6">
           <header className="flex items-baseline justify-between">
             <div>
-              <h2 className={`text-2xl font-medium ${t.text}`}>Cycles</h2>
+              <h2 className={`text-2xl font-medium ${t.text}`}>Sprints</h2>
               <p className={`mt-1 text-sm ${t.textMuted}`}>
-                Plan phases for this project. Set a description as the
-                Definition of Done, mark one as Current, and drag tasks into
-                cycles to scope them.
+                Plan sprints for this project. Set a description as the
+                Definition of Done, mark one as Current, and drag tasks into a
+                sprint to scope it.
               </p>
             </div>
             {canEdit && !showNew && (
@@ -330,7 +330,7 @@ export default function CyclesPanel({
                 onClick={() => setShowNew(true)}
                 className={`flex h-8 items-center gap-1.5 rounded-md px-3 text-xs transition ${t.accent}`}
               >
-                <Plus className="size-3.5" /> New cycle
+                <Plus className="size-3.5" /> New sprint
               </button>
             )}
           </header>
@@ -345,7 +345,7 @@ export default function CyclesPanel({
                 toDate: addDaysIso(todayIso(), 13),
                 status: 'upcoming'
               }}
-              submitLabel="Create cycle"
+              submitLabel="Create sprint"
               submitting={pending}
               onSubmit={handleCreate}
               onCancel={() => setShowNew(false)}
@@ -360,7 +360,7 @@ export default function CyclesPanel({
           >
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Delete this cycle?</AlertDialogTitle>
+                <AlertDialogTitle>Delete this sprint?</AlertDialogTitle>
                 <AlertDialogDescription>
                   {pendingDelete
                     ? `"${pendingDelete.name}" will be removed. Its tasks stay in the project — they just go back to Unscheduled.`
@@ -389,11 +389,11 @@ export default function CyclesPanel({
                 <div
                   className={`flex flex-col items-center gap-2 rounded-xl border border-dashed py-12 text-center ${t.border}`}
                 >
-                  <p className={`text-sm ${t.text}`}>No cycles yet</p>
+                  <p className={`text-sm ${t.text}`}>No sprints yet</p>
                   <p className={`max-w-sm text-xs ${t.textMuted}`}>
                     {canEdit
-                      ? 'Click "New cycle" to plan the first phase.'
-                      : 'Cycles will show up here once an admin or lead creates one.'}
+                      ? 'Click "New sprint" to plan the first one.'
+                      : 'Sprints will show up here once an admin or lead creates one.'}
                   </p>
                 </div>
               ) : (
@@ -515,7 +515,7 @@ function CycleCard({
       ref={setNodeRef}
       className={`flex flex-col gap-3 rounded-xl border p-4 transition ${t.column} ${
         isOver
-          ? 'border-red-500 bg-red-500/[0.04] ring-2 ring-red-500/30 dark:bg-red-500/10'
+          ? 'border-teal-500 bg-teal-500/[0.04] ring-2 ring-teal-500/30 dark:bg-teal-500/10'
           : ''
       }`}
     >
@@ -572,7 +572,7 @@ function CycleCard({
                 onClick={onStartEdit}
                 disabled={submitting}
                 className={`flex size-7 items-center justify-center rounded-md border transition disabled:opacity-50 ${t.btn}`}
-                aria-label="Edit cycle"
+                aria-label="Edit sprint"
               >
                 <Pencil className="size-3.5" />
               </button>
@@ -580,7 +580,7 @@ function CycleCard({
                 onClick={onDelete}
                 disabled={submitting}
                 className={`flex size-7 items-center justify-center rounded-md border transition disabled:opacity-50 ${t.btn} ${t.accentText}`}
-                aria-label="Delete cycle"
+                aria-label="Delete sprint"
               >
                 <Trash2 className="size-3.5" />
               </button>
@@ -601,7 +601,7 @@ function CycleCard({
       </div>
       <div className={`h-1.5 overflow-hidden rounded-full ${t.surfaceMuted}`}>
         <div
-          className="h-full bg-red-500 transition-all"
+          className="h-full bg-teal-500 transition-all"
           style={{ width: `${cycle.percent}%` }}
         />
       </div>
@@ -611,13 +611,13 @@ function CycleCard({
           <li
             className={`rounded-md border border-dashed px-3 py-3 text-center text-[11px] italic transition ${
               isOver
-                ? 'border-red-500 text-red-600 dark:text-red-300'
+                ? 'border-teal-500 text-teal-600 dark:text-teal-300'
                 : `${t.border} ${t.textSubtle}`
             }`}
           >
             {isOver
-              ? 'Release to add to this cycle'
-              : 'Drop a task here to scope it into this cycle'}
+              ? 'Release to add to this sprint'
+              : 'Drop a task here to scope it into this sprint'}
           </li>
         ) : (
           tasksInCycle.map((task) => (
@@ -650,7 +650,7 @@ function CycleCard({
         )}
         {tasksInCycle.length > 0 && isOver && (
           <li
-            className={`rounded-md border border-dashed border-red-500 px-2.5 py-1.5 text-center text-[11px] italic text-red-600 dark:text-red-300`}
+            className={`rounded-md border border-dashed border-teal-500 px-2.5 py-1.5 text-center text-[11px] italic text-teal-600 dark:text-teal-300`}
           >
             Release to add here
           </li>
@@ -796,7 +796,7 @@ function CycleForm({
         <span
           className={`text-[10px] font-medium tracking-wider uppercase ${t.textMuted}`}
         >
-          Cycle details
+          Sprint details
         </span>
         <button
           type="button"
@@ -812,7 +812,7 @@ function CycleForm({
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="Phase name (e.g. Phase 1 — Supabase Audit)"
+        placeholder="Sprint name (e.g. Sprint 1 — Supabase Audit)"
         className={`h-9 rounded-md border px-3 text-sm ${t.input}`}
         maxLength={80}
         required

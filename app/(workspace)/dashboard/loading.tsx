@@ -5,7 +5,7 @@
 export default function DashboardLoading() {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-white text-zinc-900 dark:bg-black dark:text-white">
-      <aside className="hidden w-[220px] shrink-0 flex-col gap-3 border-r border-zinc-200 p-3 dark:border-white/10 md:flex">
+      <aside className="hidden w-[220px] shrink-0 flex-col gap-3 border-r border-zinc-200 p-3 md:flex dark:border-white/10">
         <div className="h-8 w-32 animate-pulse rounded bg-zinc-100 dark:bg-white/[0.04]" />
         <div className="mt-2 flex flex-col gap-1.5">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -35,25 +35,25 @@ export default function DashboardLoading() {
                 <div className="h-3.5 w-20 animate-pulse rounded bg-zinc-200 dark:bg-white/10" />
                 <div className="h-3.5 w-6 animate-pulse rounded bg-zinc-200 dark:bg-white/10" />
               </div>
-              {Array.from({ length: colIdx === 0 ? 4 : colIdx === 2 ? 3 : 2 }).map(
-                (_, cardIdx) => (
-                  <div
-                    key={cardIdx}
-                    className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-3 dark:border-white/10 dark:bg-white/[0.02]"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="h-3 w-12 animate-pulse rounded bg-zinc-100 dark:bg-white/[0.06]" />
-                      <div className="h-3 w-16 animate-pulse rounded bg-zinc-100 dark:bg-white/[0.06]" />
-                    </div>
-                    <div className="h-4 w-full animate-pulse rounded bg-zinc-100 dark:bg-white/[0.06]" />
-                    <div className="h-4 w-2/3 animate-pulse rounded bg-zinc-100 dark:bg-white/[0.06]" />
-                    <div className="mt-1 flex items-center justify-between">
-                      <div className="h-3.5 w-10 animate-pulse rounded bg-zinc-100 dark:bg-white/[0.06]" />
-                      <div className="size-5 animate-pulse rounded-full bg-zinc-100 dark:bg-white/[0.06]" />
-                    </div>
+              {Array.from({
+                length: colIdx === 0 ? 4 : colIdx === 2 ? 3 : 2
+              }).map((_, cardIdx) => (
+                <div
+                  key={cardIdx}
+                  className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-3 dark:border-white/10 dark:bg-white/[0.02]"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="h-3 w-12 animate-pulse rounded bg-zinc-100 dark:bg-white/[0.06]" />
+                    <div className="h-3 w-16 animate-pulse rounded bg-zinc-100 dark:bg-white/[0.06]" />
                   </div>
-                )
-              )}
+                  <div className="h-4 w-full animate-pulse rounded bg-zinc-100 dark:bg-white/[0.06]" />
+                  <div className="h-4 w-2/3 animate-pulse rounded bg-zinc-100 dark:bg-white/[0.06]" />
+                  <div className="mt-1 flex items-center justify-between">
+                    <div className="h-3.5 w-10 animate-pulse rounded bg-zinc-100 dark:bg-white/[0.06]" />
+                    <div className="size-5 animate-pulse rounded-full bg-zinc-100 dark:bg-white/[0.06]" />
+                  </div>
+                </div>
+              ))}
             </section>
           ))}
         </div>

@@ -32,6 +32,8 @@ export interface BoardTask {
   status: TaskStatus
   priority: TaskPriority
   assignee?: BoardAssignee
+  // Lead member: who assignees ask for help. Distinct from assignee.
+  lead?: BoardAssignee
   projectId?: string
   tags?: string[]
   due?: string

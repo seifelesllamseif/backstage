@@ -79,6 +79,7 @@ export function mapTask(
   const assignee = task.assigneeId
     ? membersByDbId.get(task.assigneeId)
     : undefined;
+  const lead = task.leadId ? membersByDbId.get(task.leadId) : undefined;
 
   const tags = task.labels
     .map((tl) => tl.label?.name)
@@ -110,6 +111,7 @@ export function mapTask(
     status: task.status as TaskStatus,
     priority: task.priority as TaskPriority,
     assignee,
+    lead,
     projectId: task.projectId ?? undefined,
     tags: tags.length ? tags : undefined,
     due: formatDueDate(task.dueDate),
@@ -283,6 +285,7 @@ function activityKindFor(action: string): TaskActivity["kind"] {
   if (action === "task.created") return "created";
   if (action === "task.priority_changed") return "priority";
   if (action === "task.assignee_changed") return "assignee";
+  if (action === "task.lead_changed") return "assignee";
   if (action === "task.attachment_added") return "attachment";
   return "status";
 }
@@ -319,6 +322,14 @@ function activityTextFor(row: DbActivity): string {
       if (toName) return `${who} assigned this to ${toName}`;
       if (fromName) return `${who} unassigned ${fromName}`;
       return `${who} reassigned the task`;
+    }
+    case "task.lead_changed": {
+      const fromName = meta?.fromName ?? null;
+      const toName = meta?.toName ?? null;
+      if (toName && fromName) return `${who} changed lead from ${fromName} to ${toName}`;
+      if (toName) return `${who} set ${toName} as lead`;
+      if (fromName) return `${who} removed ${fromName} as lead`;
+      return `${who} changed the lead`;
     }
     case "task.duplicated":
       return `${who} duplicated this task`;

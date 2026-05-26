@@ -27,6 +27,14 @@ const IsoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD')
 
+const RelationKindEnum = z.enum([
+  'blocked_by',
+  'blocks',
+  'parent',
+  'sub_issue',
+  'triage'
+])
+
 const BulkDraftSchema = z.object({
   title: z.string().trim().min(1, 'title is required').max(500),
   description: z.string().nullish(),
@@ -35,7 +43,13 @@ const BulkDraftSchema = z.object({
   assigneeId: z.string().uuid().nullish(),
   dueDate: IsoDate.nullish(),
   labelIds: z.array(z.string().uuid()).optional(),
-  newLabelNames: z.array(z.string().trim().min(1).max(64)).optional()
+  newLabelNames: z.array(z.string().trim().min(1).max(64)).optional(),
+  // Optional relations to existing tasks (by ref). Each entry creates
+  // a TaskDependency row after the source task is created in the same
+  // transaction. Unknown refs are silently skipped server-side.
+  relations: z
+    .array(z.object({ kind: RelationKindEnum, ref: z.string().trim().min(1) }))
+    .optional()
 })
 
 const CreateBulkInputSchema = z.object({
@@ -118,6 +132,15 @@ export async function fetchDashboardData(projectId?: string) {
     where: taskWhere,
     include: {
       assignee: {
+        select: {
+          id: true,
+          fullName: true,
+          avatarInitials: true,
+          avatarUrl: true,
+          accessTier: true
+        }
+      },
+      lead: {
         select: {
           id: true,
           fullName: true,
@@ -295,8 +318,14 @@ export async function createDashboardTask(data: {
   priority?: TaskPriority
   projectId: string
   assigneeId?: string | null
+  leadId?: string | null
   dueDate?: string | null
   labelIds?: string[]
+  // Optional dependency rows to create alongside the task. Each entry
+  // points at an existing task by ref; unknown refs are skipped quietly
+  // so a single bad input doesn't abort the create. Same shape as the
+  // bulk action.
+  relations?: { kind: RelationKind; ref: string }[]
 }) {
   const member = await getCurrentCrewMember()
   if (!member) return { error: 'Not signed in.' }
@@ -329,6 +358,7 @@ export async function createDashboardTask(data: {
       ref,
       seqNumber: nextSeq,
       assigneeId: data.assigneeId ?? null,
+      leadId: data.leadId ?? null,
       dueDate: data.dueDate ? new Date(data.dueDate) : null,
       createdBy: member.id,
       labels: data.labelIds?.length
@@ -336,6 +366,37 @@ export async function createDashboardTask(data: {
         : undefined
     }
   })
+
+  // Attach dependency rows by looking up the target ref within the
+  // current company. Unknown refs are silently skipped — the task
+  // itself is already created and one bad ref shouldn't poison the
+  // whole flow.
+  if (data.relations && data.relations.length > 0) {
+    const refs = [...new Set(data.relations.map((r) => r.ref))]
+    const targets = await prisma.task.findMany({
+      where: { companyId: member.companyId, ref: { in: refs } },
+      select: { id: true, ref: true }
+    })
+    const idByRef = new Map(targets.map((t) => [t.ref ?? '', t.id]))
+    const rows = data.relations
+      .map((r) => {
+        const target = idByRef.get(r.ref)
+        if (!target || target === task.id) return null
+        return {
+          companyId: member.companyId,
+          taskId: task.id,
+          dependsOnTaskId: target,
+          kind: r.kind
+        }
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null)
+    if (rows.length > 0) {
+      await prisma.taskDependency.createMany({
+        data: rows,
+        skipDuplicates: true
+      })
+    }
+  }
 
   await logActivity(
     member.companyId,
@@ -346,6 +407,107 @@ export async function createDashboardTask(data: {
   )
   revalidatePath('/dashboard')
   return { task }
+}
+
+// Add a single dependency row between two existing tasks. Used by the
+// inline picker on the task detail panel. Idempotent via the (taskId,
+// dependsOnTaskId) unique index.
+const AddDepInput = z.object({
+  taskId: z.string().uuid(),
+  dependsOnRef: z.string().trim().min(1).max(64),
+  kind: z.enum(['blocked_by', 'blocks', 'parent', 'sub_issue', 'triage'])
+})
+
+export async function addTaskDependency(
+  input: z.input<typeof AddDepInput>
+): Promise<
+  | { error: string }
+  | {
+      ok: true
+      dep: { id: string; kind: RelationKind; dependsOnRef: string }
+    }
+> {
+  const parsed = AddDepInput.safeParse(input)
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
+  }
+  const member = await getCurrentCrewMember()
+  if (!member) return { error: 'Not signed in.' }
+
+  const [source, target] = await Promise.all([
+    prisma.task.findFirst({
+      where: { id: parsed.data.taskId, companyId: member.companyId },
+      select: { id: true }
+    }),
+    prisma.task.findFirst({
+      where: { ref: parsed.data.dependsOnRef, companyId: member.companyId },
+      select: { id: true, ref: true }
+    })
+  ])
+  if (!source) return { error: 'Task not found.' }
+  if (!target) return { error: `No task with ref ${parsed.data.dependsOnRef}.` }
+  if (target.id === source.id) {
+    return { error: "Can't relate a task to itself." }
+  }
+
+  // Upsert via the unique index so re-adding the same edge no-ops.
+  const dep = await prisma.taskDependency.upsert({
+    where: {
+      taskId_dependsOnTaskId: {
+        taskId: source.id,
+        dependsOnTaskId: target.id
+      }
+    },
+    create: {
+      companyId: member.companyId,
+      taskId: source.id,
+      dependsOnTaskId: target.id,
+      kind: parsed.data.kind
+    },
+    update: { kind: parsed.data.kind }
+  })
+
+  revalidatePath('/dashboard')
+  return {
+    ok: true,
+    dep: {
+      id: dep.id,
+      kind: dep.kind as RelationKind,
+      dependsOnRef: target.ref ?? parsed.data.dependsOnRef
+    }
+  }
+}
+
+const RemoveDepInput = z.object({
+  taskId: z.string().uuid(),
+  dependsOnRef: z.string().trim().min(1).max(64),
+  kind: z.enum(['blocked_by', 'blocks', 'parent', 'sub_issue', 'triage'])
+})
+
+export async function removeTaskDependency(
+  input: z.input<typeof RemoveDepInput>
+) {
+  const parsed = RemoveDepInput.safeParse(input)
+  if (!parsed.success) return { error: 'Invalid input.' }
+  const member = await getCurrentCrewMember()
+  if (!member) return { error: 'Not signed in.' }
+
+  const target = await prisma.task.findFirst({
+    where: { ref: parsed.data.dependsOnRef, companyId: member.companyId },
+    select: { id: true }
+  })
+  if (!target) return { error: 'Ref not found.' }
+
+  await prisma.taskDependency.deleteMany({
+    where: {
+      companyId: member.companyId,
+      taskId: parsed.data.taskId,
+      dependsOnTaskId: target.id,
+      kind: parsed.data.kind
+    }
+  })
+  revalidatePath('/dashboard')
+  return { ok: true as const }
 }
 
 // Bulk-create N tasks in one shot. Used by the "From AI" tab in the New
@@ -430,6 +592,12 @@ export async function createBulkDashboardTasks(
     }
 
     const out: { id: string; ref: string }[] = []
+    // Track pending dependency edges. We resolve them after all tasks are
+    // created so a draft can reference another draft in the same batch
+    // (by its computed ref) or any pre-existing task in the company.
+    const pendingDeps: { sourceId: string; ref: string; kind: RelationKind }[]
+      = []
+
     for (const d of validDrafts) {
       const seq = nextSeq++
       const ref = `${prefix}-${seq}`
@@ -469,7 +637,39 @@ export async function createBulkDashboardTasks(
         }
       })
       out.push({ id: task.id, ref: task.ref ?? ref })
+
+      for (const rel of d.relations ?? []) {
+        pendingDeps.push({ sourceId: task.id, ref: rel.ref, kind: rel.kind })
+      }
     }
+
+    if (pendingDeps.length > 0) {
+      const refs = [...new Set(pendingDeps.map((p) => p.ref))]
+      const targets = await tx.task.findMany({
+        where: { companyId: member.companyId, ref: { in: refs } },
+        select: { id: true, ref: true }
+      })
+      const idByRef = new Map(targets.map((t) => [t.ref ?? '', t.id]))
+      const depRows = pendingDeps
+        .map((p) => {
+          const targetId = idByRef.get(p.ref)
+          if (!targetId || targetId === p.sourceId) return null
+          return {
+            companyId: member.companyId,
+            taskId: p.sourceId,
+            dependsOnTaskId: targetId,
+            kind: p.kind as RelationKind
+          }
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== null)
+      if (depRows.length > 0) {
+        await tx.taskDependency.createMany({
+          data: depRows,
+          skipDuplicates: true
+        })
+      }
+    }
+
     return {
       tasks: out,
       createdLabels: [...newLabelDisplayByLower.values()]
@@ -622,6 +822,57 @@ export async function updateDashboardTaskAssignee(
         from: prev.assigneeId,
         fromName: prev.assignee?.fullName ?? null,
         to: assigneeId,
+        toName
+      }
+    )
+  }
+  revalidatePath('/dashboard')
+  return { ok: true }
+}
+
+// Lead member for a task. Lead is who members ask for help — distinct
+// from assignee. Same activity-log pattern as assignee_changed so the
+// Updates panel surfaces lead changes alongside everything else.
+export async function updateDashboardTaskLead(
+  taskId: string,
+  leadId: string | null
+) {
+  const member = await getCurrentCrewMember()
+  if (!member) return { error: 'Not signed in.' }
+
+  const prev = await prisma.task.findFirst({
+    where: { id: taskId, companyId: member.companyId },
+    select: {
+      leadId: true,
+      lead: { select: { fullName: true } }
+    }
+  })
+  if (!prev) return { error: 'Task not found.' }
+
+  await prisma.task.update({
+    where: { id: taskId },
+    data: { leadId }
+  })
+
+  if (prev.leadId !== leadId) {
+    const toName = leadId
+      ? ((
+          await prisma.crewMember.findUnique({
+            where: { id: leadId },
+            select: { fullName: true }
+          })
+        )?.fullName ?? null)
+      : null
+    await logActivity(
+      member.companyId,
+      member.id,
+      'task.lead_changed',
+      'task',
+      taskId,
+      {
+        from: prev.leadId,
+        fromName: prev.lead?.fullName ?? null,
+        to: leadId,
         toName
       }
     )
@@ -1321,6 +1572,125 @@ export async function removeProjectExternalRef(refId: string) {
 
   revalidatePath('/dashboard')
   return { ok: true as const }
+}
+
+// ─── Handoff (drag-to-Done inline form) ──────────────────────────────────
+//
+// Pre-3a, attempting to move a task to Done with an incomplete handoff
+// would bounce the user to the task edit page with a toast. That broke
+// the in-dashboard flow. These two actions let the dashboard render the
+// handoff form inline in a Sheet, then commit + move to Done in one
+// round-trip on submit.
+
+import { HANDOFF_FIELDS } from '@/lib/handoff'
+
+const HandoffFieldsInput = z
+  .object({
+    whatItIs: z.string().trim().max(2000).optional().nullable(),
+    currentStatus: z.string().trim().max(2000).optional().nullable(),
+    doneSoFar: z.string().trim().max(2000).optional().nullable(),
+    stillLeft: z.string().trim().max(2000).optional().nullable(),
+    fileLinks: z.string().trim().max(2000).optional().nullable(),
+    gotchas: z.string().trim().max(2000).optional().nullable(),
+    whoToAsk: z.string().trim().max(2000).optional().nullable()
+  })
+  .partial()
+
+const SubmitHandoffInput = z.object({
+  taskId: z.string().uuid(),
+  fields: HandoffFieldsInput
+})
+
+export async function fetchTaskHandoff(taskId: string) {
+  const parsed = z.string().uuid().safeParse(taskId)
+  if (!parsed.success) return { error: 'Invalid task id.' }
+  const member = await getCurrentCrewMember()
+  if (!member) return { error: 'Not signed in.' }
+
+  const handoff = await prisma.handoff.findFirst({
+    where: { taskId: parsed.data, companyId: member.companyId },
+    select: {
+      whatItIs: true,
+      currentStatus: true,
+      doneSoFar: true,
+      stillLeft: true,
+      fileLinks: true,
+      gotchas: true,
+      whoToAsk: true
+    }
+  })
+
+  // null means no handoff row yet; the sheet renders empty fields.
+  return { handoff }
+}
+
+export async function submitHandoffAndMoveDone(
+  input: z.input<typeof SubmitHandoffInput>
+): Promise<
+  | { error: string; missing?: string[] }
+  | { ok: true; statusResult: StatusChangeResult }
+> {
+  const parsed = SubmitHandoffInput.safeParse(input)
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
+  }
+  const member = await getCurrentCrewMember()
+  if (!member) return { error: 'Not signed in.' }
+
+  const task = await prisma.task.findFirst({
+    where: { id: parsed.data.taskId, companyId: member.companyId },
+    select: { id: true }
+  })
+  if (!task) return { error: 'Task not found.' }
+
+  // Server-side completeness check. If a field is missing we don't even
+  // hit the DB — the sheet renders the missing list inline.
+  const missing: string[] = []
+  for (const field of HANDOFF_FIELDS) {
+    const v = parsed.data.fields[field]
+    if (!v || v.trim().length === 0) missing.push(field)
+  }
+  if (missing.length > 0) {
+    return {
+      error: `${missing.length} field${missing.length === 1 ? '' : 's'} still missing.`,
+      missing
+    }
+  }
+
+  // Upsert the handoff row. If it doesn't exist yet, create with
+  // fromMemberId = current member and status ready_for_review (the row
+  // moving to Done implies the handoff is being shipped).
+  await prisma.handoff.upsert({
+    where: { taskId: task.id },
+    create: {
+      companyId: member.companyId,
+      taskId: task.id,
+      fromMemberId: member.id,
+      status: 'ready_for_review',
+      whatItIs: parsed.data.fields.whatItIs ?? null,
+      currentStatus: parsed.data.fields.currentStatus ?? null,
+      doneSoFar: parsed.data.fields.doneSoFar ?? null,
+      stillLeft: parsed.data.fields.stillLeft ?? null,
+      fileLinks: parsed.data.fields.fileLinks ?? null,
+      gotchas: parsed.data.fields.gotchas ?? null,
+      whoToAsk: parsed.data.fields.whoToAsk ?? null
+    },
+    update: {
+      whatItIs: parsed.data.fields.whatItIs ?? null,
+      currentStatus: parsed.data.fields.currentStatus ?? null,
+      doneSoFar: parsed.data.fields.doneSoFar ?? null,
+      stillLeft: parsed.data.fields.stillLeft ?? null,
+      fileLinks: parsed.data.fields.fileLinks ?? null,
+      gotchas: parsed.data.fields.gotchas ?? null,
+      whoToAsk: parsed.data.fields.whoToAsk ?? null
+    }
+  })
+
+  // Now run the same gate logic as a regular Done move. The gate should
+  // pass since we just wrote complete fields, but we route through the
+  // shared path for activity logging + consistency.
+  const statusResult = await updateDashboardTaskStatus(task.id, 'done')
+  return { ok: true, statusResult }
 }
 
 // ─── Activity Log (internal) ──────────────────────────────────────────────

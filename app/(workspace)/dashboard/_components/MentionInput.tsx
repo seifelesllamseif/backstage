@@ -28,6 +28,37 @@ function buildMentionTargets(team: BoardAssignee[]): MentionTarget[] {
   ]
 }
 
+// Color palette assigned deterministically by target id, so the same
+// person reads in the same color every time they're mentioned in the
+// same task and two different people mentioned next to each other are
+// visually distinct.
+const MENTION_PALETTE: { bg: string; text: string }[] = [
+  { bg: 'bg-teal-500/15', text: 'text-teal-700 dark:text-teal-300' },
+  { bg: 'bg-violet-500/15', text: 'text-violet-700 dark:text-violet-300' },
+  { bg: 'bg-amber-500/20', text: 'text-amber-700 dark:text-amber-300' },
+  { bg: 'bg-sky-500/15', text: 'text-sky-700 dark:text-sky-300' },
+  { bg: 'bg-emerald-500/15', text: 'text-emerald-700 dark:text-emerald-300' },
+  { bg: 'bg-rose-500/15', text: 'text-rose-700 dark:text-rose-300' },
+  { bg: 'bg-fuchsia-500/15', text: 'text-fuchsia-700 dark:text-fuchsia-300' }
+]
+
+function hashString(s: string): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+  return Math.abs(h)
+}
+
+function mentionColor(id: string): { bg: string; text: string } {
+  return MENTION_PALETTE[hashString(id) % MENTION_PALETTE.length]
+}
+
+// Mentions render as inline chips using the classic "highlight overlay"
+// trick: a transparent textarea sits on top of a div that mirrors the
+// same text but with @mentions wrapped in styled spans. The textarea
+// drives the caret; the div drives the visuals. The two elements must
+// share font, padding, line-height, and white-space rules so the chip
+// positions line up exactly with the underlying typed text.
+
 export default function MentionInput({
   onSubmit,
   placeholder = 'Leave a comment… type @ to mention'
@@ -42,7 +73,9 @@ export default function MentionInput({
     start: -1
   })
   const [highlight, setHighlight] = useState(0)
+  const [focused, setFocused] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const overlayRef = useRef<HTMLDivElement>(null)
 
   const matches = useMemo(() => {
     if (!trigger.active) return []
@@ -73,6 +106,15 @@ export default function MentionInput({
     detectMention(e.target.value, e.target.selectionStart)
   }
 
+  const handleScroll = () => {
+    // Keep overlay scroll in sync with textarea so chips stay aligned
+    // when the user types past the visible window.
+    if (overlayRef.current && inputRef.current) {
+      overlayRef.current.scrollTop = inputRef.current.scrollTop
+      overlayRef.current.scrollLeft = inputRef.current.scrollLeft
+    }
+  }
+
   const handleSelectMention = (target: MentionTarget) => {
     if (trigger.start < 0) return
     const before = value.slice(0, trigger.start)
@@ -100,84 +142,187 @@ export default function MentionInput({
     setValue('')
   }
 
-  return (
-    <div className="relative flex items-end gap-2">
-      <textarea
-        ref={inputRef}
-        rows={1}
-        value={value}
-        onChange={handleChange}
-        onKeyDown={(e) => {
-          if (trigger.active && matches.length > 0) {
-            if (e.key === 'ArrowDown') {
-              e.preventDefault()
-              setHighlight((h) => (h + 1) % matches.length)
-              return
-            }
-            if (e.key === 'ArrowUp') {
-              e.preventDefault()
-              setHighlight((h) => (h - 1 + matches.length) % matches.length)
-              return
-            }
-            if (e.key === 'Enter' || e.key === 'Tab') {
-              e.preventDefault()
-              handleSelectMention(matches[highlight])
-              return
-            }
-            if (e.key === 'Escape') {
-              setTrigger({ active: false, query: '', start: -1 })
-              return
-            }
-          }
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault()
-            submit()
-          }
-        }}
-        placeholder={placeholder}
-        className={`flex-1 resize-none rounded-md border px-3 py-2 text-xs transition focus:border-zinc-400 focus:outline-none dark:focus:border-white/30 ${t.input}`}
-      />
-      <button
-        onClick={submit}
-        className={`flex h-9 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs transition ${t.accent}`}
-      >
-        <Send className="size-3.5" />
-        Send
-      </button>
+  // Build a list of "tokens" (plain text or mention chunks) for the overlay.
+  // We greedily match the longest known mention label starting at each '@',
+  // so "@Karim Saleh" wins over "@Karim".
+  const targetsByFirstCharLower = useMemo(() => {
+    // Sort longer labels first so longest-match-wins on each candidate.
+    const sorted = [...targets].sort(
+      (a, b) => b.label.length - a.label.length
+    )
+    return sorted
+  }, [targets])
 
-      {trigger.active && matches.length > 0 && (
+  const overlayTokens = useMemo(() => {
+    const tokens: { text: string; targetId: string | null }[] = []
+    let i = 0
+    let buffer = ''
+    while (i < value.length) {
+      const ch = value[i]
+      if (ch === '@') {
+        // Find the longest matching label at this position.
+        let matched: MentionTarget | null = null
+        for (const target of targetsByFirstCharLower) {
+          const candidate = value.slice(i + 1, i + 1 + target.label.length)
+          if (candidate.toLowerCase() === target.label.toLowerCase()) {
+            matched = target
+            break
+          }
+        }
+        if (matched) {
+          if (buffer) {
+            tokens.push({ text: buffer, targetId: null })
+            buffer = ''
+          }
+          tokens.push({
+            text: `@${value.slice(i + 1, i + 1 + matched.label.length)}`,
+            targetId: matched.id
+          })
+          i += 1 + matched.label.length
+          continue
+        }
+      }
+      buffer += ch
+      i++
+    }
+    if (buffer) tokens.push({ text: buffer, targetId: null })
+    return tokens
+  }, [value, targetsByFirstCharLower])
+
+  const sharedTextClasses =
+    'block px-3 py-2 text-xs leading-relaxed font-[inherit]'
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        className={`relative flex min-h-[64px] flex-col rounded-md border transition ${
+          focused
+            ? 'border-zinc-400 dark:border-white/30'
+            : t.input.split(' ').filter((c) => c.startsWith('border-')).join(' ')
+        } ${t.input.split(' ').filter((c) => !c.startsWith('border-') && !c.startsWith('placeholder')).join(' ')}`}
+      >
         <div
-          className={`absolute bottom-full left-0 z-30 mb-1 w-64 rounded-md border py-1 shadow-xl ${t.detail}`}
+          ref={overlayRef}
+          aria-hidden="true"
+          className={`${sharedTextClasses} pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words`}
         >
-          {matches.map((m, i) => (
-            <button
-              key={m.id}
-              onMouseEnter={() => setHighlight(i)}
-              onMouseDown={(e) => {
-                e.preventDefault()
-                handleSelectMention(m)
-              }}
-              className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs ${
-                highlight === i ? t.btnActive : t.tab
-              }`}
-            >
-              {m.member ? (
-                <Avatar user={m.member} size={20} />
-              ) : (
-                <span
-                  className={`flex size-5 items-center justify-center rounded-full text-[9px] font-semibold ${t.surfaceMuted}`}
-                >
-                  @
+          {overlayTokens.length === 0 && !value ? (
+            <span className={`${t.textSubtle}`}>{placeholder}</span>
+          ) : (
+            // Chips must NOT add horizontal padding or change font-weight,
+            // otherwise the overlay drifts horizontally from the textarea
+            // and the caret no longer lines up with what the user sees.
+            // Color comes from a tinted background + text color only.
+            overlayTokens.map((tok, i) => {
+              if (!tok.targetId) {
+                return <span key={i}>{tok.text}</span>
+              }
+              const c = mentionColor(tok.targetId)
+              return (
+                <span key={i} className={`rounded-sm ${c.bg} ${c.text}`}>
+                  {tok.text}
                 </span>
-              )}
-              <span className="flex-1 truncate">{m.label}</span>
-              {!m.member && (
-                <span className={`text-[10px] ${t.textSubtle}`}>everyone</span>
-              )}
-            </button>
-          ))}
+              )
+            })
+          )}
+          {/* Trailing space so the overlay matches the textarea's vertical
+              extent even when the last char is a newline. */}
+          {'​'}
         </div>
-      )}
+        <textarea
+          ref={inputRef}
+          rows={3}
+          value={value}
+          onChange={handleChange}
+          onScroll={handleScroll}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onKeyDown={(e) => {
+            if (trigger.active && matches.length > 0) {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                setHighlight((h) => (h + 1) % matches.length)
+                return
+              }
+              if (e.key === 'ArrowUp') {
+                e.preventDefault()
+                setHighlight(
+                  (h) => (h - 1 + matches.length) % matches.length
+                )
+                return
+              }
+              if (e.key === 'Enter' || e.key === 'Tab') {
+                e.preventDefault()
+                handleSelectMention(matches[highlight])
+                return
+              }
+              if (e.key === 'Escape') {
+                setTrigger({ active: false, query: '', start: -1 })
+                return
+              }
+            }
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault()
+              submit()
+            }
+          }}
+          placeholder=""
+          spellCheck={true}
+          className={`${sharedTextClasses} relative min-h-[64px] w-full resize-none bg-transparent text-transparent caret-zinc-900 outline-none dark:caret-white`}
+        />
+
+        {trigger.active && matches.length > 0 && (
+          <div
+            className={`absolute bottom-full left-0 z-30 mb-1 w-64 rounded-md border py-1 shadow-xl ${t.detail}`}
+          >
+            {matches.map((m, i) => (
+              <button
+                key={m.id}
+                onMouseEnter={() => setHighlight(i)}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  handleSelectMention(m)
+                }}
+                className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs ${
+                  highlight === i ? t.btnActive : t.tab
+                }`}
+              >
+                {m.member ? (
+                  <Avatar user={m.member} size={20} />
+                ) : (
+                  <span
+                    className={`flex size-5 items-center justify-center rounded-full text-[9px] font-semibold ${t.surfaceMuted}`}
+                  >
+                    @
+                  </span>
+                )}
+                <span className="flex-1 truncate">{m.label}</span>
+                {!m.member && (
+                  <span className={`text-[10px] ${t.textSubtle}`}>
+                    everyone
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <span className={`text-[10px] ${t.textSubtle}`}>
+          Type <kbd className="font-mono">@</kbd> to mention.
+          <kbd className="ml-1 font-mono">⌘</kbd>
+          <kbd className="font-mono">↵</kbd> to send.
+        </span>
+        <button
+          onClick={submit}
+          disabled={!value.trim()}
+          className={`flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs transition disabled:opacity-50 ${t.accent}`}
+        >
+          <Send className="size-3.5" />
+          Send
+        </button>
+      </div>
     </div>
   )
 }
@@ -185,19 +330,27 @@ export default function MentionInput({
 export function renderMentionedBody(body: string, team: BoardAssignee[]) {
   const pattern = /(@[A-Za-z][A-Za-zÇŞĞıİİöÖüÜğçşı.\s]*[A-Za-zÇŞĞıİİöÖüÜğçş])/g
   const targets = buildMentionTargets(team)
-  const targetLabels = new Set(targets.map((m) => m.label.toLowerCase()))
+  const byLabel = new Map(
+    targets.map((target) => [target.label.toLowerCase(), target])
+  )
   return body.split(pattern).map((chunk, i) => {
     if (!chunk.startsWith('@')) return <span key={i}>{chunk}</span>
     const label = chunk.slice(1).trim()
-    const exact =
-      targetLabels.has(label.toLowerCase()) ||
-      targets.some((m) => label.toLowerCase().startsWith(m.label.toLowerCase()))
-    if (!exact) return <span key={i}>{chunk}</span>
+    // Match longest prefix so "@Karim Saleh extra words" still highlights
+    // the name. Try exact first, then prefix.
+    let matched = byLabel.get(label.toLowerCase()) ?? null
+    if (!matched) {
+      matched =
+        targets
+          .filter((target) =>
+            label.toLowerCase().startsWith(target.label.toLowerCase())
+          )
+          .sort((a, b) => b.label.length - a.label.length)[0] ?? null
+    }
+    if (!matched) return <span key={i}>{chunk}</span>
+    const c = mentionColor(matched.id)
     return (
-      <span
-        key={i}
-        className="inline-flex items-center rounded bg-teal-500/15 px-1 py-0.5 font-medium text-teal-500"
-      >
+      <span key={i} className={`rounded-sm ${c.bg} ${c.text}`}>
         {chunk}
       </span>
     )

@@ -66,7 +66,7 @@ export default function BoardColumn({
         label: statusId ? `Filter by ${title}` : 'Filter by this group',
         icon: <Filter className="size-3.5" />,
         disabled: !statusId,
-        onSelect: () => statusId && a.setStatusFilter(statusId)
+        onSelect: () => statusId && a.toggleStatusFilter(statusId)
       },
       { id: 'sep', label: '', separator: true },
       {
@@ -85,7 +85,7 @@ export default function BoardColumn({
       ref={setNodeRef}
       onContextMenu={columnMenu}
       className={`flex flex-col w-[260px] shrink-0 rounded-xl border backdrop-blur-sm transition ${t.column} ${
-        isOver ? 'ring-2 ring-red-500/30 ring-offset-0' : ''
+        isOver ? 'ring-2 ring-teal-500/30 ring-offset-0' : ''
       }`}
     >
       <div
@@ -140,7 +140,7 @@ export default function BoardColumn({
         </SortableContext>
         {tasks.length === 0 && isOver && (
           <div
-            className="rounded-lg border-2 border-dashed border-red-400/60 bg-red-500/5 px-3 py-2.5 min-h-[78px]"
+            className="rounded-lg border-2 border-dashed border-teal-400/60 bg-teal-500/5 px-3 py-2.5 min-h-[78px]"
             aria-hidden
           />
         )}

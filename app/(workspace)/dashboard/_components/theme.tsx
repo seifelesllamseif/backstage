@@ -286,7 +286,7 @@ export const TOKENS = {
     textSubtle: 'text-zinc-400',
     textFaint: 'text-zinc-300',
     chip: 'border-zinc-200 text-zinc-500 bg-white',
-    chipActive: 'bg-zinc-900 text-white',
+    chipActive: 'bg-teal-900 text-white',
     btn: 'border-zinc-200 text-zinc-700 hover:bg-zinc-100',
     btnActive: 'bg-zinc-100 text-zinc-900',
     accent: 'bg-teal-500 text-white hover:bg-teal-600',

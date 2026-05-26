@@ -7,7 +7,7 @@ import { EXPORT_VERSION } from './types'
 
 function cycleHeader(cycle: Cycle): string[] {
   const lines: string[] = []
-  lines.push(`# Cycle: ${cycle.name}`)
+  lines.push(`# Sprint: ${cycle.name}`)
   lines.push('')
   lines.push(`- **Number:** ${cycle.number}`)
   lines.push(`- **Status:** ${cycle.status}`)

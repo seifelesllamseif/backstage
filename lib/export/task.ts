@@ -45,7 +45,7 @@ export function taskToMarkdown(
     lines.push(`- **Project:** ${project.name}${repo}`)
   }
   if (cycle) {
-    lines.push(`- **Cycle:** ${cycle.name} (${cycle.status})`)
+    lines.push(`- **Sprint:** ${cycle.name} (${cycle.status})`)
   }
   if (task.due) lines.push(`- **Due:** ${task.due}`)
   if (task.tags && task.tags.length > 0) {

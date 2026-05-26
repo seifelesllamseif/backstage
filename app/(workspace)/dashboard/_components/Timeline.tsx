@@ -11,7 +11,14 @@ interface TimelineProps {
   onSelect: (id: string) => void
 }
 
-const TODAY = new Date('2026-05-22')
+// Computed once on render, not pinned to a literal. The pinned date was
+// seeded against the demo data window and stayed in place after slice 1.
+// Anchoring to `new Date()` keeps the red "today" line on the actual
+// current day for the user's clock.
+function todayLocal(): Date {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate())
+}
 
 function parseDue(s: string | undefined): Date | null {
   if (!s || s === '—') return null
@@ -41,11 +48,17 @@ const TOTAL_DAYS = 24
 export default function Timeline({ tasks, onSelect }: TimelineProps) {
   const { t, mode } = useDashTheme()
 
+  // Today is anchored at mount. If the user keeps the tab open across
+  // midnight the line stays on the prior day; that's the same tradeoff as
+  // the rest of the app (it only matters for someone who literally never
+  // closes the browser).
+  const today = useMemo(() => todayLocal(), [])
+
   const start = useMemo(() => {
-    const d = new Date(TODAY)
+    const d = new Date(today)
     d.setDate(d.getDate() - 4)
     return d
-  }, [])
+  }, [today])
 
   const days = useMemo(() => {
     return Array.from({ length: TOTAL_DAYS }, (_, i) => {
@@ -78,7 +91,7 @@ export default function Timeline({ tasks, onSelect }: TimelineProps) {
       .filter((r) => r.span > 0)
   }, [tasks, start])
 
-  const todayOffset = Math.floor((TODAY.getTime() - start.getTime()) / 86400000)
+  const todayOffset = Math.floor((today.getTime() - start.getTime()) / 86400000)
 
   const trackBg = mode === 'light' ? 'bg-zinc-50' : 'bg-white/[0.02]'
   const gridLine = mode === 'light' ? 'border-zinc-100' : 'border-white/5'
@@ -179,7 +192,7 @@ export default function Timeline({ tasks, onSelect }: TimelineProps) {
                   </span>
                 </button>
                 <div
-                  className="absolute top-0 bottom-0 w-px bg-red-500"
+                  className="absolute top-0 bottom-0 w-px bg-teal-500"
                   style={{ left: `${(todayOffset / TOTAL_DAYS) * 100}%` }}
                 />
               </div>

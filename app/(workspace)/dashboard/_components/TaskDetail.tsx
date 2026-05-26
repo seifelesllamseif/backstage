@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
+  Briefcase,
   Check,
   ExternalLink,
   FileText,
@@ -9,6 +10,7 @@ import {
   GitCommit,
   GitPullRequest,
   Link as LinkIcon,
+  Loader2,
   MessageCircleQuestion,
   MessageSquare,
   Paperclip,
@@ -17,11 +19,20 @@ import {
   Trash2,
   X
 } from 'lucide-react'
-import {
-  defaultExternalRefLabel,
-  parseExternalRef
-} from '@/lib/externalRef'
+import { defaultExternalRefLabel, parseExternalRef } from '@/lib/externalRef'
 import type { TaskExternalRef, TaskExternalRefKind } from './boardData'
+import { fetchTaskHandoff } from '../actions'
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle
+} from '@/components/ui/sheet'
+import { VisuallyHidden } from 'radix-ui'
+import {
+  HANDOFF_FIELDS,
+  HANDOFF_FIELD_LABELS,
+  type HandoffFieldValues
+} from '@/lib/handoff'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,10 +47,18 @@ import {
 import MentionInput, { renderMentionedBody } from './MentionInput'
 import { BoardTask } from './boardData'
 import { useTeam } from './TeamContext'
-import { STATUS_BY_ID, STATUSES, TaskStatus, TaskPriority, PRIORITY_LABEL } from './status'
+import {
+  STATUS_BY_ID,
+  STATUSES,
+  TaskStatus,
+  TaskPriority,
+  PRIORITY_LABEL
+} from './status'
 import StatusIcon from './StatusIcon'
 import PriorityIcon from './PriorityIcon'
 import RelationIcon from './RelationIcon'
+import RelationPicker from './RelationPicker'
+import type { TaskRelation } from './boardData'
 import Avatar from './Avatar'
 import { RELATION_LABEL } from './status'
 import { useDashTheme } from './theme'
@@ -61,7 +80,13 @@ export interface TaskComment {
 
 export interface TaskActivity {
   id: string
-  kind: 'status' | 'comment' | 'attachment' | 'created' | 'priority' | 'assignee'
+  kind:
+    | 'status'
+    | 'comment'
+    | 'attachment'
+    | 'created'
+    | 'priority'
+    | 'assignee'
   text: string
   at: string
   atRaw: string
@@ -78,11 +103,22 @@ interface TaskDetailProps {
   onChangeStatus: (id: string, s: TaskStatus) => void
   onChangePriority: (id: string, p: TaskPriority) => void
   onChangeAssignee: (id: string, assigneeId: string | null) => void
+  onChangeLead: (id: string, leadId: string | null) => void
   onAddComment: (id: string, body: string, mentions?: string[]) => void
   onEditComment: (commentId: string, body: string) => void
   onDeleteComment: (commentId: string) => void
   onAddExternalRef: (taskId: string, url: string) => void
   onRemoveExternalRef: (taskId: string, refId: string) => void
+  // Pool of tasks the relation picker autocompletes against. Already
+  // scoped by the parent to the member's visibility, so we don't filter
+  // again here.
+  candidateTasks: Pick<BoardTask, 'id' | 'ref' | 'title' | 'status'>[]
+  onAddRelation: (taskId: string, rel: TaskRelation) => void
+  onRemoveRelation: (taskId: string, rel: TaskRelation) => void
+  // Opens the handoff sheet in editable mode for this task. The detail
+  // panel uses this both for the "Edit handoff" button on a completed
+  // task and as an entry point before the task is Done.
+  onOpenHandoff: (task: BoardTask) => void
   // Optional copy-button slot. DashboardShell owns the export context and
   // injects a CopyButton here so the task header gets a Copy task action
   // without TaskDetail having to know about lib/export.
@@ -102,11 +138,16 @@ export default function TaskDetail({
   onChangeStatus,
   onChangePriority,
   onChangeAssignee,
+  onChangeLead,
   onAddComment,
   onEditComment,
   onDeleteComment,
   onAddExternalRef,
   onRemoveExternalRef,
+  candidateTasks,
+  onAddRelation,
+  onRemoveRelation,
+  onOpenHandoff,
   copySlot
 }: TaskDetailProps) {
   const { t } = useDashTheme()
@@ -114,6 +155,8 @@ export default function TaskDetail({
   const [statusOpen, setStatusOpen] = useState(false)
   const [prioOpen, setPrioOpen] = useState(false)
   const [assigneeOpen, setAssigneeOpen] = useState(false)
+  const [leadOpen, setLeadOpen] = useState(false)
+  const [askLeadOpen, setAskLeadOpen] = useState(false)
   // Comment currently being edited (id) + its draft body. Only one
   // comment edits at a time in the drawer.
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -126,18 +169,34 @@ export default function TaskDetail({
   // trap) is provided by the parent <Sheet> in DashboardShell. This
   // component is content-only.
   return (
-    <div className={`flex flex-col h-full ${t.detail}`}>
-      <div className={`flex items-center justify-between gap-3 px-4 h-12 border-b ${t.border}`}>
-        <span className={`text-[10px] uppercase tracking-[0.22em] ${t.textSubtle}`}>
-          {task.ref}
-        </span>
-        {copySlot}
+    <div className={`flex h-full flex-col ${t.detail}`}>
+      <div
+        className={`flex h-12 shrink-0 items-center justify-between gap-2 border-b px-4 ${t.border}`}
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className={`flex size-7 items-center justify-center rounded-md transition ${t.btn}`}
+          >
+            <X className="size-3.5" />
+          </button>
+          <span
+            className={`rounded border px-1.5 py-0.5 text-[10px] tracking-[0.22em] tabular-nums uppercase ${t.metaTag}`}
+          >
+            {task.ref}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">{copySlot}</div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-5">
-        <h2 className={`text-lg font-medium leading-snug ${t.text}`}>{task.title}</h2>
+      <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-5">
+        <h2 className={`text-xl leading-snug font-medium ${t.text}`}>
+          {task.title}
+        </h2>
 
-        <div className="grid grid-cols-[88px_1fr] gap-y-2.5 text-xs items-center">
+        <div className="grid grid-cols-[88px_1fr] items-center gap-y-2.5 text-xs">
           <FieldLabel>Status</FieldLabel>
           <Popover
             open={statusOpen}
@@ -156,7 +215,7 @@ export default function TaskDetail({
                   onChangeStatus(task.id, s.id)
                   setStatusOpen(false)
                 }}
-                className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-xs rounded ${
+                className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-xs ${
                   task.status === s.id ? t.btnActive : t.tab
                 }`}
               >
@@ -184,7 +243,7 @@ export default function TaskDetail({
                   onChangePriority(task.id, p)
                   setPrioOpen(false)
                 }}
-                className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-xs rounded ${
+                className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-xs ${
                   task.priority === p ? t.btnActive : t.tab
                 }`}
               >
@@ -214,11 +273,11 @@ export default function TaskDetail({
                 onChangeAssignee(task.id, null)
                 setAssigneeOpen(false)
               }}
-              className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-xs rounded ${
+              className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-xs ${
                 !task.assignee ? t.btnActive : t.tab
               }`}
             >
-              <span className="size-5 rounded-full bg-zinc-200 dark:bg-white/10 text-[9px] font-semibold flex items-center justify-center">
+              <span className="flex size-5 items-center justify-center rounded-full bg-zinc-200 text-[9px] font-semibold dark:bg-white/10">
                 —
               </span>
               Unassigned
@@ -230,7 +289,7 @@ export default function TaskDetail({
                   onChangeAssignee(task.id, m.id)
                   setAssigneeOpen(false)
                 }}
-                className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-xs rounded ${
+                className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-xs ${
                   task.assignee?.id === m.id ? t.btnActive : t.tab
                 }`}
               >
@@ -240,6 +299,65 @@ export default function TaskDetail({
             ))}
           </Popover>
 
+          <FieldLabel>Lead</FieldLabel>
+          <div className="flex items-center gap-2">
+            <Popover
+              open={leadOpen}
+              onOpenChange={setLeadOpen}
+              trigger={
+                task.lead ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Avatar user={task.lead} size={20} />
+                    {task.lead.name}
+                  </span>
+                ) : (
+                  <span className={t.textSubtle}>No lead</span>
+                )
+              }
+            >
+              <button
+                onClick={() => {
+                  onChangeLead(task.id, null)
+                  setLeadOpen(false)
+                }}
+                className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-xs ${
+                  !task.lead ? t.btnActive : t.tab
+                }`}
+              >
+                <span className="flex size-5 items-center justify-center rounded-full bg-zinc-200 text-[9px] font-semibold dark:bg-white/10">
+                  —
+                </span>
+                No lead
+              </button>
+              {team.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => {
+                    onChangeLead(task.id, m.id)
+                    setLeadOpen(false)
+                  }}
+                  className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-xs ${
+                    task.lead?.id === m.id ? t.btnActive : t.tab
+                  }`}
+                >
+                  <Avatar user={m} size={20} />
+                  {m.name}
+                </button>
+              ))}
+            </Popover>
+            {task.lead && task.lead.id !== currentUserId && (
+              <button
+                type="button"
+                onClick={() => setAskLeadOpen(true)}
+                className={`flex h-6 items-center gap-1 rounded-md border px-2 text-[10px] transition ${t.accent}`}
+                title={`Ask ${task.lead.name} for help`}
+              >
+                <MessageSquare className="size-3" />
+                Ask lead
+              </button>
+            )}
+          </div>
+
           <FieldLabel>Due</FieldLabel>
           <span className={t.text}>{task.due ?? '—'}</span>
 
@@ -248,43 +366,47 @@ export default function TaskDetail({
             {task.tags?.map((tag) => (
               <span
                 key={tag}
-                className={`border rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${t.metaTag}`}
+                className={`rounded border px-1.5 py-0.5 text-[10px] tracking-wider uppercase ${t.metaTag}`}
               >
                 {tag}
               </span>
             )) ?? <span className={t.textSubtle}>—</span>}
           </span>
 
-          {task.relations && task.relations.length > 0 && (
-            <>
-              <FieldLabel>Relations</FieldLabel>
-              <span className="flex flex-wrap gap-1.5">
-                {task.relations.map((r, i) => (
-                  <span
-                    key={`${r.kind}-${r.ref}-${i}`}
-                    className={`inline-flex items-center gap-1.5 border rounded-md px-2 py-1 text-[11px] ${t.metaTag}`}
-                  >
-                    <RelationIcon kind={r.kind} className="size-3.5" />
-                    <span className={t.textMuted}>
-                      {RELATION_LABEL[r.kind]}
-                    </span>
-                    <span className={`uppercase tracking-wider text-[10px] ${t.text}`}>
-                      {r.ref}
-                    </span>
-                  </span>
-                ))}
-              </span>
-            </>
-          )}
+          <FieldLabel>Relations</FieldLabel>
+          <RelationPicker
+            relations={task.relations ?? []}
+            candidates={candidateTasks}
+            selfRef={task.ref}
+            onAdd={(rel) => onAddRelation(task.id, rel)}
+            onRemove={(rel) => onRemoveRelation(task.id, rel)}
+            variant="compact"
+          />
         </div>
 
+        <LinksSection
+          task={task}
+          refs={externalRefs}
+          onAdd={(url) => onAddExternalRef(task.id, url)}
+          onRemove={(refId) => onRemoveExternalRef(task.id, refId)}
+        />
+
+        <HandoffReadView
+          taskId={task.id}
+          onOpenEditor={() => onOpenHandoff(task)}
+        />
+
         <div>
-          <div className={`text-[10px] uppercase tracking-[0.22em] mb-2 ${t.textMuted}`}>
+          <div
+            className={`mb-2 text-[10px] tracking-[0.22em] uppercase ${t.textMuted}`}
+          >
             Comments ({comments.length})
           </div>
           <div className="flex flex-col gap-2">
             {comments.length === 0 && (
-              <p className={`text-xs italic ${t.textSubtle}`}>No comments yet.</p>
+              <p className={`text-xs italic ${t.textSubtle}`}>
+                No comments yet.
+              </p>
             )}
             {comments.map((c) => {
               const canManage =
@@ -295,15 +417,15 @@ export default function TaskDetail({
                   key={c.id}
                   className={`group rounded-md border px-3 py-2 text-xs ${t.border} ${t.surfaceMuted}`}
                 >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <div className="flex min-w-0 items-center gap-1.5">
                       <span
-                        className={`shrink-0 size-5 rounded-full flex items-center justify-center text-[9px] font-semibold ${t.surface} border ${t.border} ${t.text}`}
+                        className={`flex size-5 shrink-0 items-center justify-center rounded-full text-[9px] font-semibold ${t.surface} border ${t.border} ${t.text}`}
                         aria-hidden
                       >
                         {c.authorInitials}
                       </span>
-                      <span className={`font-medium truncate ${t.text}`}>
+                      <span className={`truncate font-medium ${t.text}`}>
                         {c.author}
                       </span>
                       {c.editedAt && (
@@ -313,7 +435,9 @@ export default function TaskDetail({
                       )}
                     </div>
                     <div className="flex items-center gap-1">
-                      <span className={`text-[10px] ${t.textSubtle}`}>{c.at}</span>
+                      <span className={`text-[10px] ${t.textSubtle}`}>
+                        {c.at}
+                      </span>
                       {canManage && !isEditing && (
                         <>
                           <button
@@ -323,7 +447,7 @@ export default function TaskDetail({
                               setEditDraft(c.body)
                             }}
                             aria-label="Edit comment"
-                            className={`size-5 rounded opacity-0 group-hover:opacity-100 transition flex items-center justify-center ${t.btn}`}
+                            className={`flex size-5 items-center justify-center rounded opacity-0 transition group-hover:opacity-100 ${t.btn}`}
                           >
                             <Pencil className="size-3" />
                           </button>
@@ -332,14 +456,16 @@ export default function TaskDetail({
                               <button
                                 type="button"
                                 aria-label="Delete comment"
-                                className={`size-5 rounded opacity-0 group-hover:opacity-100 transition flex items-center justify-center ${t.btn}`}
+                                className={`flex size-5 items-center justify-center rounded opacity-0 transition group-hover:opacity-100 ${t.btn}`}
                               >
                                 <Trash2 className="size-3" />
                               </button>
                             </AlertDialogTrigger>
                             <AlertDialogContent>
                               <AlertDialogHeader>
-                                <AlertDialogTitle>Delete comment?</AlertDialogTitle>
+                                <AlertDialogTitle>
+                                  Delete comment?
+                                </AlertDialogTitle>
                                 <AlertDialogDescription>
                                   This comment will be permanently removed.
                                   Activity log keeps the deletion event.
@@ -364,18 +490,21 @@ export default function TaskDetail({
                       <textarea
                         value={editDraft}
                         onChange={(e) => setEditDraft(e.target.value)}
-                        rows={Math.min(6, Math.max(2, editDraft.split('\n').length))}
+                        rows={Math.min(
+                          6,
+                          Math.max(2, editDraft.split('\n').length)
+                        )}
                         autoFocus
                         className={`w-full resize-y rounded border px-2 py-1.5 text-xs ${t.input}`}
                       />
-                      <div className="flex items-center gap-1.5 justify-end">
+                      <div className="flex items-center justify-end gap-1.5">
                         <button
                           type="button"
                           onClick={() => {
                             setEditingId(null)
                             setEditDraft('')
                           }}
-                          className={`h-6 px-2 rounded text-[11px] ${t.btn}`}
+                          className={`h-6 rounded px-2 text-[11px] ${t.btn}`}
                         >
                           Cancel
                         </button>
@@ -390,7 +519,7 @@ export default function TaskDetail({
                             onEditComment(c.id, trimmed)
                             setEditingId(null)
                           }}
-                          className={`h-6 px-2 rounded text-[11px] inline-flex items-center gap-1 ${t.accent}`}
+                          className={`inline-flex h-6 items-center gap-1 rounded px-2 text-[11px] ${t.accent}`}
                         >
                           <Check className="size-3" />
                           Save
@@ -398,7 +527,9 @@ export default function TaskDetail({
                       </div>
                     </div>
                   ) : (
-                    <p className={`${t.textMuted} leading-snug whitespace-pre-wrap`}>
+                    <p
+                      className={`${t.textMuted} leading-snug whitespace-pre-wrap`}
+                    >
                       {renderMentionedBody(c.body, team)}
                     </p>
                   )}
@@ -408,15 +539,10 @@ export default function TaskDetail({
           </div>
         </div>
 
-        <LinksSection
-          task={task}
-          refs={externalRefs}
-          onAdd={(url) => onAddExternalRef(task.id, url)}
-          onRemove={(refId) => onRemoveExternalRef(task.id, refId)}
-        />
-
         <div className="flex flex-col gap-2 text-xs">
-          <div className={`text-[10px] uppercase tracking-[0.22em] ${t.textMuted}`}>
+          <div
+            className={`text-[10px] tracking-[0.22em] uppercase ${t.textMuted}`}
+          >
             Activity
           </div>
           {activity.length === 0 && (
@@ -430,13 +556,18 @@ export default function TaskDetail({
                   ? Paperclip
                   : GitBranch
             return (
-              <div key={a.id} className={`flex items-start gap-2 ${t.textMuted}`}>
+              <div
+                key={a.id}
+                className={`flex items-start gap-2 ${t.textMuted}`}
+              >
                 <span className={`mt-0.5 ${t.textSubtle}`}>
                   <Icon className="size-3" />
                 </span>
                 <span className="leading-snug">
                   {a.text}{' '}
-                  <span className={`text-[10px] ${t.textSubtle}`}>· {a.at}</span>
+                  <span className={`text-[10px] ${t.textSubtle}`}>
+                    · {a.at}
+                  </span>
                 </span>
               </div>
             )
@@ -449,7 +580,157 @@ export default function TaskDetail({
           onSubmit={(body, mentions) => onAddComment(task.id, body, mentions)}
         />
       </div>
+
+      <AskLeadSheet
+        open={askLeadOpen}
+        onOpenChange={setAskLeadOpen}
+        task={task}
+        lead={task.lead ?? null}
+        onSend={(body, mentions) => {
+          onAddComment(task.id, body, mentions)
+          setAskLeadOpen(false)
+        }}
+      />
     </div>
+  )
+}
+
+// Small sheet that opens from the "Ask lead" button on the task detail.
+// Pre-fills the comment with @-mention of the lead so the recipient sees
+// it in their Mentions view. The actual post goes through the same
+// addComment path as the regular comment box; nothing new server-side.
+function AskLeadSheet({
+  open,
+  onOpenChange,
+  task,
+  lead,
+  onSend
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  task: BoardTask
+  lead: { id: string; name: string } | null
+  onSend: (body: string, mentions: string[]) => void
+}) {
+  const { t } = useDashTheme()
+  const [body, setBody] = useState('')
+
+  // Reset draft when the sheet closes so each open starts clean.
+  useEffect(() => {
+    if (!open) setBody('')
+  }, [open])
+
+  const send = () => {
+    if (!lead) return
+    const trimmed = body.trim()
+    if (!trimmed) return
+    const prefix = `@${lead.name} `
+    // If the body already starts with the @mention (user kept the prefix
+    // we suggested in the placeholder), don't double it.
+    const finalBody = trimmed.startsWith(`@${lead.name}`)
+      ? trimmed
+      : `${prefix}${trimmed}`
+    onSend(finalBody, [lead.id])
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        showCloseButton={false}
+        className={`w-full p-0 sm:!max-w-[480px] ${t.detail}`}
+      >
+        <VisuallyHidden.Root>
+          <SheetTitle>
+            {lead ? `Ask ${lead.name} about ${task.ref}` : 'Ask lead'}
+          </SheetTitle>
+        </VisuallyHidden.Root>
+
+        {lead && (
+          <div className={`flex h-full flex-col ${t.detail}`}>
+            <header
+              className={`flex shrink-0 items-center justify-between gap-3 border-b px-5 py-3 ${t.border}`}
+            >
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <div
+                  className={`text-[10px] tracking-[0.22em] uppercase ${t.textSubtle}`}
+                >
+                  Ask lead
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${t.text}`}>
+                    {lead.name}
+                  </span>
+                  <span
+                    className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] tracking-[0.22em] tabular-nums uppercase ${t.metaTag}`}
+                  >
+                    {task.ref}
+                  </span>
+                </div>
+                <p className={`truncate text-xs ${t.textMuted}`}>
+                  {task.title}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpenChange(false)}
+                aria-label="Close"
+                className={`flex size-7 items-center justify-center rounded-md transition ${t.btn}`}
+              >
+                <X className="size-3.5" />
+              </button>
+            </header>
+
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              <p className={`mb-3 text-xs leading-relaxed ${t.textMuted}`}>
+                Sends a comment on this task that @-mentions {lead.name}.
+                They&apos;ll see it in their Mentions view.
+              </p>
+              <textarea
+                autoFocus
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault()
+                    send()
+                  }
+                }}
+                placeholder={`What's the question for ${lead.name}? They'll be tagged automatically.`}
+                rows={6}
+                className={`w-full resize-y rounded-md border px-3 py-2 text-xs leading-relaxed ${t.input}`}
+              />
+            </div>
+
+            <footer
+              className={`flex shrink-0 items-center justify-between gap-2 border-t px-5 py-3 ${t.border}`}
+            >
+              <span className={`text-[10px] ${t.textSubtle}`}>
+                <kbd className="font-mono">⌘</kbd>
+                <kbd className="font-mono">↵</kbd> to send.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onOpenChange(false)}
+                  className={`flex h-8 items-center rounded-md border px-3 text-xs transition ${t.btn}`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={send}
+                  disabled={!body.trim()}
+                  className={`flex h-8 items-center gap-1.5 rounded-md px-3 text-xs transition disabled:opacity-50 ${t.accent}`}
+                >
+                  <MessageSquare className="size-3.5" /> Send
+                </button>
+              </div>
+            </footer>
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
   )
 }
 
@@ -457,7 +738,7 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   const { t } = useDashTheme()
   return (
     <div
-      className={`uppercase tracking-wider text-[10px] py-1 ${t.textSubtle}`}
+      className={`py-1 text-[10px] tracking-wider uppercase ${t.textSubtle}`}
     >
       {children}
     </div>
@@ -488,7 +769,7 @@ function Popover({
       </button>
       {open && (
         <div
-          className={`absolute left-0 top-9 z-40 w-52 rounded-md border shadow-xl py-1 ${t.detail}`}
+          className={`absolute top-9 left-0 z-40 w-52 rounded-md border py-1 shadow-xl ${t.detail}`}
         >
           {children}
         </div>
@@ -517,6 +798,58 @@ function refIcon(kind: TaskExternalRefKind) {
   }
 }
 
+const REF_KIND_LABEL: Record<TaskExternalRefKind, string> = {
+  pr: 'Pull request',
+  issue: 'Issue',
+  commit: 'Commit',
+  doc: 'Document',
+  link: 'Link'
+}
+
+// Tone classes per ref kind. Mirrors the Updates panel palette so PRs /
+// issues / docs read consistently across the dashboard.
+function refTone(
+  kind: TaskExternalRefKind,
+  mode: 'light' | 'dark'
+): string {
+  if (mode === 'light') {
+    switch (kind) {
+      case 'pr':
+        return 'bg-violet-100 text-violet-700 border-violet-200'
+      case 'issue':
+        return 'bg-emerald-100 text-emerald-700 border-emerald-200'
+      case 'commit':
+        return 'bg-sky-100 text-sky-700 border-sky-200'
+      case 'doc':
+        return 'bg-amber-100 text-amber-700 border-amber-200'
+      case 'link':
+      default:
+        return 'bg-zinc-100 text-zinc-700 border-zinc-200'
+    }
+  }
+  switch (kind) {
+    case 'pr':
+      return 'bg-violet-400/10 text-violet-300 border-violet-400/30'
+    case 'issue':
+      return 'bg-emerald-400/10 text-emerald-300 border-emerald-400/30'
+    case 'commit':
+      return 'bg-sky-400/10 text-sky-300 border-sky-400/30'
+    case 'doc':
+      return 'bg-amber-400/10 text-amber-300 border-amber-400/30'
+    case 'link':
+    default:
+      return 'bg-white/5 text-white/70 border-white/20'
+  }
+}
+
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return null
+  }
+}
+
 function LinksSection({
   task,
   refs,
@@ -528,7 +861,7 @@ function LinksSection({
   onAdd: (url: string) => void
   onRemove: (refId: string) => void
 }) {
-  const { t } = useDashTheme()
+  const { t, mode } = useDashTheme()
   const [adding, setAdding] = useState(false)
   const [url, setUrl] = useState('')
   const [err, setErr] = useState<string | null>(null)
@@ -547,64 +880,105 @@ function LinksSection({
     setAdding(false)
   }
 
+  const showEmpty = refs.length === 0 && !adding
+
   return (
-    <div className="flex flex-col gap-2 text-xs">
+    <div className="flex flex-col gap-3 text-xs">
       <div className="flex items-center justify-between">
         <div
-          className={`text-[10px] uppercase tracking-[0.22em] ${t.textMuted}`}
+          className={`text-[10px] tracking-[0.22em] uppercase ${t.textMuted}`}
         >
-          Links
+          Links {refs.length > 0 && `(${refs.length})`}
         </div>
-        {!adding && (
+        {!adding && refs.length > 0 && (
           <button
+            type="button"
             onClick={() => setAdding(true)}
             className={`flex h-6 items-center gap-1 rounded-md border px-1.5 text-[10px] transition ${t.btn}`}
           >
-            <Plus className="size-3" /> Add
+            <Plus className="size-3" /> Add link
           </button>
         )}
       </div>
 
-      {refs.length === 0 && !adding && (
-        <p className={`text-xs italic ${t.textSubtle}`}>
-          No PRs, issues or docs linked yet.
-        </p>
+      {showEmpty && (
+        <div
+          className={`flex flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-6 text-center ${t.border}`}
+        >
+          <LinkIcon className={`size-4 ${t.textSubtle}`} />
+          <p className={`text-[11px] ${t.textMuted}`}>
+            No PRs, issues, docs or links yet.
+          </p>
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className={`mt-1 flex h-7 items-center gap-1 rounded-md px-2.5 text-[11px] transition ${t.accent}`}
+          >
+            <Plus className="size-3" /> Paste a URL
+          </button>
+        </div>
       )}
 
-      <ul className="flex flex-col gap-1.5">
-        {refs.map((ref) => {
-          const parsed = parseExternalRef(ref.url)
-          const label =
-            ref.label ??
-            (parsed ? defaultExternalRefLabel(parsed) : ref.url)
-          const Icon = refIcon(ref.kind)
-          return (
-            <li
-              key={ref.id}
-              className={`group flex items-center gap-2 rounded-md border px-2.5 py-1.5 ${t.column}`}
-            >
-              <Icon className={`size-3.5 shrink-0 ${t.textMuted}`} />
-              <a
-                href={ref.url}
-                target="_blank"
-                rel="noreferrer noopener"
-                className={`flex min-w-0 flex-1 items-center gap-1.5 text-xs ${t.text}`}
-                title={ref.url}
+      {refs.length > 0 && (
+        <ul className="flex flex-col gap-2">
+          {refs.map((ref) => {
+            const parsed = parseExternalRef(ref.url)
+            const label =
+              ref.label ?? (parsed ? defaultExternalRefLabel(parsed) : ref.url)
+            const Icon = refIcon(ref.kind)
+            const tone = refTone(ref.kind, mode)
+            const sub =
+              parsed?.repo ?? hostOf(ref.url) ?? REF_KIND_LABEL[ref.kind]
+            return (
+              <li
+                key={ref.id}
+                className={`group flex items-center gap-3 rounded-lg border px-3 py-2 transition ${t.column} ${t.rowHover}`}
               >
-                <span className="truncate">{label}</span>
-                <ExternalLink className={`size-3 shrink-0 ${t.textSubtle}`} />
-              </a>
-              <button
-                onClick={() => onRemove(ref.id)}
-                className={`flex size-5 items-center justify-center rounded opacity-0 transition group-hover:opacity-100 ${t.tab}`}
-                aria-label="Remove link"
-              >
-                <X className="size-3" />
-              </button>
-            </li>
-          )
-        })}
-      </ul>
+                <span
+                  className={`flex size-8 shrink-0 items-center justify-center rounded-md border ${tone}`}
+                  aria-hidden="true"
+                >
+                  <Icon className="size-3.5" />
+                </span>
+                <a
+                  href={ref.url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="flex min-w-0 flex-1 flex-col gap-0.5"
+                  title={ref.url}
+                >
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className={`truncate text-xs font-medium ${t.text}`}>
+                      {label}
+                    </span>
+                    <ExternalLink
+                      className={`size-3 shrink-0 ${t.textSubtle}`}
+                    />
+                  </span>
+                  <span
+                    className={`flex items-center gap-1.5 text-[10px] ${t.textSubtle}`}
+                  >
+                    <span
+                      className={`rounded border px-1 py-px tracking-wider uppercase ${t.metaTag}`}
+                    >
+                      {REF_KIND_LABEL[ref.kind]}
+                    </span>
+                    <span className="truncate">{sub}</span>
+                  </span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => onRemove(ref.id)}
+                  className={`flex size-6 items-center justify-center rounded opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 ${t.btn}`}
+                  aria-label="Remove link"
+                >
+                  <X className="size-3" />
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
 
       {adding && (
         <form
@@ -612,9 +986,10 @@ function LinksSection({
             e.preventDefault()
             submit()
           }}
-          className="flex flex-col gap-1.5"
+          className={`flex flex-col gap-1.5 rounded-lg border p-2 ${t.border} ${t.surfaceMuted}`}
         >
           <div className="flex items-center gap-1.5">
+            <LinkIcon className={`size-3.5 shrink-0 ${t.textSubtle}`} />
             <input
               autoFocus
               type="url"
@@ -635,7 +1010,7 @@ function LinksSection({
             />
             <button
               type="submit"
-              className={`h-8 rounded-md px-2.5 text-[10px] ${t.accent}`}
+              className={`flex h-8 items-center justify-center rounded-md px-2.5 text-[11px] disabled:opacity-50 ${t.accent}`}
               disabled={!url.trim()}
             >
               <Check className="size-3.5" />
@@ -653,7 +1028,119 @@ function LinksSection({
             </button>
           </div>
           {err && <p className="text-[11px] text-red-500">{err}</p>}
+          <p className={`px-1 text-[10px] ${t.textSubtle}`}>
+            Kind is auto-detected: GitHub PRs / issues / commits, Google
+            Docs, Notion, Figma, `.md` files, anything else as a link.
+          </p>
         </form>
+      )}
+    </div>
+  )
+}
+
+// Read view for the handoff content attached to a task. Pulls the row
+// lazily when the task detail opens; renders the seven fields with a tiny
+// "Open" button to launch the editor sheet for updates. Used both before
+// and after a task is marked Done so the next person can read it inline.
+function HandoffReadView({
+  taskId,
+  onOpenEditor
+}: {
+  taskId: string
+  onOpenEditor: () => void
+}) {
+  const { t } = useDashTheme()
+  const [loading, setLoading] = useState(true)
+  const [handoff, setHandoff] = useState<HandoffFieldValues | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    fetchTaskHandoff(taskId)
+      .then((res) => {
+        if (cancelled) return
+        if ('error' in res) {
+          setHandoff(null)
+          return
+        }
+        setHandoff(res.handoff ?? null)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [taskId])
+
+  const filled = handoff
+    ? HANDOFF_FIELDS.filter(
+        (f) => (handoff[f] ?? '').trim().length > 0
+      ).length
+    : 0
+  const hasAny = filled > 0
+  const total = HANDOFF_FIELDS.length
+
+  return (
+    <div className="flex flex-col gap-2 text-xs">
+      <div className="flex items-center justify-between">
+        <div
+          className={`flex items-center gap-1.5 text-[10px] tracking-[0.22em] uppercase ${t.textMuted}`}
+        >
+          <Briefcase className="size-3" />
+          Handoff {hasAny && `(${filled}/${total})`}
+        </div>
+        <button
+          type="button"
+          onClick={onOpenEditor}
+          className={`flex h-6 items-center gap-1 rounded-md border px-1.5 text-[10px] transition ${t.btn}`}
+        >
+          <Pencil className="size-3" />
+          {hasAny ? 'Edit' : 'Start'}
+        </button>
+      </div>
+
+      {loading ? (
+        <div
+          className={`flex items-center gap-2 rounded-md border border-dashed px-3 py-2 text-[11px] ${t.border} ${t.textSubtle}`}
+        >
+          <Loader2 className="size-3 animate-spin" />
+          Loading…
+        </div>
+      ) : !hasAny ? (
+        <div
+          className={`rounded-md border border-dashed px-3 py-2 text-[11px] italic ${t.border} ${t.textSubtle}`}
+        >
+          No handoff written yet. Start one so the next person can pick
+          this task up cleanly.
+        </div>
+      ) : (
+        <dl
+          className={`flex flex-col gap-2 rounded-md border px-3 py-2.5 ${t.column}`}
+        >
+          {HANDOFF_FIELDS.map((field) => {
+            const value = handoff?.[field] ?? ''
+            const isEmpty = value.trim().length === 0
+            return (
+              <div key={field} className="flex flex-col gap-0.5">
+                <dt
+                  className={`text-[10px] tracking-wider uppercase ${
+                    isEmpty ? t.textFaint : t.textMuted
+                  }`}
+                >
+                  {HANDOFF_FIELD_LABELS[field]}
+                </dt>
+                <dd
+                  className={`text-xs leading-snug whitespace-pre-wrap ${
+                    isEmpty ? `italic ${t.textSubtle}` : t.text
+                  }`}
+                >
+                  {isEmpty ? 'missing' : value}
+                </dd>
+              </div>
+            )
+          })}
+        </dl>
       )}
     </div>
   )

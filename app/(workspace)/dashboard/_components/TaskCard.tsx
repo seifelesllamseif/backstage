@@ -87,7 +87,7 @@ export default function TaskCard({
         ref={sortable.setNodeRef}
         style={dndStyle}
         {...sortable.attributes}
-        className="rounded-lg border-2 border-dashed border-red-400/60 bg-red-500/5 px-3 py-2.5 min-h-[78px]"
+        className="rounded-lg border-2 border-dashed border-teal-400/60 bg-teal-500/5 px-3 py-2.5 min-h-[78px]"
         aria-hidden
       />
     )
@@ -160,7 +160,7 @@ export default function TaskCard({
         id: 'filter-status',
         label: `Filter by ${status.label}`,
         icon: <Filter className="size-3.5" />,
-        onSelect: () => a.setStatusFilter(task.status)
+        onSelect: () => a.toggleStatusFilter(task.status)
       },
       { id: 'sep2', label: '', separator: true },
       {
@@ -185,7 +185,7 @@ export default function TaskCard({
       data-selected={selected ? 'true' : undefined}
       className={`group w-full text-left rounded-lg border transition px-3 py-2.5 flex flex-col gap-2 ${t.card} ${
         selected
-          ? 'ring-2 ring-red-500/40 border-red-400 dark:border-red-400/60 shadow-sm'
+          ? 'ring-2 ring-teal-500/40 border-teal-400 dark:border-teal-400/60 shadow-sm'
           : ''
       } ${draggable ? 'touch-none' : ''}`}
     >

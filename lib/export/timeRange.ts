@@ -18,7 +18,7 @@ export const TIME_SCOPE_OPTIONS: TimeScopeOption[] = [
   { id: 'week', label: 'This week' },
   { id: 'month', label: 'This month' },
   { id: 'all', label: 'All' },
-  { id: 'cycle', label: 'By cycle' },
+  { id: 'cycle', label: 'By sprint' },
 ]
 
 function startOfDay(d: Date): Date {

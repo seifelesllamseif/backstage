@@ -12,8 +12,12 @@ export interface TaskActions {
   copyRef: (ref: string) => void
   openDetail: (id: string) => void
   addInColumn: (status?: TaskStatus) => void
-  setStatusFilter: (s: TaskStatus | null) => void
-  setAssigneeFilter: (id: string | null) => void
+  // Filter shortcuts wired up from card context menus. Toggle membership
+  // in the current multi-select array. Pass null to clear that axis.
+  toggleStatusFilter: (s: TaskStatus) => void
+  clearStatusFilter: () => void
+  toggleAssigneeFilter: (id: string) => void
+  clearAssigneeFilter: () => void
 }
 
 const TaskActionsContext = createContext<TaskActions | null>(null)

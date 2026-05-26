@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Check, Copy, Trash2, X } from 'lucide-react'
 import { STATUSES, TaskPriority, TaskStatus, PRIORITY_LABEL } from './status'
-import { BoardAssignee, BoardTask } from './boardData'
+import { BoardAssignee, BoardTask, TaskRelation } from './boardData'
+import RelationPicker from './RelationPicker'
 import StatusIcon from './StatusIcon'
 import PriorityIcon from './PriorityIcon'
 import { useDashTheme } from './theme'
@@ -20,6 +21,9 @@ interface NewTaskModalProps {
   labels: { id: string; name: string }[]
   projects: { id: string; name: string }[]
   defaultProjectId: string | null
+  // Pool for the relation picker autocomplete. Visible tasks scoped by
+  // the caller.
+  candidateTasks: { id: string; ref: string; title: string; status: TaskStatus }[]
   onClose: () => void
   onCreate: (
     task: Omit<BoardTask, 'id' | 'ref' | 'createdAt' | 'updatedAt'>
@@ -35,6 +39,7 @@ interface NewTaskModalProps {
       dueDate: string | null
       labelIds: string[]
       newLabelNames: string[]
+      relations?: { kind: 'blocked_by' | 'blocks' | 'parent' | 'sub_issue' | 'triage'; ref: string }[]
     }[]
   ) => Promise<void> | void
 }
@@ -50,6 +55,7 @@ export default function NewTaskModal({
   labels,
   projects,
   defaultProjectId,
+  candidateTasks,
   onClose,
   onCreate,
   onCreateBulk
@@ -117,6 +123,7 @@ export default function NewTaskModal({
           <ManualTab
             defaultStatus={defaultStatus}
             members={members}
+            candidateTasks={candidateTasks}
             onClose={onClose}
             onCreate={onCreate}
           />
@@ -126,6 +133,7 @@ export default function NewTaskModal({
             labels={labels}
             projects={projects}
             defaultProjectId={defaultProjectId}
+            candidateTasks={candidateTasks}
             onClose={onClose}
             onCreateBulk={onCreateBulk}
           />
@@ -140,11 +148,18 @@ export default function NewTaskModal({
 function ManualTab({
   defaultStatus,
   members,
+  candidateTasks,
   onClose,
   onCreate
 }: {
   defaultStatus: TaskStatus
   members: BoardAssignee[]
+  candidateTasks: {
+    id: string
+    ref: string
+    title: string
+    status: TaskStatus
+  }[]
   onClose: () => void
   onCreate: (
     task: Omit<BoardTask, 'id' | 'ref' | 'createdAt' | 'updatedAt'>
@@ -157,6 +172,7 @@ function ManualTab({
   const [assigneeId, setAssigneeId] = useState<string | null>(null)
   const [due, setDue] = useState('')
   const [tagsInput, setTagsInput] = useState('')
+  const [pendingRelations, setPendingRelations] = useState<TaskRelation[]>([])
 
   const reset = () => {
     setTitle('')
@@ -165,6 +181,7 @@ function ManualTab({
     setAssigneeId(null)
     setDue('')
     setTagsInput('')
+    setPendingRelations([])
   }
 
   const submit = () => {
@@ -181,7 +198,8 @@ function ManualTab({
         ? members.find((m) => m.id === assigneeId)
         : undefined,
       tags: tags.length > 0 ? tags : undefined,
-      due: due.trim() || undefined
+      due: due.trim() || undefined,
+      relations: pendingRelations.length > 0 ? pendingRelations : undefined
     })
     reset()
     onClose()
@@ -265,6 +283,32 @@ function ManualTab({
         />
       </Field>
 
+      <Field label="Relations">
+        <RelationPicker
+          relations={pendingRelations}
+          candidates={candidateTasks}
+          variant="spacious"
+          onAdd={(rel) =>
+            setPendingRelations((cur) => {
+              // Dedup on (kind, ref).
+              if (
+                cur.some((r) => r.kind === rel.kind && r.ref === rel.ref)
+              ) {
+                return cur
+              }
+              return [...cur, rel]
+            })
+          }
+          onRemove={(rel) =>
+            setPendingRelations((cur) =>
+              cur.filter(
+                (r) => !(r.kind === rel.kind && r.ref === rel.ref)
+              )
+            )
+          }
+        />
+      </Field>
+
       <div className="flex items-center justify-between pt-2">
         <div className="flex items-center gap-3 text-[10px]">
           <span className="inline-flex items-center gap-1">
@@ -303,6 +347,7 @@ function AiTab({
   labels,
   projects,
   defaultProjectId,
+  candidateTasks,
   onClose,
   onCreateBulk
 }: {
@@ -310,6 +355,12 @@ function AiTab({
   labels: { id: string; name: string }[]
   projects: { id: string; name: string }[]
   defaultProjectId: string | null
+  candidateTasks: {
+    id: string
+    ref: string
+    title: string
+    status: TaskStatus
+  }[]
   onClose: () => void
   onCreateBulk: (
     projectId: string,
@@ -322,6 +373,10 @@ function AiTab({
       dueDate: string | null
       labelIds: string[]
       newLabelNames: string[]
+      relations?: {
+        kind: 'blocked_by' | 'blocks' | 'parent' | 'sub_issue' | 'triage'
+        ref: string
+      }[]
     }[]
   ) => Promise<void> | void
 }) {
@@ -341,9 +396,13 @@ function AiTab({
       buildBulkTaskPrompt({
         projectName: selectedProject?.name ?? null,
         members: members.map((m) => ({ name: m.name })),
-        labels: labels.map((l) => ({ name: l.name }))
+        labels: labels.map((l) => ({ name: l.name })),
+        existingTasks: candidateTasks.map((task) => ({
+          ref: task.ref,
+          title: task.title
+        }))
       }),
-    [selectedProject, members, labels]
+    [selectedProject, members, labels, candidateTasks]
   )
 
   const [copied, setCopied] = useState(false)
@@ -365,7 +424,8 @@ function AiTab({
   const parse = () => {
     const res = parseBulkTaskJson(pasted, {
       members: members.map((m) => ({ id: m.id, name: m.name })),
-      labels
+      labels,
+      existingTaskRefs: candidateTasks.map((task) => task.ref)
     })
     if (!res.ok) {
       setParseError(res.error)
@@ -400,7 +460,8 @@ function AiTab({
           assigneeId: d.assigneeId,
           dueDate: d.dueDate,
           labelIds: d.labelIds,
-          newLabelNames: d.unknownLabels
+          newLabelNames: d.unknownLabels,
+          relations: d.relations.length > 0 ? d.relations : undefined
         }))
       )
       onClose()

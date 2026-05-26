@@ -31,7 +31,7 @@ export function projectToMarkdown(
   lines.push(
     `- **Tasks:** ${done}/${tasks.length} done (${tasks.length} total)`
   )
-  lines.push(`- **Cycles:** ${cycles.length}`)
+  lines.push(`- **Sprints:** ${cycles.length}`)
 
   if (projectRefs.length > 0) {
     lines.push('')
@@ -45,7 +45,7 @@ export function projectToMarkdown(
 
   if (cycles.length > 0) {
     lines.push('')
-    lines.push('## Cycles')
+    lines.push('## Sprints')
     // Same sort order as the Cycles tab: current, then upcoming asc, then
     // completed (newest first).
     const order: Record<typeof cycles[number]['status'], number> = {

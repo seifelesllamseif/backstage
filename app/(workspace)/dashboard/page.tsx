@@ -27,7 +27,7 @@ export async function generateMetadata({
   const description =
     'Hand off, receive and track tasks across the Verbivore team.'
   if (!projectParam) {
-    return { title: 'All tasks · Verbivore', description }
+    return { title: 'All Projects · Verbivore', description }
   }
   const member = await getCurrentCrewMember()
   if (!member) {

@@ -33,6 +33,10 @@ interface CopyButtonProps {
   // Compact mode: hides the primary label, shows just the icon. Useful in
   // dense surfaces like a project card.
   iconOnly?: boolean
+  // Show the label only at very wide widths (2xl+). Below that, the
+  // button collapses to icon + chevron. Use in the dashboard Topbar
+  // where horizontal space is contested.
+  responsiveLabel?: boolean
 }
 
 async function copyToClipboard(content: string): Promise<boolean> {
@@ -70,6 +74,7 @@ export function CopyButton({
   size = 'sm',
   className,
   iconOnly = false,
+  responsiveLabel = false,
 }: CopyButtonProps) {
   const [open, setOpen] = useState(false)
   const [openSubmenuId, setOpenSubmenuId] = useState<string | null>(null)
@@ -133,15 +138,19 @@ export function CopyButton({
             iconOnly && 'px-2 rounded-md',
             !iconOnly && menu.length === 0 && 'rounded-md'
           )}
-          aria-label={iconOnly ? primaryLabel : undefined}
-          title={iconOnly ? primaryLabel : undefined}
+          aria-label={iconOnly || responsiveLabel ? primaryLabel : undefined}
+          title={iconOnly || responsiveLabel ? primaryLabel : undefined}
         >
           {justCopied ? (
             <Check className="size-3.5" />
           ) : (
             <Copy className="size-3.5" />
           )}
-          {!iconOnly && <span>{primaryLabel}</span>}
+          {!iconOnly && (
+            <span className={responsiveLabel ? 'hidden 2xl:inline' : undefined}>
+              {primaryLabel}
+            </span>
+          )}
         </button>
         {menu.length > 0 && !iconOnly && (
           <>

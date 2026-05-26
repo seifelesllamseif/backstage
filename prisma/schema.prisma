@@ -148,6 +148,7 @@ model CrewMember {
 
   company       Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   assignedTasks Task[]  @relation("TaskAssignee")
+  ledTasks      Task[]  @relation("TaskLead")
   createdTasks  Task[]  @relation("TaskCreatedBy")
   handoffsFrom  Handoff[] @relation("HandoffFrom")
   handoffsTo    Handoff[] @relation("HandoffTo")
@@ -197,6 +198,11 @@ model Task {
   // before the migration use createdAt as the fallback order.
   sortOrder   Int?         @map("sort_order")
   assigneeId  String?      @map("assignee_id") @db.Uuid
+  // Lead member for this task — the person assignees ask for help. Set
+  // by lead/admin from the task detail Popover. Distinct from assignee:
+  // assignee does the work, lead unblocks it. Nullable; SET NULL on lead
+  // removal so the task stays alive.
+  leadId      String?      @map("lead_id") @db.Uuid
   dueDate     DateTime?    @map("due_date") @db.Date
   createdBy   String?      @map("created_by") @db.Uuid
   createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -205,6 +211,7 @@ model Task {
   company    Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   project    Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
   assignee   CrewMember?         @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  lead       CrewMember?         @relation("TaskLead", fields: [leadId], references: [id], onDelete: SetNull)
   creator    CrewMember?         @relation("TaskCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
   handoff    Handoff?
   labels     TaskLabel[]
@@ -218,6 +225,7 @@ model Task {
   @@index([companyId])
   @@index([projectId])
   @@index([assigneeId])
+  @@index([leadId])
   @@index([status])
   @@map("task")
 }

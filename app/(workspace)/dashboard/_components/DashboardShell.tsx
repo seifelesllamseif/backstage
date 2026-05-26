@@ -11,7 +11,9 @@ import {
   Plus,
   RotateCcw,
   Sun,
-  Moon
+  Moon,
+  X,
+  PlusCircle
 } from 'lucide-react'
 import { signOut } from '@/app/login/actions'
 import {
@@ -39,8 +41,11 @@ import {
   removeProjectExternalRef as removeProjectExternalRefAction,
   removeTaskExternalRef as removeTaskExternalRefAction,
   updateDashboardTaskAssignee,
+  updateDashboardTaskLead,
   updateDashboardTaskPriority,
-  updateDashboardTaskStatus
+  updateDashboardTaskStatus,
+  addTaskDependency,
+  removeTaskDependency
 } from '../actions'
 import { parseExternalRef as parseExternalRefClient } from '@/lib/externalRef'
 import type { BoardAssignee, BoardTask, Cycle } from './boardData'
@@ -65,6 +70,7 @@ import FilterPanel from './FilterPanel'
 import { ProjectsPanel, SettingsPanel, UpdatesPanel } from './Panels'
 import CyclesPanel from './CyclesPanel'
 import CycleHero from './CycleHero'
+import HandoffSheet from './HandoffSheet'
 import { CopyButton, type CopyMenuItem } from '@/components/ui/copy-button'
 import { viewToJson, viewToMarkdown } from '@/lib/export/view'
 import { cycleToJson, cycleToMarkdown } from '@/lib/export/cycle'
@@ -290,14 +296,14 @@ function buildViewCopyMenu(args: {
   if (projectScopedCycles.length > 0) {
     items.push({
       id: 'by-cycle',
-      label: 'Copy by cycle',
-      description: 'Pick a cycle to export',
+      label: 'Copy by sprint',
+      description: 'Pick a sprint to export',
       separatorBefore: true,
       submenu: projectScopedCycles.map((c) => ({
         id: `cycle-${c.id}`,
         label: `${c.name} (${c.status})`,
         getContent: () => cycleToMarkdown(c, args.ctx),
-        toastLabel: `cycle ${c.name}`
+        toastLabel: `sprint ${c.name}`
       }))
     })
   }
@@ -323,7 +329,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   const { open: openMenu } = useContextMenu()
   const router = useRouter()
   const mainScrollRef = useRef<HTMLElement | null>(null)
-  const [, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransition()
 
   const currentUserId = initial.currentMember.id
   const isAdmin = initial.currentMember.accessTier === 'admin'
@@ -404,14 +410,58 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   const [groupOpen, setGroupOpen] = useState(false)
 
   const [filterOpen, setFilterOpen] = useState(false)
-  const [statusFilter, setStatusFilter] = useState<TaskStatus | null>(null)
-  const [priorityFilter, setPriorityFilter] = useState<TaskPriority | null>(
-    null
-  )
-  const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
-  const [tagFilter, setTagFilter] = useState<string | null>(null)
+  // Multi-select filters. Empty array = no filter on that axis. Tasks
+  // must match at least one value per active axis (intersection across
+  // axes, union within an axis), e.g. (status in {todo, in_review}) AND
+  // (priority in {urgent}) AND ... .
+  const [statusFilter, setStatusFilter] = useState<TaskStatus[]>([])
+  const [priorityFilter, setPriorityFilter] = useState<TaskPriority[]>([])
+  const [assigneeFilter, setAssigneeFilter] = useState<string[]>([])
+  const [tagFilter, setTagFilter] = useState<string[]>([])
+  // Sprint filter holds cycle ids. A task matches the filter if it belongs
+  // to any selected sprint (via cycle.taskIds). Works for both admin and
+  // members; member view stays scoped by their project visibility.
+  const [sprintFilter, setSprintFilter] = useState<string[]>([])
+
+  // Toggle helpers — flip a value's membership in a filter array. Used by
+  // every surface (Sidebar, FilterPanel, SymbolsPanel) so the rule for
+  // "click again to remove" lives in one place.
+  const toggleStatus = (s: TaskStatus) => {
+    setStatusFilter((cur) =>
+      cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]
+    )
+  }
+  const togglePriority = (p: TaskPriority) => {
+    setPriorityFilter((cur) =>
+      cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p]
+    )
+  }
+  const toggleAssignee = (id: string) => {
+    setAssigneeFilter((cur) =>
+      cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]
+    )
+  }
+  const toggleTag = (tag: string) => {
+    setTagFilter((cur) =>
+      cur.includes(tag) ? cur.filter((x) => x !== tag) : [...cur, tag]
+    )
+  }
+  const toggleSprint = (cycleId: string) => {
+    setSprintFilter((cur) =>
+      cur.includes(cycleId)
+        ? cur.filter((x) => x !== cycleId)
+        : [...cur, cycleId]
+    )
+  }
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Open task descriptor for the handoff sheet. Populated when a Done
+  // move is blocked by the slice-2 handoff gate.
+  const [handoffTaskTarget, setHandoffTaskTarget] = useState<{
+    id: string
+    ref: string
+    title: string
+  } | null>(null)
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [newTaskColumn, setNewTaskColumn] = useState<TaskStatus>('todo')
@@ -483,12 +533,33 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     if (view === 'mentions')
       list = list.filter((task) => mentionedTaskIds.has(task.id))
 
-    if (statusFilter) list = list.filter((task) => task.status === statusFilter)
-    if (priorityFilter)
-      list = list.filter((task) => task.priority === priorityFilter)
-    if (assigneeFilter)
-      list = list.filter((task) => task.assignee?.id === assigneeFilter)
-    if (tagFilter) list = list.filter((task) => task.tags?.includes(tagFilter))
+    if (statusFilter.length > 0) {
+      list = list.filter((task) => statusFilter.includes(task.status))
+    }
+    if (priorityFilter.length > 0) {
+      list = list.filter((task) => priorityFilter.includes(task.priority))
+    }
+    if (assigneeFilter.length > 0) {
+      list = list.filter(
+        (task) => task.assignee && assigneeFilter.includes(task.assignee.id)
+      )
+    }
+    if (tagFilter.length > 0) {
+      list = list.filter((task) =>
+        task.tags?.some((tag) => tagFilter.includes(tag))
+      )
+    }
+    if (sprintFilter.length > 0) {
+      // Build the set of task ids that live in any selected sprint once,
+      // then filter — avoids an O(filters × cycles × tasks) inner loop.
+      const allowed = new Set<string>()
+      for (const cycle of cycles) {
+        if (sprintFilter.includes(cycle.id)) {
+          for (const tid of cycle.taskIds) allowed.add(tid)
+        }
+      }
+      list = list.filter((task) => allowed.has(task.id))
+    }
     if (query.trim()) {
       const q = query.toLowerCase()
       list = list.filter(
@@ -506,6 +577,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     priorityFilter,
     assigneeFilter,
     tagFilter,
+    sprintFilter,
+    cycles,
     query,
     currentUserId,
     mentionedTaskIds
@@ -557,6 +630,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     // to its prior column is the user-visible signal.
     const prev = tasks.find((t) => t.id === id)
     const prevStatus = prev?.status
+    const taskRef = prev?.ref ?? null
     setTasks((cur) =>
       cur.map((task) =>
         task.id === id
@@ -565,6 +639,9 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       )
     )
     logActivityLocal(id, `Status set to ${STATUS_BY_ID[s].label}`)
+    // Skip the toast when the status didn't actually change (drag landed
+    // back in the same column). Avoids a flurry of "moved to X" pings.
+    const movedToDifferentColumn = prevStatus !== undefined && prevStatus !== s
     startTransition(async () => {
       const res = await updateDashboardTaskStatus(id, s)
       if (!res.ok) {
@@ -576,20 +653,39 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
             )
           )
         }
-        if (res.reason === 'handoff-incomplete' && res.taskUrl) {
-          // Slice-2 gate (decision 0015, 0022). taskUrl points at the
-          // handoff editor (slice-1 edit page).
-          const url = res.taskUrl
-          toast.error(res.message, {
-            action: {
-              label: 'Fill handoff',
-              onClick: () => router.push(url)
-            },
-            duration: 8000
-          })
+        if (res.reason === 'handoff-incomplete') {
+          // Slice-2 gate (decision 0015, 0022). Pre-3a we bounced the
+          // user to the standalone task edit page; now we open an inline
+          // sheet so they never leave the dashboard.
+          const blocked = prev
+          if (blocked) {
+            setHandoffTaskTarget({
+              id: blocked.id,
+              ref: blocked.ref,
+              title: blocked.title
+            })
+          } else {
+            toast.error(res.message)
+          }
         } else {
           toast.error(res.message)
         }
+        return
+      }
+      if (movedToDifferentColumn) {
+        const prevLabel = prevStatus
+          ? STATUS_BY_ID[prevStatus].label
+          : 'previous'
+        const nextLabel = STATUS_BY_ID[s].label
+        const refPart = taskRef ? `${taskRef} ` : ''
+        toast.success(`${refPart}moved to ${nextLabel}`, {
+          description: `From ${prevLabel}.`,
+          action: {
+            label: 'Undo',
+            onClick: () => updateStatus(id, prevStatus!)
+          },
+          duration: 4000
+        })
       }
     })
   }
@@ -623,6 +719,85 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       if ('error' in res) {
         console.error('updateAssignee:', res.error)
         toast.error("Couldn't update assignee.")
+      }
+    })
+  }
+
+  const addRelation = (taskId: string, rel: { kind: import('./status').RelationKind; ref: string }) => {
+    // Optimistic append. If the server rejects (unknown ref, self-ref,
+    // etc.) we roll back to the snapshot and toast the message.
+    let snapshot: BoardTask[] | null = null
+    setTasks((cur) => {
+      snapshot = cur
+      return cur.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              relations: [...(task.relations ?? []), rel]
+            }
+          : task
+      )
+    })
+    startTransition(async () => {
+      const res = await addTaskDependency({
+        taskId,
+        dependsOnRef: rel.ref,
+        kind: rel.kind
+      })
+      if ('error' in res) {
+        if (snapshot) setTasks(snapshot)
+        toast.error(res.error)
+      }
+    })
+  }
+
+  const removeRelation = (
+    taskId: string,
+    rel: { kind: import('./status').RelationKind; ref: string }
+  ) => {
+    let snapshot: BoardTask[] | null = null
+    setTasks((cur) => {
+      snapshot = cur
+      return cur.map((task) => {
+        if (task.id !== taskId) return task
+        const existing = task.relations ?? []
+        return {
+          ...task,
+          relations: existing.filter(
+            (r) => !(r.kind === rel.kind && r.ref === rel.ref)
+          )
+        }
+      })
+    })
+    startTransition(async () => {
+      const res = await removeTaskDependency({
+        taskId,
+        dependsOnRef: rel.ref,
+        kind: rel.kind
+      })
+      if ('error' in res) {
+        if (snapshot) setTasks(snapshot)
+        toast.error(res.error)
+      }
+    })
+  }
+
+  const updateLead = (id: string, leadId: string | null) => {
+    const member = leadId ? team.find((m) => m.id === leadId) : undefined
+    setTasks((cur) =>
+      cur.map((task) =>
+        task.id === id ? { ...task, lead: member ?? undefined } : task
+      )
+    )
+    logActivityLocal(
+      id,
+      member ? `Lead set to ${member.name}` : 'Lead cleared'
+    )
+    startTransition(async () => {
+      const res = await updateDashboardTaskLead(id, leadId)
+      if ('error' in res) {
+        console.error('updateLead:', res.error)
+        toast.error("Couldn't update lead.")
       }
     })
   }
@@ -897,8 +1072,15 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         priority: draft.priority,
         projectId: targetProjectId,
         assigneeId: draft.assignee?.id ?? null,
+        leadId: draft.lead?.id ?? null,
         dueDate: null,
-        labelIds
+        labelIds,
+        // The picker on ManualTab stores pending relations on draft.
+        // Passed through to the server action as { kind, ref } pairs.
+        relations: draft.relations?.map((rel) => ({
+          kind: rel.kind,
+          ref: rel.ref
+        }))
       })
       if ('error' in res) {
         console.error('createTask:', res.error)
@@ -1040,15 +1222,18 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       if (!res.ok) {
         console.error('moveDashboardTask:', res.message)
         if (snapshot) setTasks(snapshot)
-        if (res.reason === 'handoff-incomplete' && res.taskUrl) {
-          const url = res.taskUrl
-          toast.error(res.message, {
-            action: {
-              label: 'Fill handoff',
-              onClick: () => router.push(url)
-            },
-            duration: 8000
-          })
+        if (res.reason === 'handoff-incomplete') {
+          // Same inline-sheet path as the click-status flow.
+          const blocked = tasks.find((t) => t.id === activeId)
+          if (blocked) {
+            setHandoffTaskTarget({
+              id: blocked.id,
+              ref: blocked.ref,
+              title: blocked.title
+            })
+          } else {
+            toast.error(res.message)
+          }
         } else {
           toast.error(res.message)
         }
@@ -1072,6 +1257,10 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       dueDate: string | null
       labelIds: string[]
       newLabelNames: string[]
+      relations?: {
+        kind: 'blocked_by' | 'blocks' | 'parent' | 'sub_issue' | 'triage'
+        ref: string
+      }[]
     }[]
   ) => {
     const res = await createBulkDashboardTasks(targetProjectId, drafts)
@@ -1177,10 +1366,11 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   }
 
   const resetFilters = () => {
-    setStatusFilter(null)
-    setPriorityFilter(null)
-    setAssigneeFilter(null)
-    setTagFilter(null)
+    setStatusFilter([])
+    setPriorityFilter([])
+    setAssigneeFilter([])
+    setTagFilter([])
+    setSprintFilter([])
     setQuery('')
   }
 
@@ -1292,8 +1482,10 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     copyRef,
     openDetail: setSelectedId,
     addInColumn: openNewTask,
-    setStatusFilter,
-    setAssigneeFilter
+    toggleStatusFilter: toggleStatus,
+    clearStatusFilter: () => setStatusFilter([]),
+    toggleAssigneeFilter: toggleAssignee,
+    clearAssigneeFilter: () => setAssigneeFilter([])
   }
 
   const onProjectChange = (projectId: string | null) => {
@@ -1312,18 +1504,35 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     onProjectChange(projectId)
   }
 
+  // Quick filters are presets that map to specific combinations of the
+  // multi-select state. A preset is "active" iff its target shape is
+  // exactly what's in the filter arrays right now.
+  const noFilters =
+    statusFilter.length === 0 &&
+    priorityFilter.length === 0 &&
+    assigneeFilter.length === 0 &&
+    tagFilter.length === 0
+  const onlyPriority = (p: TaskPriority) =>
+    priorityFilter.length === 1 &&
+    priorityFilter[0] === p &&
+    statusFilter.length === 0 &&
+    assigneeFilter.length === 0 &&
+    tagFilter.length === 0
+  const onlyStatus = (s: TaskStatus) =>
+    statusFilter.length === 1 &&
+    statusFilter[0] === s &&
+    priorityFilter.length === 0 &&
+    assigneeFilter.length === 0 &&
+    tagFilter.length === 0
+
   const activeQuickFilter: 'open' | 'due' | 'review' | 'done' | null =
-    priorityFilter === 'urgent' && !statusFilter
+    onlyPriority('urgent')
       ? 'due'
-      : statusFilter === 'in_review' && !priorityFilter
+      : onlyStatus('in_review')
         ? 'review'
-        : statusFilter === 'done' && !priorityFilter
+        : onlyStatus('done')
           ? 'done'
-          : !statusFilter &&
-              !priorityFilter &&
-              !assigneeFilter &&
-              !tagFilter &&
-              !query.trim()
+          : noFilters && !query.trim()
             ? 'open'
             : null
 
@@ -1333,18 +1542,51 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       return
     }
     if (kind === 'due') {
-      setStatusFilter(null)
-      setPriorityFilter(priorityFilter === 'urgent' ? null : 'urgent')
+      setStatusFilter([])
+      setPriorityFilter(onlyPriority('urgent') ? [] : ['urgent'])
+      setAssigneeFilter([])
+      setTagFilter([])
       return
     }
     if (kind === 'review') {
-      setPriorityFilter(null)
-      setStatusFilter(statusFilter === 'in_review' ? null : 'in_review')
+      setPriorityFilter([])
+      setStatusFilter(onlyStatus('in_review') ? [] : ['in_review'])
+      setAssigneeFilter([])
+      setTagFilter([])
       return
     }
-    setPriorityFilter(null)
-    setStatusFilter(statusFilter === 'done' ? null : 'done')
+    setPriorityFilter([])
+    setStatusFilter(onlyStatus('done') ? [] : ['done'])
+    setAssigneeFilter([])
+    setTagFilter([])
   }
+
+  // Plain-language label for whichever view is currently active. Surfaces
+  // in the top chrome (right of the user menu) so the user always sees
+  // which scope they're in.
+  const viewLabel = (() => {
+    switch (view) {
+      case 'mine':
+        return 'My tasks'
+      case 'inbox':
+        return 'Inbox'
+      case 'mentions':
+        return 'Mentions'
+      case 'projects':
+        return 'Projects'
+      case 'updates':
+        return 'Updates'
+      case 'symbols':
+        return 'Symbols'
+      case 'settings':
+        return 'Settings'
+      case 'archive':
+        return 'Archive'
+      case 'all':
+      default:
+        return 'All tasks'
+    }
+  })()
 
   return (
     <TaskActionsProvider value={actions}>
@@ -1359,7 +1601,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
             )
             if (scroller) scroller.scrollBy({ top: e.deltaY, behavior: 'auto' })
           }}
-          className={`flex h-11 shrink-0 items-center justify-between border-b px-4 text-xs ${t.topbar}`}
+          className={`relative flex h-11 shrink-0 items-center justify-between border-b px-4 text-xs ${t.topbar}`}
         >
           <Link
             href="/portfolio"
@@ -1369,11 +1611,62 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
             Back to overview
           </Link>
           <span
-            className={`text-[10px] tracking-[0.25em] uppercase ${t.textMuted}`}
+            className={`pointer-events-none absolute left-1/2 -translate-x-1/2 text-[10px] tracking-[0.25em] uppercase ${t.textMuted}`}
           >
             Verbivore · Task Handoff
           </span>
-          <CurrentUserMenu user={currentUser} isAdmin={isAdmin} />
+          <div className="flex items-center gap-3">
+            {assigneeFilter.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setAssigneeFilter([])}
+                title={
+                  assigneeFilter.length === 1
+                    ? `Inspecting ${
+                        team.find((m) => m.id === assigneeFilter[0])?.name ??
+                        'unknown'
+                      } — click to clear`
+                    : `Inspecting ${assigneeFilter.length} teammates — click to clear`
+                }
+                className={`flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-1.5 text-[11px] transition ${t.btn}`}
+              >
+                <span
+                  className={`text-[9px] tracking-[0.22em] uppercase ${t.textSubtle}`}
+                >
+                  Inspecting
+                </span>
+                <div className="flex items-center -space-x-1.5">
+                  {assigneeFilter.slice(0, 3).map((id) => {
+                    const member = team.find((m) => m.id === id)
+                    if (!member) return null
+                    return (
+                      <span
+                        key={id}
+                        className="ring-background rounded-full ring-1"
+                      >
+                        <Avatar user={member} size={18} />
+                      </span>
+                    )
+                  })}
+                  {assigneeFilter.length > 3 && (
+                    <span
+                      className={`ring-background flex size-[18px] items-center justify-center rounded-full text-[9px] font-semibold ring-1 ${t.surfaceMuted} ${t.text}`}
+                    >
+                      +{assigneeFilter.length - 3}
+                    </span>
+                  )}
+                </div>
+                {assigneeFilter.length === 1 && (
+                  <span className={`max-w-[120px] truncate ${t.text}`}>
+                    {team.find((m) => m.id === assigneeFilter[0])?.name ??
+                      'unknown'}
+                  </span>
+                )}
+                <X className={`size-3 ${t.textSubtle}`} />
+              </button>
+            )}
+            <CurrentUserMenu user={currentUser} isAdmin={isAdmin} />
+          </div>
         </div>
 
         <div className="flex min-h-0 flex-1">
@@ -1390,9 +1683,11 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               }
               onView={(v) => setView(v)}
               statusFilter={statusFilter}
-              onStatusFilter={setStatusFilter}
+              onToggleStatus={toggleStatus}
+              onClearStatus={() => setStatusFilter([])}
               assigneeFilter={assigneeFilter}
-              onAssigneeFilter={setAssigneeFilter}
+              onToggleAssignee={toggleAssignee}
+              onClearAssignee={() => setAssigneeFilter([])}
               counts={counts}
               secondary={view}
               onSecondary={(v) => setView(v)}
@@ -1402,6 +1697,14 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           </div>
 
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            {isPending && (
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 top-0 z-50 h-0.5 overflow-hidden"
+              >
+                <div className="dashboard-loader-bar h-full w-1/4 rounded-r bg-teal-500" />
+              </div>
+            )}
             <Topbar
               query={query}
               onQuery={setQuery}
@@ -1423,9 +1726,27 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               onProjectChange={onProjectChange}
               activeQuickFilter={activeQuickFilter}
               onQuickFilter={onQuickFilter}
+              activeFilterCount={
+                statusFilter.length +
+                priorityFilter.length +
+                assigneeFilter.length +
+                tagFilter.length +
+                sprintFilter.length
+              }
+              viewLabel={viewLabel}
+              feedView={
+                view === 'all' ||
+                view === 'mine' ||
+                view === 'inbox' ||
+                view === 'mentions'
+                  ? view
+                  : 'all'
+              }
+              onFeedViewChange={(v) => setView(v)}
               copySlot={
                 <CopyButton
                   primaryLabel="Copy page"
+                  responsiveLabel
                   primaryToastLabel="page as Markdown"
                   primaryGetContent={() =>
                     buildViewMarkdown({
@@ -1455,14 +1776,33 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               open={filterOpen}
               onClose={() => setFilterOpen(false)}
               statusFilter={statusFilter}
-              onStatusFilter={setStatusFilter}
+              onToggleStatus={toggleStatus}
+              onClearStatus={() => setStatusFilter([])}
               priorityFilter={priorityFilter}
-              onPriorityFilter={setPriorityFilter}
+              onTogglePriority={togglePriority}
+              onClearPriority={() => setPriorityFilter([])}
               assigneeFilter={assigneeFilter}
-              onAssigneeFilter={setAssigneeFilter}
+              onToggleAssignee={toggleAssignee}
+              onClearAssignee={() => setAssigneeFilter([])}
               tagFilter={tagFilter}
-              onTagFilter={setTagFilter}
+              onToggleTag={toggleTag}
+              onClearTag={() => setTagFilter([])}
               allTags={allTags}
+              sprintFilter={sprintFilter}
+              onToggleSprint={toggleSprint}
+              onClearSprint={() => setSprintFilter([])}
+              allSprints={cycles
+                .filter(
+                  (c) =>
+                    !initial.currentProjectId ||
+                    c.projectId === initial.currentProjectId
+                )
+                .map((c) => ({
+                  id: c.id,
+                  name: c.name,
+                  status: c.status,
+                  number: c.number
+                }))}
               onReset={resetFilters}
             />
 
@@ -1488,8 +1828,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 openMenu(e, [
                   {
                     id: 'add',
-                    label: 'New task',
-                    icon: <Plus className="size-3.5" />,
+                    label: 'New Task',
+                    icon: <PlusCircle className="size-3.5" />,
                     shortcut: 'N',
                     onSelect: () => openNewTask()
                   },
@@ -1561,8 +1901,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                               copySlot={
                                 currentCycle ? (
                                   <CopyButton
-                                    primaryLabel="Copy cycle"
-                                    primaryToastLabel={`cycle ${currentCycle.name} as Markdown`}
+                                    primaryLabel="Copy sprint"
+                                    primaryToastLabel={`sprint ${currentCycle.name} as Markdown`}
                                     primaryGetContent={() =>
                                       cycleToMarkdown(currentCycle, exportCtx)
                                     }
@@ -1575,7 +1915,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                                             currentCycle,
                                             exportCtx
                                           ),
-                                        toastLabel: `cycle ${currentCycle.name} as Markdown`
+                                        toastLabel: `sprint ${currentCycle.name} as Markdown`
                                       },
                                       {
                                         id: 'md-slim',
@@ -1588,14 +1928,14 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                                               withoutCommentsAndActivity: true
                                             }
                                           ),
-                                        toastLabel: `cycle ${currentCycle.name} as Markdown`
+                                        toastLabel: `sprint ${currentCycle.name} as Markdown`
                                       },
                                       {
                                         id: 'json-full',
                                         label: 'Copy as JSON',
                                         getContent: () =>
                                           cycleToJson(currentCycle, exportCtx),
-                                        toastLabel: `cycle ${currentCycle.name} as JSON`
+                                        toastLabel: `sprint ${currentCycle.name} as JSON`
                                       },
                                       {
                                         id: 'json-slim',
@@ -1604,7 +1944,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                                           cycleToJson(currentCycle, exportCtx, {
                                             withoutCommentsAndActivity: true
                                           }),
-                                        toastLabel: `cycle ${currentCycle.name} as JSON`
+                                        toastLabel: `sprint ${currentCycle.name} as JSON`
                                       }
                                     ]}
                                   />
@@ -1693,7 +2033,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                           <CopyButton
                             primaryLabel=""
                             iconOnly
-                            primaryToastLabel={`cycle ${c.name} as Markdown`}
+                            primaryToastLabel={`sprint ${c.name} as Markdown`}
                             primaryGetContent={() =>
                               cycleToMarkdown(c, exportCtx)
                             }
@@ -1780,14 +2120,14 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   refsByTask={externalRefs}
                   refsByProject={projectExternalRefs}
                   onFilterByStatus={(status) => {
-                    setStatusFilter(status)
-                    setPriorityFilter(null)
+                    setStatusFilter([status])
+                    setPriorityFilter([])
                     setView('all')
                     setTab('board')
                   }}
                   onFilterByPriority={(priority) => {
-                    setPriorityFilter(priority)
-                    setStatusFilter(null)
+                    setPriorityFilter([priority])
+                    setStatusFilter([])
                     setView('all')
                     setTab('board')
                   }}
@@ -1828,7 +2168,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
             >
               <SheetContent
                 side="right"
-                className={`w-full p-0 sm:!max-w-[440px] ${t.detail}`}
+                showCloseButton={false}
+                className={`w-full p-0 sm:!max-w-[640px] ${t.detail}`}
               >
                 <VisuallyHidden.Root>
                   <SheetTitle>
@@ -1847,11 +2188,27 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                     onChangeStatus={updateStatus}
                     onChangePriority={updatePriority}
                     onChangeAssignee={updateAssignee}
+                    onChangeLead={updateLead}
                     onAddComment={addComment}
                     onEditComment={editComment}
                     onDeleteComment={deleteComment}
                     onAddExternalRef={addExternalRef}
                     onRemoveExternalRef={removeExternalRef}
+                    candidateTasks={tasks.map((task) => ({
+                      id: task.id,
+                      ref: task.ref,
+                      title: task.title,
+                      status: task.status
+                    }))}
+                    onAddRelation={addRelation}
+                    onRemoveRelation={removeRelation}
+                    onOpenHandoff={(task) =>
+                      setHandoffTaskTarget({
+                        id: task.id,
+                        ref: task.ref,
+                        title: task.title
+                      })
+                    }
                     copySlot={
                       <CopyButton
                         primaryLabel="Copy"
@@ -1903,6 +2260,34 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           </div>
         </div>
 
+        <HandoffSheet
+          task={handoffTaskTarget}
+          refs={
+            handoffTaskTarget ? (externalRefs[handoffTaskTarget.id] ?? []) : []
+          }
+          onAddRef={addExternalRef}
+          onRemoveRef={removeExternalRef}
+          members={team}
+          onClose={() => setHandoffTaskTarget(null)}
+          onDone={(taskId) => {
+            // The server has already moved the task to Done. Apply the
+            // same local effect we would have if the gate had passed on
+            // the first try: flip status + log activity.
+            setTasks((cur) =>
+              cur.map((task) =>
+                task.id === taskId
+                  ? {
+                      ...task,
+                      status: 'done',
+                      updatedAt: new Date().toISOString()
+                    }
+                  : task
+              )
+            )
+            logActivityLocal(taskId, 'Status set to Done')
+          }}
+        />
+
         <NewTaskModal
           open={newTaskOpen}
           defaultStatus={newTaskColumn}
@@ -1912,6 +2297,12 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           defaultProjectId={
             initial.currentProjectId ?? initial.defaultProjectId
           }
+          candidateTasks={tasks.map((task) => ({
+            id: task.id,
+            ref: task.ref,
+            title: task.title,
+            status: task.status
+          }))}
           onClose={() => setNewTaskOpen(false)}
           onCreate={createTask}
           onCreateBulk={createBulkTasks}
