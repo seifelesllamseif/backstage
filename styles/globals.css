@@ -1,6 +1,6 @@
-@import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -52,63 +52,112 @@
 }
 
 /*
- * SKAM dark theme — single-mode app for slice 1.
- * Source: docs/backstage-os-slice-1-plan.md §10
- *       + lib/business-logic.ts (skamTheme)
- *       + docs/decisions/0014-step-7-polish-scope.md
+ * Theme tokens.
  *
- * No .light selector — if a light mode ever ships, add tokens there.
+ * :root = light palette (mirrors the [data-theme="paper"] preset below so
+ * profile-bento "paper" and the global light mode stay in lockstep).
+ * .dark / [data-theme="dark"] = SKAM dark palette (original slice-1 design).
+ *
+ * Selector wiring: next-themes sets `class="dark"` or `class="light"` on
+ * <html> via app/providers.tsx (attribute="class", defaultTheme="system").
+ * Profile bento containers also opt in to specific palettes via the
+ * data-theme attribute — see docs/decisions/0020-profile-theme-presets.md.
+ *
+ * Source: docs/backstage-os-slice-1-plan.md §10,
+ *         lib/business-logic.ts (skamTheme),
+ *         docs/decisions/0014-step-7-polish-scope.md.
  */
 :root {
-  --background: #0E0E10;
-  --foreground: #F2F2F0;
+  --background: #f7f6f2;
+  --foreground: #1a1816;
 
-  --card: #161618;
-  --card-foreground: #F2F2F0;
+  --card: #ffffff;
+  --card-foreground: #1a1816;
 
-  --popover: #161618;
-  --popover-foreground: #F2F2F0;
+  --popover: #ffffff;
+  --popover-foreground: #1a1816;
 
-  --primary: #F2F2F0;
-  --primary-foreground: #0E0E10;
+  --primary: #1a1816;
+  --primary-foreground: #ffffff;
 
-  --secondary: #1A1A1C;
-  --secondary-foreground: #F2F2F0;
+  --secondary: #f1efe9;
+  --secondary-foreground: #1a1816;
 
-  --muted: #1A1A1C;
-  --muted-foreground: #A8A8AE;
+  --muted: #f1efe9;
+  --muted-foreground: #5a5852;
 
-  --accent: #E24B4A;
-  --accent-foreground: #F2F2F0;
+  --accent: #00a89e;
+  --accent-foreground: #ffffff;
 
-  --destructive: #E24B4A;
+  --destructive: #00a89e;
 
-  --border: #2A2A2E;
-  --input: #2A2A2E;
-  --ring: #E24B4A;
+  --border: #d9d6ce;
+  --input: #d9d6ce;
+  --ring: #d63e3d;
 
-  --success: #5DCAA5;
-  --warning: #EF9F27;
-  --info: #85B7EB;
+  --success: #2e9c74;
+  --warning: #c5800e;
+  --info: #3d7dbe;
 
   --radius: 0.75rem;
 
-  /* Charts not used in slice 1; keep palette declared so shadcn doesn't choke. */
-  --chart-1: #E24B4A;
-  --chart-2: #5DCAA5;
-  --chart-3: #EF9F27;
-  --chart-4: #85B7EB;
-  --chart-5: #A8A8AE;
+  --chart-1: #e24b4a;
+  --chart-2: #5dcaa5;
+  --chart-3: #ef9f27;
+  --chart-4: #85b7eb;
+  --chart-5: #a8a8ae;
 
-  /* Sidebar tokens unused in slice 1, but shadcn references them. */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1a1816;
+  --sidebar-primary: #1a1816;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f1efe9;
+  --sidebar-accent-foreground: #1a1816;
+  --sidebar-border: #d9d6ce;
+  --sidebar-ring: #d63e3d;
+}
+
+.dark,
+[data-theme='dark'] {
+  --background: #0e0e10;
+  --foreground: #f2f2f0;
+
+  --card: #161618;
+  --card-foreground: #f2f2f0;
+
+  --popover: #161618;
+  --popover-foreground: #f2f2f0;
+
+  --primary: #f2f2f0;
+  --primary-foreground: #0e0e10;
+
+  --secondary: #1a1a1c;
+  --secondary-foreground: #f2f2f0;
+
+  --muted: #1a1a1c;
+  --muted-foreground: #a8a8ae;
+
+  --accent: #e24b4a;
+  --accent-foreground: #f2f2f0;
+
+  --destructive: #e24b4a;
+
+  --border: #2a2a2e;
+  --input: #2a2a2e;
+  --ring: #e24b4a;
+
+  --success: #5dcaa5;
+  --warning: #ef9f27;
+  --info: #85b7eb;
+
   --sidebar: #161618;
-  --sidebar-foreground: #F2F2F0;
-  --sidebar-primary: #F2F2F0;
-  --sidebar-primary-foreground: #0E0E10;
-  --sidebar-accent: #1A1A1C;
-  --sidebar-accent-foreground: #F2F2F0;
-  --sidebar-border: #2A2A2E;
-  --sidebar-ring: #E24B4A;
+  --sidebar-foreground: #f2f2f0;
+  --sidebar-primary: #f2f2f0;
+  --sidebar-primary-foreground: #0e0e10;
+  --sidebar-accent: #1a1a1c;
+  --sidebar-accent-foreground: #f2f2f0;
+  --sidebar-border: #2a2a2e;
+  --sidebar-ring: #e24b4a;
 }
 
 /*
@@ -118,83 +167,84 @@
  *
  * Applied as a data-theme="…" attribute on the bento root container in
  * app/(authenticated)/profile/[slug]/profile-bento.tsx. Tokens cascade
- * inside; outside the bento (sidebar, top bar, every other route) keep
- * the :root dark tokens.
+ * inside the bento; outside, the next-themes `class="dark"|"light"` on
+ * <html> decides the palette.
  *
- * data-theme="dark" is a no-op (matches :root) and intentionally not
- * defined here — every other route would otherwise match it.
+ * `[data-theme="dark"]` is now an explicit override block (shared with
+ * the global `.dark` selector above) so a profile marked "dark" stays
+ * dark even when the rest of the app is in light mode.
  */
 
-[data-theme="paper"] {
-  --background: #F7F6F2;
-  --foreground: #1A1816;
-  --card: #FFFFFF;
-  --card-foreground: #1A1816;
-  --popover: #FFFFFF;
-  --popover-foreground: #1A1816;
-  --primary: #1A1816;
-  --primary-foreground: #FFFFFF;
-  --secondary: #F1EFE9;
-  --secondary-foreground: #1A1816;
-  --muted: #F1EFE9;
-  --muted-foreground: #5A5852;
-  --accent: #D63E3D;
-  --accent-foreground: #FFFFFF;
-  --destructive: #D63E3D;
-  --border: #D9D6CE;
-  --input: #D9D6CE;
-  --ring: #D63E3D;
-  --success: #2E9C74;
-  --warning: #C5800E;
-  --info: #3D7DBE;
+[data-theme='paper'] {
+  --background: #f7f6f2;
+  --foreground: #1a1816;
+  --card: #ffffff;
+  --card-foreground: #1a1816;
+  --popover: #ffffff;
+  --popover-foreground: #1a1816;
+  --primary: #1a1816;
+  --primary-foreground: #ffffff;
+  --secondary: #f1efe9;
+  --secondary-foreground: #1a1816;
+  --muted: #f1efe9;
+  --muted-foreground: #5a5852;
+  --accent: #d63e3d;
+  --accent-foreground: #ffffff;
+  --destructive: #d63e3d;
+  --border: #d9d6ce;
+  --input: #d9d6ce;
+  --ring: #d63e3d;
+  --success: #2e9c74;
+  --warning: #c5800e;
+  --info: #3d7dbe;
 }
 
-[data-theme="mocha"] {
-  --background: #F5EFE6;
-  --foreground: #3D2914;
-  --card: #FFFAF2;
-  --card-foreground: #3D2914;
-  --popover: #FFFAF2;
-  --popover-foreground: #3D2914;
-  --primary: #3D2914;
-  --primary-foreground: #FFFAF2;
-  --secondary: #EFE5D4;
-  --secondary-foreground: #3D2914;
-  --muted: #EFE5D4;
-  --muted-foreground: #6B4A2B;
-  --accent: #8B5A2B;
-  --accent-foreground: #FFFAF2;
-  --destructive: #C2543E;
-  --border: #E0D4C0;
-  --input: #E0D4C0;
-  --ring: #8B5A2B;
-  --success: #5E8C5A;
-  --warning: #B8841E;
-  --info: #4A7DA0;
+[data-theme='mocha'] {
+  --background: #f5efe6;
+  --foreground: #3d2914;
+  --card: #fffaf2;
+  --card-foreground: #3d2914;
+  --popover: #fffaf2;
+  --popover-foreground: #3d2914;
+  --primary: #3d2914;
+  --primary-foreground: #fffaf2;
+  --secondary: #efe5d4;
+  --secondary-foreground: #3d2914;
+  --muted: #efe5d4;
+  --muted-foreground: #6b4a2b;
+  --accent: #8b5a2b;
+  --accent-foreground: #fffaf2;
+  --destructive: #c2543e;
+  --border: #e0d4c0;
+  --input: #e0d4c0;
+  --ring: #8b5a2b;
+  --success: #5e8c5a;
+  --warning: #b8841e;
+  --info: #4a7da0;
 }
 
-[data-theme="ocean"] {
-  --background: #0F1419;
-  --foreground: #E8EEF2;
-  --card: #1A2128;
-  --card-foreground: #E8EEF2;
-  --popover: #1A2128;
-  --popover-foreground: #E8EEF2;
-  --primary: #E8EEF2;
-  --primary-foreground: #0F1419;
-  --secondary: #1F2832;
-  --secondary-foreground: #E8EEF2;
-  --muted: #1F2832;
-  --muted-foreground: #95A5B3;
-  --accent: #5DCAA5;
-  --accent-foreground: #0F1419;
-  --destructive: #E24B4A;
-  --border: #2A3540;
-  --input: #2A3540;
-  --ring: #5DCAA5;
-  --success: #5DCAA5;
-  --warning: #EF9F27;
-  --info: #85B7EB;
+[data-theme='ocean'] {
+  --background: #0f1419;
+  --foreground: #e8eef2;
+  --card: #1a2128;
+  --card-foreground: #e8eef2;
+  --popover: #1a2128;
+  --popover-foreground: #e8eef2;
+  --primary: #e8eef2;
+  --primary-foreground: #0f1419;
+  --secondary: #1f2832;
+  --secondary-foreground: #e8eef2;
+  --muted: #1f2832;
+  --muted-foreground: #95a5b3;
+  --accent: #5dcaa5;
+  --accent-foreground: #0f1419;
+  --destructive: #e24b4a;
+  --border: #2a3540;
+  --input: #2a3540;
+  --ring: #5dcaa5;
+  --success: #5dcaa5;
+  --warning: #ef9f27;
+  --info: #85b7eb;
 }
 
 @layer base {
@@ -204,7 +254,8 @@
   body {
     @apply bg-background text-foreground;
   }
-  button:not(:disabled), [role="button"]:not(:disabled) {
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
     cursor: pointer;
   }
   html {
@@ -218,6 +269,6 @@
   mix-blend-mode: normal;
 }
 
-html[data-magicui-theme-vt="active"]::view-transition-group(root) {
+html[data-magicui-theme-vt='active']::view-transition-group(root) {
   animation-duration: var(--magicui-theme-toggle-vt-duration);
 }

@@ -1,10 +1,19 @@
 'use client'
 
-import { useMemo, useRef, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { ArrowLeft, Plus, RotateCcw, Sun, Moon } from 'lucide-react'
+import {
+  ArrowLeft,
+  ChevronDown,
+  LogOut,
+  Plus,
+  RotateCcw,
+  Sun,
+  Moon
+} from 'lucide-react'
+import { signOut } from '@/app/login/actions'
 import {
   DndContext,
   DragOverlay,
@@ -18,16 +27,22 @@ import {
 } from '@dnd-kit/core'
 import {
   addComment as addCommentAction,
+  addProjectExternalRef as addProjectExternalRefAction,
+  addTaskExternalRef as addTaskExternalRefAction,
+  createBulkDashboardTasks,
   createDashboardTask,
   deleteComment as deleteCommentAction,
   deleteDashboardTask,
   duplicateDashboardTask,
   editComment as editCommentAction,
   moveDashboardTask,
+  removeProjectExternalRef as removeProjectExternalRefAction,
+  removeTaskExternalRef as removeTaskExternalRefAction,
   updateDashboardTaskAssignee,
   updateDashboardTaskPriority,
   updateDashboardTaskStatus
 } from '../actions'
+import { parseExternalRef as parseExternalRefClient } from '@/lib/externalRef'
 import type { BoardAssignee, BoardTask, Cycle } from './boardData'
 import {
   STATUSES,
@@ -43,10 +58,20 @@ import { VisuallyHidden } from 'radix-ui'
 import Sidebar from './Sidebar'
 import Topbar from './Topbar'
 import TaskDetail, { TaskActivity, TaskComment } from './TaskDetail'
+import type { ProjectExternalRef, TaskExternalRef } from './boardData'
 import NewTaskModal from './NewTaskModal'
 import Timeline from './Timeline'
 import FilterPanel from './FilterPanel'
 import { ProjectsPanel, SettingsPanel, UpdatesPanel } from './Panels'
+import CyclesPanel from './CyclesPanel'
+import CycleHero from './CycleHero'
+import { CopyButton, type CopyMenuItem } from '@/components/ui/copy-button'
+import { viewToJson, viewToMarkdown } from '@/lib/export/view'
+import { cycleToJson, cycleToMarkdown } from '@/lib/export/cycle'
+import { taskToJson, taskToMarkdown } from '@/lib/export/task'
+import { projectToJson, projectToMarkdown } from '@/lib/export/project'
+import { isInScope, type TimeScope } from '@/lib/export/timeRange'
+import type { ExportContext } from '@/lib/export/types'
 import SymbolsPanel from './SymbolsPanel'
 import ArchivePanel from './ArchivePanel'
 import Avatar from './Avatar'
@@ -60,6 +85,7 @@ export type View =
   | 'all'
   | 'mine'
   | 'inbox'
+  | 'mentions'
   | 'projects'
   | 'updates'
   | 'settings'
@@ -75,10 +101,17 @@ export interface DashboardInitial {
     name: string
     kind: 'standard' | 'operations'
     isArchived: boolean
+    githubRepo: string | null
   }[]
+  // Full active-project list for the bulk-add picker. Not member-scoped:
+  // members may not have any tasks yet but still need to pick a target
+  // project to create *into*. Reads remain scoped via `projects`.
+  allActiveProjects: { id: string; name: string }[]
   labels: { id: string; name: string }[]
   commentsByTask: Record<string, TaskComment[]>
   activityByTask: Record<string, TaskActivity[]>
+  externalRefsByTask: Record<string, TaskExternalRef[]>
+  externalRefsByProject: Record<string, ProjectExternalRef[]>
   currentMember: {
     id: string
     fullName: string
@@ -101,6 +134,174 @@ let idCounter = 0
 function nextId(prefix: string) {
   idCounter += 1
   return `${prefix}-${Date.now()}-${idCounter}`
+}
+
+// ─── Copy-view helpers ────────────────────────────────────────────────────
+// Derive a stable title + scope label from the current view + project so
+// the markdown header reads naturally. The default group-by mirrors what
+// the user sees on screen (status / priority / assignee) so the paste
+// matches the visual structure.
+
+function viewTitle(
+  view: View,
+  currentProjectId: string | null,
+  projects: { id: string; name: string }[]
+): string {
+  const project = currentProjectId
+    ? projects.find((p) => p.id === currentProjectId)
+    : null
+  const base = (() => {
+    if (view === 'mine') return 'My tasks'
+    if (view === 'inbox') return 'Inbox'
+    if (view === 'mentions') return 'Mentions'
+    if (view === 'projects') return 'Projects'
+    if (view === 'updates') return 'Updates'
+    if (view === 'symbols') return 'Symbol library'
+    if (view === 'settings') return 'Workspace settings'
+    if (view === 'archive') return 'Archive'
+    return 'All tasks'
+  })()
+  return project ? `${project.name} — ${base}` : base
+}
+
+function buildViewMarkdown(args: {
+  tasks: BoardTask[]
+  ctx: ExportContext
+  view: View
+  groupBy: GroupBy
+  currentProjectId: string | null
+  projects: { id: string; name: string }[]
+}): string {
+  return viewToMarkdown(args.tasks, args.ctx, {
+    title: viewTitle(args.view, args.currentProjectId, args.projects),
+    groupBy: args.groupBy
+  })
+}
+
+function scopedTasks(
+  tasks: BoardTask[],
+  scope: Exclude<TimeScope, 'all' | 'cycle'>
+): BoardTask[] {
+  const now = new Date()
+  // "Today / This week / This month" buckets are based on updatedAt so the
+  // export captures recent movement (drops, status changes, comments) not
+  // just newly-created tasks.
+  return tasks.filter((task) => isInScope(task.updatedAt, scope, now))
+}
+
+function buildViewCopyMenu(args: {
+  filtered: BoardTask[]
+  allTasks: BoardTask[]
+  ctx: ExportContext
+  view: View
+  groupBy: GroupBy
+  currentProjectId: string | null
+  projects: { id: string; name: string }[]
+  cycles: Cycle[]
+}): CopyMenuItem[] {
+  const baseTitle = viewTitle(args.view, args.currentProjectId, args.projects)
+  const meta = (extra?: string) => ({
+    title: extra ? `${baseTitle} (${extra})` : baseTitle,
+    groupBy: args.groupBy,
+    scopeLabel: extra
+  })
+  const items: CopyMenuItem[] = [
+    {
+      id: 'md-full',
+      label: 'Copy as Markdown',
+      description: 'Filtered tasks, comments + activity',
+      getContent: () => viewToMarkdown(args.filtered, args.ctx, meta()),
+      toastLabel: 'page as Markdown'
+    },
+    {
+      id: 'md-slim',
+      label: 'Copy as Markdown (no comments)',
+      description: 'Filtered tasks, metadata only',
+      getContent: () =>
+        viewToMarkdown(args.filtered, args.ctx, meta(), {
+          withoutCommentsAndActivity: true
+        }),
+      toastLabel: 'page as Markdown'
+    },
+    {
+      id: 'json-full',
+      label: 'Copy as JSON',
+      description: 'Versioned shape for agent ingestion',
+      getContent: () => viewToJson(args.filtered, args.ctx, meta()),
+      toastLabel: 'page as JSON'
+    },
+    {
+      id: 'json-slim',
+      label: 'Copy as JSON (no comments)',
+      description: 'Slim shape, metadata only',
+      getContent: () =>
+        viewToJson(args.filtered, args.ctx, meta(), {
+          withoutCommentsAndActivity: true
+        }),
+      toastLabel: 'page as JSON'
+    }
+  ]
+  // Time-scope shortcuts always operate on the *unfiltered* visible task set
+  // so the user can grab "everything updated this week" without losing
+  // tasks the on-screen filters have hidden.
+  items.push(
+    {
+      id: 'today',
+      label: 'Copy today (Markdown)',
+      description: 'Tasks updated since midnight',
+      separatorBefore: true,
+      getContent: () =>
+        viewToMarkdown(
+          scopedTasks(args.allTasks, 'today'),
+          args.ctx,
+          meta('today')
+        ),
+      toastLabel: "today's tasks"
+    },
+    {
+      id: 'week',
+      label: 'Copy this week (Markdown)',
+      description: 'Tasks updated since Monday',
+      getContent: () =>
+        viewToMarkdown(
+          scopedTasks(args.allTasks, 'week'),
+          args.ctx,
+          meta('this week')
+        ),
+      toastLabel: "this week's tasks"
+    },
+    {
+      id: 'month',
+      label: 'Copy this month (Markdown)',
+      description: 'Tasks updated this calendar month',
+      getContent: () =>
+        viewToMarkdown(
+          scopedTasks(args.allTasks, 'month'),
+          args.ctx,
+          meta('this month')
+        ),
+      toastLabel: "this month's tasks"
+    }
+  )
+
+  const projectScopedCycles = args.currentProjectId
+    ? args.cycles.filter((c) => c.projectId === args.currentProjectId)
+    : args.cycles
+  if (projectScopedCycles.length > 0) {
+    items.push({
+      id: 'by-cycle',
+      label: 'Copy by cycle',
+      description: 'Pick a cycle to export',
+      separatorBefore: true,
+      submenu: projectScopedCycles.map((c) => ({
+        id: `cycle-${c.id}`,
+        label: `${c.name} (${c.status})`,
+        getContent: () => cycleToMarkdown(c, args.ctx),
+        toastLabel: `cycle ${c.name}`
+      }))
+    })
+  }
+  return items
 }
 
 export default function DashboardShellWrapper(props: {
@@ -148,9 +349,56 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   const [activity, setActivity] = useState<Record<string, TaskActivity[]>>(
     initial.activityByTask
   )
+  const [cycles, setCycles] = useState<Cycle[]>(initial.cycles)
+  const [externalRefs, setExternalRefs] = useState<
+    Record<string, TaskExternalRef[]>
+  >(initial.externalRefsByTask)
+  const [projectExternalRefs, setProjectExternalRefs] = useState<
+    Record<string, ProjectExternalRef[]>
+  >(initial.externalRefsByProject)
+
+  // Resync local state when the server hands us fresh data via router.refresh
+  // (bulk create, "reset board", project switch). Per-mutation flows update
+  // local state optimistically and don't refresh, so this only fires at the
+  // moments where the server is the source of truth.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTasks(initial.tasks)
+  }, [initial.tasks])
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setComments(initial.commentsByTask)
+  }, [initial.commentsByTask])
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setActivity(initial.activityByTask)
+  }, [initial.activityByTask])
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCycles(initial.cycles)
+  }, [initial.cycles])
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExternalRefs(initial.externalRefsByTask)
+  }, [initial.externalRefsByTask])
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setProjectExternalRefs(initial.externalRefsByProject)
+  }, [initial.externalRefsByProject])
 
   const [view, setView] = useState<View>('all')
-  const [tab, setTab] = useState<'board' | 'list' | 'timeline'>('board')
+  const [tab, setTab] = useState<'board' | 'list' | 'timeline' | 'cycles'>(
+    'board'
+  )
+  // The Cycles tab is project-scoped. If the user navigates back to "All
+  // projects" while on it, drop them on Board so they don't see a blank
+  // panel.
+  useEffect(() => {
+    if (tab === 'cycles' && !initial.currentProjectId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTab('board')
+    }
+  }, [tab, initial.currentProjectId])
   const [query, setQuery] = useState('')
   const [groupBy, setGroupBy] = useState<GroupBy>('status')
   const [groupOpen, setGroupOpen] = useState(false)
@@ -177,6 +425,22 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   const [density, setDensity] = useState<'compact' | 'cozy'>('cozy')
   const [wipLimit, setWipLimit] = useState(0)
   const [notifyOnAssign, setNotifyOnAssign] = useState(true)
+  // Help hints in the sidebar. Persisted to localStorage so members who
+  // turn them off don't see them again on refresh. Defaults to on so the
+  // first thing a new member sees explains the navigation.
+  const [showHints, setShowHints] = useState(true)
+  useEffect(() => {
+    // Lazy initializer + suppressHydrationWarning would avoid this
+    // setState, but only at the cost of a hydration mismatch (the
+    // server can't read localStorage). One mount-time re-render is the
+    // lesser evil here — `showHints` only flips a tiny ⓘ icon.
+    const stored = window.localStorage.getItem('dashboard.showHints')
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (stored === '0') setShowHints(false)
+  }, [])
+  useEffect(() => {
+    window.localStorage.setItem('dashboard.showHints', showHints ? '1' : '0')
+  }, [showHints])
 
   const labelIdByName = useMemo(
     () => new Map(initial.labels.map((l) => [l.name, l.id])),
@@ -189,13 +453,23 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     return [...set].sort()
   }, [tasks])
 
-  const visibleTasks = useMemo(
-    () =>
-      isAdmin
-        ? tasks
-        : tasks.filter((task) => task.assignee?.id === currentUserId),
-    [tasks, isAdmin, currentUserId]
-  )
+  // Server-side scoping in fetchDashboardData already narrows non-admin
+  // tasks to "tasks in projects where I have ≥1 assignment". The 'mine'
+  // view further narrows to just my-assignee tasks below.
+  const visibleTasks = tasks
+
+  // Task IDs where the current user is @mentioned in at least one comment.
+  // Derived from local comment state so optimistic mentions show up
+  // immediately in the count.
+  const mentionedTaskIds = useMemo(() => {
+    const set = new Set<string>()
+    for (const [taskId, list] of Object.entries(comments)) {
+      if (list.some((c) => c.mentions?.includes(currentUserId))) {
+        set.add(taskId)
+      }
+    }
+    return set
+  }, [comments, currentUserId])
 
   const filtered = useMemo(() => {
     let list = visibleTasks
@@ -206,6 +480,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       list = list.filter(
         (task) => task.status === 'todo' || task.status === 'in_review'
       )
+    if (view === 'mentions')
+      list = list.filter((task) => mentionedTaskIds.has(task.id))
 
     if (statusFilter) list = list.filter((task) => task.status === statusFilter)
     if (priorityFilter)
@@ -231,7 +507,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     assigneeFilter,
     tagFilter,
     query,
-    currentUserId
+    currentUserId,
+    mentionedTaskIds
   ])
 
   const counts = {
@@ -240,7 +517,9 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       .length,
     inbox: visibleTasks.filter(
       (task) => task.status === 'todo' || task.status === 'in_review'
-    ).length
+    ).length,
+    mentions: visibleTasks.filter((task) => mentionedTaskIds.has(task.id))
+      .length
   }
 
   const totals = {
@@ -258,7 +537,13 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         ...cur,
         [taskId]: [
           ...list,
-          { id: nextId('act'), kind: 'status', text, at: nowLabel() }
+          {
+            id: nextId('act'),
+            kind: 'status',
+            text,
+            at: nowLabel(),
+            atRaw: new Date().toISOString()
+          }
         ]
       }
     })
@@ -371,7 +656,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
             id: nextId('act'),
             kind: 'comment',
             text: 'You left a comment',
-            at: nowLabel()
+            at: nowLabel(),
+            atRaw: new Date().toISOString()
           }
         ]
       }
@@ -428,6 +714,146 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     })
   }
 
+  const addExternalRef = (taskId: string, url: string) => {
+    // Optimistic temp row — gets replaced by the server row on refresh.
+    const tempId = nextId('ref')
+    const parsed = parseExternalRefClient(url)
+    const optimistic: TaskExternalRef = {
+      id: tempId,
+      taskId,
+      kind: parsed?.kind ?? 'link',
+      url: parsed?.url ?? url,
+      label: null,
+      createdAt: new Date().toISOString()
+    }
+    setExternalRefs((cur) => ({
+      ...cur,
+      [taskId]: [...(cur[taskId] ?? []), optimistic]
+    }))
+    startTransition(async () => {
+      const res = await addTaskExternalRefAction({ taskId, url })
+      if ('error' in res) {
+        toast.error(res.error)
+        setExternalRefs((cur) => ({
+          ...cur,
+          [taskId]: (cur[taskId] ?? []).filter((r) => r.id !== tempId)
+        }))
+        return
+      }
+      // Swap the optimistic row for the real one without a full refresh —
+      // avoids the brief flash that router.refresh would cause.
+      const saved = res.ref
+      setExternalRefs((cur) => ({
+        ...cur,
+        [taskId]: (cur[taskId] ?? []).map((r) =>
+          r.id === tempId
+            ? {
+                id: saved.id,
+                taskId: saved.taskId,
+                kind: saved.kind,
+                url: saved.url,
+                label: saved.label,
+                createdAt:
+                  saved.createdAt instanceof Date
+                    ? saved.createdAt.toISOString()
+                    : String(saved.createdAt)
+              }
+            : r
+        )
+      }))
+    })
+  }
+
+  const removeExternalRef = (taskId: string, refId: string) => {
+    let snapshot: TaskExternalRef[] | null = null
+    setExternalRefs((cur) => {
+      snapshot = cur[taskId] ?? []
+      return {
+        ...cur,
+        [taskId]: (cur[taskId] ?? []).filter((r) => r.id !== refId)
+      }
+    })
+    startTransition(async () => {
+      const res = await removeTaskExternalRefAction(refId)
+      if ('error' in res) {
+        toast.error(res.error)
+        if (snapshot) {
+          setExternalRefs((cur) => ({ ...cur, [taskId]: snapshot! }))
+        }
+      }
+    })
+  }
+
+  const addProjectExternalRef = (projectId: string, url: string) => {
+    const tempId = nextId('pref')
+    const parsed = parseExternalRefClient(url)
+    const optimistic: ProjectExternalRef = {
+      id: tempId,
+      projectId,
+      kind: parsed?.kind ?? 'link',
+      url: parsed?.url ?? url,
+      label: null,
+      createdAt: new Date().toISOString()
+    }
+    setProjectExternalRefs((cur) => ({
+      ...cur,
+      [projectId]: [...(cur[projectId] ?? []), optimistic]
+    }))
+    startTransition(async () => {
+      const res = await addProjectExternalRefAction({ projectId, url })
+      if ('error' in res) {
+        toast.error(res.error)
+        setProjectExternalRefs((cur) => ({
+          ...cur,
+          [projectId]: (cur[projectId] ?? []).filter((r) => r.id !== tempId)
+        }))
+        return
+      }
+      const saved = res.ref
+      setProjectExternalRefs((cur) => ({
+        ...cur,
+        [projectId]: (cur[projectId] ?? []).map((r) =>
+          r.id === tempId
+            ? {
+                id: saved.id,
+                projectId: saved.projectId,
+                kind: saved.kind,
+                url: saved.url,
+                label: saved.label,
+                createdAt:
+                  saved.createdAt instanceof Date
+                    ? saved.createdAt.toISOString()
+                    : String(saved.createdAt)
+              }
+            : r
+        )
+      }))
+    })
+  }
+
+  const removeProjectExternalRef = (projectId: string, refId: string) => {
+    let snapshot: ProjectExternalRef[] | null = null
+    setProjectExternalRefs((cur) => {
+      snapshot = cur[projectId] ?? []
+      return {
+        ...cur,
+        [projectId]: (cur[projectId] ?? []).filter((r) => r.id !== refId)
+      }
+    })
+    startTransition(async () => {
+      const res = await removeProjectExternalRefAction(refId)
+      if ('error' in res) {
+        toast.error(res.error)
+        if (snapshot) {
+          setProjectExternalRefs((cur) => ({
+            ...cur,
+            [projectId]: snapshot!
+          }))
+        }
+      }
+    })
+  }
+
   const createTask = (
     draft: Omit<BoardTask, 'id' | 'ref' | 'createdAt' | 'updatedAt'>
   ) => {
@@ -453,7 +879,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           id: nextId('act'),
           kind: 'created',
           text: 'Task created',
-          at: nowLabel()
+          at: nowLabel(),
+          atRaw: new Date().toISOString()
         }
       ]
     }))
@@ -497,8 +924,9 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       setActivity((cur) => {
         const entry = cur[tempId]
         if (!entry) return cur
-        const { [tempId]: _, ...rest } = cur
-        return { ...rest, [serverTask.id]: entry }
+        const next = { ...cur }
+        delete next[tempId]
+        return { ...next, [serverTask.id]: entry }
       })
       setSelectedId((sid) => (sid === tempId ? serverTask.id : sid))
     })
@@ -633,6 +1061,36 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     setNewTaskOpen(true)
   }
 
+  const createBulkTasks = async (
+    targetProjectId: string,
+    drafts: {
+      title: string
+      description: string | null
+      status: TaskStatus
+      priority: TaskPriority
+      assigneeId: string | null
+      dueDate: string | null
+      labelIds: string[]
+      newLabelNames: string[]
+    }[]
+  ) => {
+    const res = await createBulkDashboardTasks(targetProjectId, drafts)
+    if ('error' in res) {
+      console.error('createBulkTasks:', res.error)
+      toast.error("Couldn't create tasks.")
+      return
+    }
+    const taskMsg = `Created ${res.tasks.length} task${res.tasks.length === 1 ? '' : 's'}`
+    const labelMsg =
+      res.createdLabels.length > 0
+        ? ` + ${res.createdLabels.length} new label${res.createdLabels.length === 1 ? '' : 's'}`
+        : ''
+    toast.success(taskMsg + labelMsg)
+    // Server data refresh — bulk insert doesn't reuse the per-task
+    // optimistic plumbing.
+    router.refresh()
+  }
+
   const deleteTask = (id: string) => {
     const snapshot = tasks
     const removed = snapshot.find((t) => t.id === id)
@@ -737,16 +1195,47 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     ? (tasks.find((task) => task.id === selectedId) ?? null)
     : null
 
+  // Shared export context for every CopyButton on the page. The serializers
+  // in lib/export consume this shape, so the Topbar / Project / Cycle /
+  // Updates / Task buttons all reuse the same context build.
+  const exportCtx: ExportContext = useMemo(
+    () => ({
+      tasks,
+      cycles,
+      projects: initial.projects,
+      members: team,
+      commentsByTask: comments,
+      activityByTask: activity,
+      refsByTask: externalRefs,
+      refsByProject: projectExternalRefs
+    }),
+    [
+      tasks,
+      cycles,
+      initial.projects,
+      team,
+      comments,
+      activity,
+      externalRefs,
+      projectExternalRefs
+    ]
+  )
+
   const globalActivity = useMemo(() => {
     const all = Object.entries(activity).flatMap(([taskId, list]) => {
       const task = tasks.find((task) => task.id === taskId)
       return list.map((a) => ({
         id: a.id,
-        text: task ? `[${task.ref}] ${a.text}` : a.text,
-        at: a.at
+        kind: a.kind,
+        text: a.text,
+        at: a.at,
+        atRaw: a.atRaw,
+        taskId,
+        taskRef: task?.ref ?? null,
+        taskTitle: task?.title ?? null
       }))
     })
-    return all.reverse()
+    return all.sort((a, b) => b.atRaw.localeCompare(a.atRaw))
   }, [activity, tasks])
 
   // Sort within each column: explicit sortOrder first (3b drag/drop),
@@ -814,6 +1303,15 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     router.push(qs ? `/dashboard?${qs}` : '/dashboard')
   }
 
+  // Clicking a project card on the in-dashboard Projects panel should
+  // both pin the project filter and surface the board (the card is the
+  // "open this project" action — staying on the meta-panel afterward
+  // would be confusing).
+  const onOpenProject = (projectId: string) => {
+    setView('all')
+    onProjectChange(projectId)
+  }
+
   const activeQuickFilter: 'open' | 'due' | 'review' | 'done' | null =
     priorityFilter === 'urgent' && !statusFilter
       ? 'due'
@@ -875,7 +1373,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           >
             Verbivore · Task Handoff
           </span>
-          <CurrentUserBadge user={currentUser} isAdmin={isAdmin} />
+          <CurrentUserMenu user={currentUser} isAdmin={isAdmin} />
         </div>
 
         <div className="flex min-h-0 flex-1">
@@ -898,6 +1396,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               counts={counts}
               secondary={view}
               onSecondary={(v) => setView(v)}
+              showHints={showHints}
+              currentUserId={currentUserId}
             />
           </div>
 
@@ -923,6 +1423,32 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               onProjectChange={onProjectChange}
               activeQuickFilter={activeQuickFilter}
               onQuickFilter={onQuickFilter}
+              copySlot={
+                <CopyButton
+                  primaryLabel="Copy page"
+                  primaryToastLabel="page as Markdown"
+                  primaryGetContent={() =>
+                    buildViewMarkdown({
+                      tasks: filtered,
+                      ctx: exportCtx,
+                      view,
+                      groupBy,
+                      currentProjectId: initial.currentProjectId,
+                      projects: initial.projects
+                    })
+                  }
+                  menu={buildViewCopyMenu({
+                    filtered,
+                    allTasks: tasks,
+                    ctx: exportCtx,
+                    view,
+                    groupBy,
+                    currentProjectId: initial.currentProjectId,
+                    projects: initial.projects,
+                    cycles
+                  })}
+                />
+              }
             />
 
             <FilterPanel
@@ -1008,66 +1534,173 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 ])
               }}
             >
-              {(view === 'all' || view === 'mine' || view === 'inbox') && (
+              {(view === 'all' ||
+                view === 'mine' ||
+                view === 'inbox' ||
+                view === 'mentions') && (
                 <>
                   {tab === 'board' && (
-                    <DndContext
-                      id="dashboard-board"
-                      sensors={sensors}
-                      collisionDetection={closestCorners}
-                      onDragStart={onDragStart}
-                      onDragOver={onDragOver}
-                      onDragEnd={onDragEnd}
-                      onDragCancel={onDragCancel}
-                    >
-                      {/* Scrollbars hidden (chrome + firefox + ie) but scroll
-                          still works via wheel/trackpad. No gradient hint. */}
-                      <div className="flex h-full min-h-0 [scrollbar-width:none] gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                        {groups.map((g) => {
-                          const status =
-                            groupBy === 'status'
-                              ? (STATUS_BY_ID[g.key as TaskStatus] ??
-                                STATUSES[0])
-                              : undefined
+                    <div className="flex h-full min-h-0 flex-col">
+                      {initial.currentProjectId &&
+                        (() => {
+                          const currentCycle =
+                            cycles.find(
+                              (c) =>
+                                c.projectId === initial.currentProjectId &&
+                                c.status === 'current'
+                            ) ?? null
                           return (
-                            <BoardColumn
-                              key={g.key}
-                              title={g.label}
-                              statusId={status?.id}
-                              tasks={g.items}
-                              selectedTaskId={selectedId}
-                              onSelect={setSelectedId}
-                              onAdd={
-                                groupBy === 'status'
-                                  ? () => openNewTask(g.key as TaskStatus)
-                                  : undefined
+                            <CycleHero
+                              cycle={currentCycle}
+                              canEdit={
+                                initial.currentMember.accessTier === 'admin' ||
+                                initial.currentMember.accessTier === 'lead'
                               }
-                              density={density}
-                              wipLimit={wipLimit}
-                              droppableId={`col:${status?.id ?? g.key}`}
+                              onPlan={() => setTab('cycles')}
+                              onEdit={() => setTab('cycles')}
+                              copySlot={
+                                currentCycle ? (
+                                  <CopyButton
+                                    primaryLabel="Copy cycle"
+                                    primaryToastLabel={`cycle ${currentCycle.name} as Markdown`}
+                                    primaryGetContent={() =>
+                                      cycleToMarkdown(currentCycle, exportCtx)
+                                    }
+                                    menu={[
+                                      {
+                                        id: 'md-full',
+                                        label: 'Copy as Markdown',
+                                        getContent: () =>
+                                          cycleToMarkdown(
+                                            currentCycle,
+                                            exportCtx
+                                          ),
+                                        toastLabel: `cycle ${currentCycle.name} as Markdown`
+                                      },
+                                      {
+                                        id: 'md-slim',
+                                        label: 'Copy as Markdown (no comments)',
+                                        getContent: () =>
+                                          cycleToMarkdown(
+                                            currentCycle,
+                                            exportCtx,
+                                            {
+                                              withoutCommentsAndActivity: true
+                                            }
+                                          ),
+                                        toastLabel: `cycle ${currentCycle.name} as Markdown`
+                                      },
+                                      {
+                                        id: 'json-full',
+                                        label: 'Copy as JSON',
+                                        getContent: () =>
+                                          cycleToJson(currentCycle, exportCtx),
+                                        toastLabel: `cycle ${currentCycle.name} as JSON`
+                                      },
+                                      {
+                                        id: 'json-slim',
+                                        label: 'Copy as JSON (no comments)',
+                                        getContent: () =>
+                                          cycleToJson(currentCycle, exportCtx, {
+                                            withoutCommentsAndActivity: true
+                                          }),
+                                        toastLabel: `cycle ${currentCycle.name} as JSON`
+                                      }
+                                    ]}
+                                  />
+                                ) : null
+                              }
                             />
                           )
-                        })}
-                      </div>
-                      <DragOverlay dropAnimation={null}>
-                        {activeDragId
-                          ? (() => {
-                              const t = tasks.find((x) => x.id === activeDragId)
-                              return t ? (
-                                <div className="rotate-1 opacity-95 shadow-2xl">
-                                  <TaskCard task={t} draggable={false} />
-                                </div>
-                              ) : null
-                            })()
-                          : null}
-                      </DragOverlay>
-                    </DndContext>
+                        })()}
+                      <DndContext
+                        id="dashboard-board"
+                        sensors={sensors}
+                        collisionDetection={closestCorners}
+                        onDragStart={onDragStart}
+                        onDragOver={onDragOver}
+                        onDragEnd={onDragEnd}
+                        onDragCancel={onDragCancel}
+                      >
+                        {/* Scrollbars hidden (chrome + firefox + ie) but scroll
+                            still works via wheel/trackpad. No gradient hint. */}
+                        <div className="flex min-h-0 flex-1 [scrollbar-width:none] gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                          {groups.map((g) => {
+                            const status =
+                              groupBy === 'status'
+                                ? (STATUS_BY_ID[g.key as TaskStatus] ??
+                                  STATUSES[0])
+                                : undefined
+                            return (
+                              <BoardColumn
+                                key={g.key}
+                                title={g.label}
+                                statusId={status?.id}
+                                tasks={g.items}
+                                selectedTaskId={selectedId}
+                                onSelect={setSelectedId}
+                                onAdd={
+                                  groupBy === 'status'
+                                    ? () => openNewTask(g.key as TaskStatus)
+                                    : undefined
+                                }
+                                density={density}
+                                wipLimit={wipLimit}
+                                droppableId={`col:${status?.id ?? g.key}`}
+                              />
+                            )
+                          })}
+                        </div>
+                        <DragOverlay dropAnimation={null}>
+                          {activeDragId
+                            ? (() => {
+                                const t = tasks.find(
+                                  (x) => x.id === activeDragId
+                                )
+                                return t ? (
+                                  <div className="rotate-1 opacity-95 shadow-2xl">
+                                    <TaskCard task={t} draggable={false} />
+                                  </div>
+                                ) : null
+                              })()
+                            : null}
+                        </DragOverlay>
+                      </DndContext>
+                    </div>
                   )}
                   {tab === 'list' && (
                     <ListView tasks={filtered} onSelect={setSelectedId} />
                   )}
                   {tab === 'timeline' && (
                     <Timeline tasks={filtered} onSelect={setSelectedId} />
+                  )}
+                  {tab === 'cycles' && initial.currentProjectId && (
+                    <CyclesPanel
+                      projectId={initial.currentProjectId}
+                      cycles={cycles.filter(
+                        (c) => c.projectId === initial.currentProjectId
+                      )}
+                      setCycles={setCycles}
+                      tasks={tasks.filter(
+                        (t) => t.projectId === initial.currentProjectId
+                      )}
+                      accessTier={initial.currentMember.accessTier}
+                      onOpenTask={setSelectedId}
+                      renderCycleCopySlot={(cycleId) => {
+                        const c = cycles.find((x) => x.id === cycleId)
+                        if (!c) return null
+                        return (
+                          <CopyButton
+                            primaryLabel=""
+                            iconOnly
+                            primaryToastLabel={`cycle ${c.name} as Markdown`}
+                            primaryGetContent={() =>
+                              cycleToMarkdown(c, exportCtx)
+                            }
+                          />
+                        )
+                      }}
+                    />
                   )}
                 </>
               )}
@@ -1078,13 +1711,91 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   projects={initial.projects}
                   currentUserId={currentUserId}
                   accessTier={initial.currentMember.accessTier}
+                  onOpenProject={onOpenProject}
+                  refsByProject={projectExternalRefs}
+                  onAddProjectRef={addProjectExternalRef}
+                  onRemoveProjectRef={removeProjectExternalRef}
+                  renderCopySlot={(projectId) => {
+                    const project = initial.projects.find(
+                      (p) => p.id === projectId
+                    )
+                    if (!project) return null
+                    return (
+                      <CopyButton
+                        primaryLabel="Copy project"
+                        primaryToastLabel={`${project.name} as Markdown`}
+                        primaryGetContent={() =>
+                          projectToMarkdown(project, exportCtx)
+                        }
+                        menu={[
+                          {
+                            id: 'md-full',
+                            label: 'Copy as Markdown',
+                            description: 'With comments + activity',
+                            getContent: () =>
+                              projectToMarkdown(project, exportCtx),
+                            toastLabel: `${project.name} as Markdown`
+                          },
+                          {
+                            id: 'md-slim',
+                            label: 'Copy as Markdown (no comments)',
+                            getContent: () =>
+                              projectToMarkdown(project, exportCtx, {
+                                withoutCommentsAndActivity: true
+                              }),
+                            toastLabel: `${project.name} as Markdown`
+                          },
+                          {
+                            id: 'json-full',
+                            label: 'Copy as JSON',
+                            description: 'Versioned shape for agent ingestion',
+                            getContent: () => projectToJson(project, exportCtx),
+                            toastLabel: `${project.name} as JSON`
+                          },
+                          {
+                            id: 'json-slim',
+                            label: 'Copy as JSON (no comments)',
+                            getContent: () =>
+                              projectToJson(project, exportCtx, {
+                                withoutCommentsAndActivity: true
+                              }),
+                            toastLabel: `${project.name} as JSON`
+                          }
+                        ]}
+                      />
+                    )
+                  }}
                 />
               )}
-              {view === 'updates' && <UpdatesPanel activity={globalActivity} />}
-              {view === 'symbols' && <SymbolsPanel />}
+              {view === 'updates' && (
+                <UpdatesPanel
+                  activity={globalActivity}
+                  onOpenTask={(id) => setSelectedId(id)}
+                />
+              )}
+              {view === 'symbols' && (
+                <SymbolsPanel
+                  tasks={visibleTasks}
+                  cycles={cycles}
+                  refsByTask={externalRefs}
+                  refsByProject={projectExternalRefs}
+                  onFilterByStatus={(status) => {
+                    setStatusFilter(status)
+                    setPriorityFilter(null)
+                    setView('all')
+                    setTab('board')
+                  }}
+                  onFilterByPriority={(priority) => {
+                    setPriorityFilter(priority)
+                    setStatusFilter(null)
+                    setView('all')
+                    setTab('board')
+                  }}
+                />
+              )}
               {view === 'archive' && (
                 <ArchivePanel
-                  cycles={initial.cycles}
+                  cycles={cycles}
                   tasks={visibleTasks}
                   comments={comments}
                   activity={activity}
@@ -1102,6 +1813,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   setWipLimit={setWipLimit}
                   notifyOnAssign={notifyOnAssign}
                   setNotifyOnAssign={setNotifyOnAssign}
+                  showHints={showHints}
+                  setShowHints={setShowHints}
                   onClearTasks={refreshFromServer}
                 />
               )}
@@ -1127,6 +1840,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                     task={selected}
                     comments={comments[selected.id] ?? []}
                     activity={activity[selected.id] ?? []}
+                    externalRefs={externalRefs[selected.id] ?? []}
                     currentUserId={currentUserId}
                     isAdmin={isAdmin}
                     onClose={() => setSelectedId(null)}
@@ -1136,6 +1850,52 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                     onAddComment={addComment}
                     onEditComment={editComment}
                     onDeleteComment={deleteComment}
+                    onAddExternalRef={addExternalRef}
+                    onRemoveExternalRef={removeExternalRef}
+                    copySlot={
+                      <CopyButton
+                        primaryLabel="Copy"
+                        primaryToastLabel="task as Markdown"
+                        primaryGetContent={() =>
+                          taskToMarkdown(selected, exportCtx)
+                        }
+                        menu={[
+                          {
+                            id: 'md-full',
+                            label: 'Copy as Markdown',
+                            description: 'With comments + activity',
+                            getContent: () =>
+                              taskToMarkdown(selected, exportCtx),
+                            toastLabel: 'task as Markdown'
+                          },
+                          {
+                            id: 'md-slim',
+                            label: 'Copy as Markdown (no comments)',
+                            getContent: () =>
+                              taskToMarkdown(selected, exportCtx, {
+                                withoutCommentsAndActivity: true
+                              }),
+                            toastLabel: 'task as Markdown'
+                          },
+                          {
+                            id: 'json-full',
+                            label: 'Copy as JSON',
+                            description: 'Versioned shape for agent ingestion',
+                            getContent: () => taskToJson(selected, exportCtx),
+                            toastLabel: 'task as JSON'
+                          },
+                          {
+                            id: 'json-slim',
+                            label: 'Copy as JSON (no comments)',
+                            getContent: () =>
+                              taskToJson(selected, exportCtx, {
+                                withoutCommentsAndActivity: true
+                              }),
+                            toastLabel: 'task as JSON'
+                          }
+                        ]}
+                      />
+                    }
                   />
                 )}
               </SheetContent>
@@ -1147,15 +1907,21 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           open={newTaskOpen}
           defaultStatus={newTaskColumn}
           members={team}
+          labels={initial.labels}
+          projects={initial.allActiveProjects}
+          defaultProjectId={
+            initial.currentProjectId ?? initial.defaultProjectId
+          }
           onClose={() => setNewTaskOpen(false)}
           onCreate={createTask}
+          onCreateBulk={createBulkTasks}
         />
       </div>
     </TaskActionsProvider>
   )
 }
 
-function CurrentUserBadge({
+function CurrentUserMenu({
   user,
   isAdmin
 }: {
@@ -1163,21 +1929,81 @@ function CurrentUserBadge({
   isAdmin: boolean
 }) {
   const { t } = useDashTheme()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open])
+
+  const roleLabel = isAdmin ? 'Admin' : 'Member'
+
   return (
-    <div
-      className={`flex items-center gap-2 rounded-full border px-2 py-1 ${t.btn}`}
-    >
-      <Avatar user={user} size={22} />
-      <span className={`text-xs ${t.text} hidden sm:inline`}>{user.name}</span>
-      <span
-        className={`rounded px-1.5 py-0.5 text-[9px] tracking-wider uppercase ${
-          isAdmin
-            ? 'bg-red-500/15 text-red-500'
-            : `${t.surfaceMuted} ${t.textMuted}`
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={user.name}
+        className={`flex items-center gap-2 rounded-full border px-2 py-1 transition ${
+          open ? t.btnActive : t.btn
         }`}
       >
-        {isAdmin ? 'Admin' : 'Member'}
-      </span>
+        <Avatar user={user} size={22} />
+        <span className={`text-xs ${t.text} hidden sm:inline`}>
+          {user.name}
+        </span>
+        <span
+          className={`rounded px-1.5 py-0.5 text-[9px] tracking-wider uppercase ${
+            isAdmin
+              ? 'bg-teal-500/15 text-teal-500'
+              : `${t.surfaceMuted} ${t.textMuted}`
+          }`}
+        >
+          {roleLabel}
+        </span>
+        <ChevronDown
+          className={`size-3 ${t.textSubtle} transition-transform ${
+            open ? 'rotate-180' : ''
+          }`}
+        />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className={`absolute top-9 right-0 z-40 w-56 rounded-md border py-1 shadow-xl ${t.detail}`}
+        >
+          <div className="flex items-center gap-2 px-3 py-2">
+            <Avatar user={user} size={28} />
+            <div className="flex min-w-0 flex-col leading-tight">
+              <span className={`truncate text-xs font-medium ${t.text}`}>
+                {user.name}
+              </span>
+              <span
+                className={`text-[10px] tracking-wider uppercase ${t.textSubtle}`}
+              >
+                {roleLabel}
+              </span>
+            </div>
+          </div>
+          <div className={`my-1 border-t ${t.borderSoft}`} />
+          <form action={signOut}>
+            <button
+              type="submit"
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs ${t.tab} ${t.accentText}`}
+            >
+              <LogOut className="size-3.5" />
+              Sign out
+            </button>
+          </form>
+        </div>
+      )}
     </div>
   )
 }

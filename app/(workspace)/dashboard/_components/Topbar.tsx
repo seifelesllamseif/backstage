@@ -17,8 +17,8 @@ export type QuickFilter = 'open' | 'due' | 'review' | 'done'
 interface TopbarProps {
   query: string
   onQuery: (q: string) => void
-  tab: 'board' | 'list' | 'timeline'
-  onTab: (t: 'board' | 'list' | 'timeline') => void
+  tab: 'board' | 'list' | 'timeline' | 'cycles'
+  onTab: (t: 'board' | 'list' | 'timeline' | 'cycles') => void
   totals: { open: number; due: number; review: number; done: number }
   onNewTask: () => void
   onToggleFilter: () => void
@@ -32,12 +32,21 @@ interface TopbarProps {
   onProjectChange: (projectId: string | null) => void
   activeQuickFilter: QuickFilter | null
   onQuickFilter: (kind: QuickFilter) => void
+  // Slot for the Copy view button. Lives next to "New task" on the right.
+  // The parent (DashboardShell) owns the data, so the slot is a plain
+  // ReactNode rather than a callback bag.
+  copySlot?: React.ReactNode
 }
 
-const TABS: { id: 'board' | 'list' | 'timeline'; label: string }[] = [
+const TABS: {
+  id: 'board' | 'list' | 'timeline' | 'cycles'
+  label: string
+  requiresProject?: boolean
+}[] = [
   { id: 'board', label: 'Board' },
   { id: 'list', label: 'List' },
-  { id: 'timeline', label: 'Timeline' }
+  { id: 'timeline', label: 'Timeline' },
+  { id: 'cycles', label: 'Cycles', requiresProject: true }
 ]
 
 const GROUPS: { id: GroupBy; label: string }[] = [
@@ -63,7 +72,8 @@ export default function Topbar({
   currentProjectId,
   onProjectChange,
   activeQuickFilter,
-  onQuickFilter
+  onQuickFilter,
+  copySlot
 }: TopbarProps) {
   const { t } = useDashTheme()
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
@@ -96,72 +106,86 @@ export default function Topbar({
             Verbivore
           </Link>
           <span className={t.textFaint}>/</span>
-          {currentProject ? (
-            <div className="relative" ref={projectMenuRef}>
-              <button
-                onClick={() => setProjectMenuOpen((o) => !o)}
-                className={`flex items-center gap-1 ${t.text} hover:opacity-80 transition`}
-                title="Switch project"
+          <div className="relative" ref={projectMenuRef}>
+            <button
+              onClick={() => setProjectMenuOpen((o) => !o)}
+              className={`flex items-center gap-1 ${t.text} hover:opacity-80 transition`}
+              title="Switch project"
+              aria-haspopup="menu"
+              aria-expanded={projectMenuOpen}
+            >
+              <span className="truncate max-w-[180px]">
+                {currentProject?.name ?? 'All tasks'}
+              </span>
+              <ChevronDown
+                className={`size-3 ${t.textSubtle} transition-transform ${
+                  projectMenuOpen ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+            {projectMenuOpen && (
+              <div
+                role="menu"
+                className={`absolute left-0 top-7 z-40 w-60 rounded-md border shadow-xl py-1 max-h-72 overflow-auto ${t.detail}`}
               >
-                <span className="truncate max-w-[180px]">
-                  {currentProject.name}
-                </span>
-                <ChevronDown
-                  className={`size-3 ${t.textSubtle} transition-transform ${
-                    projectMenuOpen ? 'rotate-180' : ''
+                <button
+                  onClick={() => {
+                    onProjectChange(null)
+                    setProjectMenuOpen(false)
+                  }}
+                  className={`w-full text-left px-3 py-1.5 text-xs ${
+                    currentProjectId === null ? t.btnActive : t.tab
                   }`}
-                />
-              </button>
-              {projectMenuOpen && (
-                <div
-                  className={`absolute left-0 top-7 z-40 w-60 rounded-md border shadow-xl py-1 max-h-72 overflow-auto ${t.detail}`}
                 >
+                  All tasks
+                </button>
+                <div className={`my-1 border-t ${t.borderSoft}`} />
+                {projects.map((p) => (
                   <button
+                    key={p.id}
                     onClick={() => {
-                      onProjectChange(null)
+                      onProjectChange(p.id)
                       setProjectMenuOpen(false)
                     }}
-                    className={`w-full text-left px-3 py-1.5 text-xs ${t.tab}`}
+                    className={`w-full text-left px-3 py-1.5 text-xs truncate ${
+                      p.id === currentProjectId ? t.btnActive : t.tab
+                    }`}
                   >
-                    All projects
+                    {p.name}
                   </button>
-                  <div className={`my-1 border-t ${t.borderSoft}`} />
-                  {projects.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => {
-                        onProjectChange(p.id)
-                        setProjectMenuOpen(false)
-                      }}
-                      className={`w-full text-left px-3 py-1.5 text-xs truncate ${
-                        p.id === currentProjectId ? t.btnActive : t.tab
-                      }`}
-                    >
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <span className={t.text}>All tasks</span>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <div
           className={`hidden md:flex items-center gap-1 rounded-md border p-0.5 ${t.border}`}
         >
-          {TABS.map((opt) => (
-            <button
-              key={opt.id}
-              onClick={() => onTab(opt.id)}
-              className={`px-2.5 py-1 rounded text-xs transition ${
-                tab === opt.id ? t.tabActive : t.tab
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+          {TABS.map((opt) => {
+            const disabled =
+              opt.requiresProject && currentProjectId === null
+            return (
+              <button
+                key={opt.id}
+                onClick={() => {
+                  if (disabled) return
+                  onTab(opt.id)
+                }}
+                disabled={disabled}
+                title={
+                  disabled
+                    ? 'Pick a project from the breadcrumb to plan cycles'
+                    : undefined
+                }
+                className={`px-2.5 py-1 rounded text-xs transition disabled:opacity-40 disabled:cursor-not-allowed ${
+                  tab === opt.id ? t.tabActive : t.tab
+                }`}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -250,6 +274,8 @@ export default function Topbar({
         <AnimatedThemeToggler
           className={`h-8 w-8 rounded-md border flex items-center justify-center transition ${t.btn}`}
         />
+
+        {copySlot}
 
         <button
           onClick={onNewTask}

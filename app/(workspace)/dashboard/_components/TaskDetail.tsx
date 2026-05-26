@@ -1,7 +1,27 @@
 'use client'
 
 import { useState } from 'react'
-import { MessageSquare, Paperclip, GitBranch, Pencil, Trash2, Check } from 'lucide-react'
+import {
+  Check,
+  ExternalLink,
+  FileText,
+  GitBranch,
+  GitCommit,
+  GitPullRequest,
+  Link as LinkIcon,
+  MessageCircleQuestion,
+  MessageSquare,
+  Paperclip,
+  Pencil,
+  Plus,
+  Trash2,
+  X
+} from 'lucide-react'
+import {
+  defaultExternalRefLabel,
+  parseExternalRef
+} from '@/lib/externalRef'
+import type { TaskExternalRef, TaskExternalRefKind } from './boardData'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,12 +64,14 @@ export interface TaskActivity {
   kind: 'status' | 'comment' | 'attachment' | 'created' | 'priority' | 'assignee'
   text: string
   at: string
+  atRaw: string
 }
 
 interface TaskDetailProps {
   task: BoardTask | null
   comments: TaskComment[]
   activity: TaskActivity[]
+  externalRefs: TaskExternalRef[]
   currentUserId: string
   isAdmin: boolean
   onClose: () => void
@@ -59,6 +81,12 @@ interface TaskDetailProps {
   onAddComment: (id: string, body: string, mentions?: string[]) => void
   onEditComment: (commentId: string, body: string) => void
   onDeleteComment: (commentId: string) => void
+  onAddExternalRef: (taskId: string, url: string) => void
+  onRemoveExternalRef: (taskId: string, refId: string) => void
+  // Optional copy-button slot. DashboardShell owns the export context and
+  // injects a CopyButton here so the task header gets a Copy task action
+  // without TaskDetail having to know about lib/export.
+  copySlot?: React.ReactNode
 }
 
 const PRIORITIES: TaskPriority[] = ['urgent', 'high', 'medium', 'low', 'none']
@@ -67,6 +95,7 @@ export default function TaskDetail({
   task,
   comments,
   activity,
+  externalRefs,
   currentUserId,
   isAdmin,
   onClose,
@@ -75,7 +104,10 @@ export default function TaskDetail({
   onChangeAssignee,
   onAddComment,
   onEditComment,
-  onDeleteComment
+  onDeleteComment,
+  onAddExternalRef,
+  onRemoveExternalRef,
+  copySlot
 }: TaskDetailProps) {
   const { t } = useDashTheme()
   const team = useTeam()
@@ -95,10 +127,11 @@ export default function TaskDetail({
   // component is content-only.
   return (
     <div className={`flex flex-col h-full ${t.detail}`}>
-      <div className={`flex items-center justify-between px-4 h-12 border-b ${t.border}`}>
+      <div className={`flex items-center justify-between gap-3 px-4 h-12 border-b ${t.border}`}>
         <span className={`text-[10px] uppercase tracking-[0.22em] ${t.textSubtle}`}>
           {task.ref}
         </span>
+        {copySlot}
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-5">
@@ -375,6 +408,13 @@ export default function TaskDetail({
           </div>
         </div>
 
+        <LinksSection
+          task={task}
+          refs={externalRefs}
+          onAdd={(url) => onAddExternalRef(task.id, url)}
+          onRemove={(refId) => onRemoveExternalRef(task.id, refId)}
+        />
+
         <div className="flex flex-col gap-2 text-xs">
           <div className={`text-[10px] uppercase tracking-[0.22em] ${t.textMuted}`}>
             Activity
@@ -452,6 +492,168 @@ function Popover({
         >
           {children}
         </div>
+      )}
+    </div>
+  )
+}
+
+// External refs section (PR / issue / commit / doc / link). Auto-detects
+// kind from the pasted URL (lib/externalRef.ts). The chip label falls
+// back to a sensible default (e.g. "PR #123", "github.com") when the row
+// doesn't carry an explicit label.
+function refIcon(kind: TaskExternalRefKind) {
+  switch (kind) {
+    case 'pr':
+      return GitPullRequest
+    case 'issue':
+      return MessageCircleQuestion
+    case 'commit':
+      return GitCommit
+    case 'doc':
+      return FileText
+    case 'link':
+    default:
+      return LinkIcon
+  }
+}
+
+function LinksSection({
+  task,
+  refs,
+  onAdd,
+  onRemove
+}: {
+  task: BoardTask
+  refs: TaskExternalRef[]
+  onAdd: (url: string) => void
+  onRemove: (refId: string) => void
+}) {
+  const { t } = useDashTheme()
+  const [adding, setAdding] = useState(false)
+  const [url, setUrl] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+
+  const submit = () => {
+    const trimmed = url.trim()
+    if (!trimmed) return
+    const parsed = parseExternalRef(trimmed)
+    if (!parsed) {
+      setErr('Not a valid URL.')
+      return
+    }
+    onAdd(parsed.url)
+    setUrl('')
+    setErr(null)
+    setAdding(false)
+  }
+
+  return (
+    <div className="flex flex-col gap-2 text-xs">
+      <div className="flex items-center justify-between">
+        <div
+          className={`text-[10px] uppercase tracking-[0.22em] ${t.textMuted}`}
+        >
+          Links
+        </div>
+        {!adding && (
+          <button
+            onClick={() => setAdding(true)}
+            className={`flex h-6 items-center gap-1 rounded-md border px-1.5 text-[10px] transition ${t.btn}`}
+          >
+            <Plus className="size-3" /> Add
+          </button>
+        )}
+      </div>
+
+      {refs.length === 0 && !adding && (
+        <p className={`text-xs italic ${t.textSubtle}`}>
+          No PRs, issues or docs linked yet.
+        </p>
+      )}
+
+      <ul className="flex flex-col gap-1.5">
+        {refs.map((ref) => {
+          const parsed = parseExternalRef(ref.url)
+          const label =
+            ref.label ??
+            (parsed ? defaultExternalRefLabel(parsed) : ref.url)
+          const Icon = refIcon(ref.kind)
+          return (
+            <li
+              key={ref.id}
+              className={`group flex items-center gap-2 rounded-md border px-2.5 py-1.5 ${t.column}`}
+            >
+              <Icon className={`size-3.5 shrink-0 ${t.textMuted}`} />
+              <a
+                href={ref.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className={`flex min-w-0 flex-1 items-center gap-1.5 text-xs ${t.text}`}
+                title={ref.url}
+              >
+                <span className="truncate">{label}</span>
+                <ExternalLink className={`size-3 shrink-0 ${t.textSubtle}`} />
+              </a>
+              <button
+                onClick={() => onRemove(ref.id)}
+                className={`flex size-5 items-center justify-center rounded opacity-0 transition group-hover:opacity-100 ${t.tab}`}
+                aria-label="Remove link"
+              >
+                <X className="size-3" />
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+
+      {adding && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            submit()
+          }}
+          className="flex flex-col gap-1.5"
+        >
+          <div className="flex items-center gap-1.5">
+            <input
+              autoFocus
+              type="url"
+              value={url}
+              onChange={(e) => {
+                setUrl(e.target.value)
+                if (err) setErr(null)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setUrl('')
+                  setErr(null)
+                  setAdding(false)
+                }
+              }}
+              placeholder="Paste a PR, issue, doc or any URL…"
+              className={`h-8 flex-1 rounded-md border px-2 text-xs ${t.input}`}
+            />
+            <button
+              type="submit"
+              className={`h-8 rounded-md px-2.5 text-[10px] ${t.accent}`}
+              disabled={!url.trim()}
+            >
+              <Check className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setUrl('')
+                setErr(null)
+                setAdding(false)
+              }}
+              className={`flex size-8 items-center justify-center rounded-md border ${t.btn}`}
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+          {err && <p className="text-[11px] text-red-500">{err}</p>}
+        </form>
       )}
     </div>
   )

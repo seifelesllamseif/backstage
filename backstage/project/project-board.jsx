@@ -2,26 +2,39 @@
 // Columns: Backlog, Unscoped, To do, In progress, In review, Done.
 
 const BOARD_COLUMNS = [
-  { key: 'backlog',     label: 'Backlog' },
-  { key: 'unscoped',    label: 'Unscoped' },
-  { key: 'todo',        label: 'To do' },
+  { key: 'backlog', label: 'Backlog' },
+  { key: 'unscoped', label: 'Unscoped' },
+  { key: 'todo', label: 'To do' },
   { key: 'in_progress', label: 'In progress' },
-  { key: 'in_review',   label: 'In review' },
-  { key: 'done',        label: 'Done' },
-];
+  { key: 'in_review', label: 'In review' },
+  { key: 'done', label: 'Done' }
+]
 
-function ProjectBoard({ project, tasks, onOpenTask, openTaskId, blockedTaskId }) {
+function ProjectBoard({
+  project,
+  tasks,
+  onOpenTask,
+  openTaskId,
+  blockedTaskId
+}) {
   // bucket tasks by status
-  const buckets = {};
-  BOARD_COLUMNS.forEach((c) => (buckets[c.key] = []));
+  const buckets = {}
+  BOARD_COLUMNS.forEach((c) => (buckets[c.key] = []))
   tasks.forEach((t) => {
-    (buckets[t.status] || (buckets[t.status] = [])).push(t);
-  });
+    ;(buckets[t.status] || (buckets[t.status] = [])).push(t)
+  })
 
-  const empty = tasks.length === 0;
+  const empty = tasks.length === 0
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        minHeight: 0
+      }}
+    >
       {/* Board toolbar */}
       <div
         style={{
@@ -29,7 +42,7 @@ function ProjectBoard({ project, tasks, onOpenTask, openTaskId, blockedTaskId })
           borderBottom: `0.5px solid ${SKAM.divider}`,
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
+          gap: 10
         }}
       >
         <FilterChip label="Assignee" value="Anyone" />
@@ -39,7 +52,9 @@ function ProjectBoard({ project, tasks, onOpenTask, openTaskId, blockedTaskId })
         <span style={{ fontSize: 12, color: SKAM.textMuted }}>
           {tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}
         </span>
-        <Button variant="secondary" icon={Icon.plus}>New task</Button>
+        <Button variant="secondary" icon={Icon.plus}>
+          New task
+        </Button>
       </div>
 
       {empty ? (
@@ -53,7 +68,7 @@ function ProjectBoard({ project, tasks, onOpenTask, openTaskId, blockedTaskId })
             gap: 12,
             padding: '16px 32px 32px 32px',
             overflowX: 'auto',
-            alignItems: 'start',
+            alignItems: 'start'
           }}
         >
           {BOARD_COLUMNS.map((col) => (
@@ -69,7 +84,7 @@ function ProjectBoard({ project, tasks, onOpenTask, openTaskId, blockedTaskId })
         </div>
       )}
     </div>
-  );
+  )
 }
 
 function FilterChip({ label, value }) {
@@ -86,31 +101,49 @@ function FilterChip({ label, value }) {
         borderRadius: 999,
         fontSize: 11,
         cursor: 'pointer',
-        fontFamily: 'inherit',
+        fontFamily: 'inherit'
       }}
     >
       <span style={{ color: SKAM.textMuted }}>{label}</span>
       <span style={{ color: SKAM.text }}>{value}</span>
-      <svg width="8" height="8" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ color: SKAM.textMuted }}>
-        <path d="M3 4l2 2 2-2"/>
+      <svg
+        width="8"
+        height="8"
+        viewBox="0 0 10 10"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ color: SKAM.textMuted }}
+      >
+        <path d="M3 4l2 2 2-2" />
       </svg>
     </button>
-  );
+  )
 }
 
 function BoardColumn({ column, items, onOpenTask, openTaskId, blockedTaskId }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+    <div
+      style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+    >
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 8,
-          padding: '0 4px',
+          padding: '0 4px'
         }}
       >
         <StatusPill status={column.key} />
-        <span style={{ fontSize: 11, color: SKAM.textDim, fontVariantNumeric: 'tabular-nums' }}>
+        <span
+          style={{
+            fontSize: 11,
+            color: SKAM.textDim,
+            fontVariantNumeric: 'tabular-nums'
+          }}
+        >
           {items.length}
         </span>
         <span style={{ flex: 1 }} />
@@ -122,14 +155,21 @@ function BoardColumn({ column, items, onOpenTask, openTaskId, blockedTaskId }) {
             cursor: 'pointer',
             display: 'inline-flex',
             padding: 2,
-            borderRadius: 4,
+            borderRadius: 4
           }}
           title="Add"
         >
           {Icon.plus}
         </button>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 80 }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          minHeight: 80
+        }}
+      >
         {items.map((t) => (
           <TaskCard
             key={t.id}
@@ -141,12 +181,12 @@ function BoardColumn({ column, items, onOpenTask, openTaskId, blockedTaskId }) {
         ))}
       </div>
     </div>
-  );
+  )
 }
 
 function TaskCard({ task, open, blocked, onOpenTask }) {
-  const overdue = task.overdue;
-  const borderColor = blocked ? SKAM.red : open ? SKAM.text2 : SKAM.border;
+  const overdue = task.overdue
+  const borderColor = blocked ? SKAM.red : open ? SKAM.text2 : SKAM.border
   return (
     <div
       onClick={() => onOpenTask && onOpenTask(task.id)}
@@ -160,16 +200,29 @@ function TaskCard({ task, open, blocked, onOpenTask }) {
         gap: 8,
         cursor: 'pointer',
         position: 'relative',
-        boxShadow: blocked ? `0 0 0 2px ${SKAM.redTintHi}` : open ? `0 0 0 1px ${SKAM.hover}` : 'none',
+        boxShadow: blocked
+          ? `0 0 0 2px ${SKAM.redTintHi}`
+          : open
+            ? `0 0 0 1px ${SKAM.hover}`
+            : 'none'
       }}
     >
       {/* id row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontSize: 10, color: SKAM.textDim, fontVariantNumeric: 'tabular-nums' }}>
+        <span
+          style={{
+            fontSize: 10,
+            color: SKAM.textDim,
+            fontVariantNumeric: 'tabular-nums'
+          }}
+        >
           {task.id}
         </span>
         {task.hasDeps && (
-          <span style={{ color: SKAM.textMuted, display: 'inline-flex' }} title="Has dependencies">
+          <span
+            style={{ color: SKAM.textMuted, display: 'inline-flex' }}
+            title="Has dependencies"
+          >
             {Icon.link}
           </span>
         )}
@@ -184,7 +237,7 @@ function TaskCard({ task, open, blocked, onOpenTask }) {
               background: 'rgba(239,159,39,0.10)',
               padding: '1px 6px',
               borderRadius: 4,
-              marginLeft: 'auto',
+              marginLeft: 'auto'
             }}
           >
             handoff
@@ -198,7 +251,7 @@ function TaskCard({ task, open, blocked, onOpenTask }) {
           fontSize: 13,
           color: SKAM.text,
           lineHeight: 1.35,
-          fontWeight: 400,
+          fontWeight: 400
         }}
       >
         {task.title}
@@ -220,7 +273,7 @@ function TaskCard({ task, open, blocked, onOpenTask }) {
           alignItems: 'center',
           justifyContent: 'space-between',
           marginTop: 2,
-          gap: 8,
+          gap: 8
         }}
       >
         {task.assignee ? (
@@ -236,16 +289,20 @@ function TaskCard({ task, open, blocked, onOpenTask }) {
               fontWeight: overdue ? 500 : 400,
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 4,
+              gap: 4
             }}
           >
-            {overdue && <span style={{ color: SKAM.red, display: 'inline-flex' }}>{Icon.warn}</span>}
+            {overdue && (
+              <span style={{ color: SKAM.red, display: 'inline-flex' }}>
+                {Icon.warn}
+              </span>
+            )}
             {task.due}
           </span>
         )}
       </div>
     </div>
-  );
+  )
 }
 
 function EmptyProject({ project }) {
@@ -256,7 +313,7 @@ function EmptyProject({ project }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '60px 32px',
+        padding: '60px 32px'
       }}
     >
       <Card style={{ maxWidth: 480, width: '100%' }}>
@@ -271,26 +328,42 @@ function EmptyProject({ project }) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: SKAM.text2,
+              color: SKAM.text2
             }}
           >
             {Icon.inbox}
           </div>
-          <div style={{ fontSize: 15, color: SKAM.text, fontWeight: 500, marginBottom: 6 }}>
+          <div
+            style={{
+              fontSize: 15,
+              color: SKAM.text,
+              fontWeight: 500,
+              marginBottom: 6
+            }}
+          >
             {project.name} has no tasks yet
           </div>
-          <div style={{ fontSize: 13, color: SKAM.text2, lineHeight: 1.5, marginBottom: 18 }}>
+          <div
+            style={{
+              fontSize: 13,
+              color: SKAM.text2,
+              lineHeight: 1.5,
+              marginBottom: 18
+            }}
+          >
             Start by adding the first thing the team needs to do. Drop it in
             Unscoped if you're still figuring out the brief.
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-            <Button variant="primary" icon={Icon.plus}>New task</Button>
+            <Button variant="primary" icon={Icon.plus}>
+              New task
+            </Button>
             <Button variant="secondary">Import from a list</Button>
           </div>
         </div>
       </Card>
     </div>
-  );
+  )
 }
 
-Object.assign(window, { ProjectBoard, BOARD_COLUMNS });
+Object.assign(window, { ProjectBoard, BOARD_COLUMNS })

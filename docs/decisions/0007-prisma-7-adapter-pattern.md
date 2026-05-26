@@ -1,6 +1,7 @@
 ---
 status: accepted
 decided_on: 2026-05-23
+revised_on: 2026-05-26
 supersedes_parts_of: 0001, 0006
 ---
 
@@ -70,3 +71,17 @@ On a single-user dev machine the practical risk is low, but rotate the DB passwo
 - **Migration command** is unchanged from [0006](0006-prisma-migrations-workflow.md) — `pnpm prisma migrate dev`. Prisma picks up `prisma.config.ts` automatically.
 - **Runtime client** must be constructed with the adapter every time. `lib/prisma.ts` is the only place we do this; nothing else should `new PrismaClient(...)`.
 - The `accelerateUrl` path is left available — if/when slice 4+ wants edge-runtime query support, we can swap the adapter for `accelerateUrl` and the rest of the app code keeps working.
+
+## Revision — 2026-05-26: split the runtime URL onto the Transaction pooler
+
+The original decision pointed both `prisma migrate` and the runtime adapter at the **Session pooler** (port 5432), with a footnote acknowledging the upgrade path was "two URLs" if we outgrew it. The slice-3b dashboard's fan-out (`fetchDashboardData` in `app/(workspace)/dashboard/actions.ts` runs 7 parallel queries, each with relation includes that issue follow-up queries) outgrew it: Supavisor's session-mode `pool_size: 15` started returning `EMAXCONNSESSION` after a few Turbopack HMR cycles in dev.
+
+**Resolution** — take the upgrade path foreshadowed in the original footnote:
+
+- **`DATABASE_URL`** stays on the **Session pooler (5432)** because `prisma migrate` needs advisory locks.
+- **`APP_DATABASE_URL`** is new and points at the **Transaction pooler (6543)**. `lib/prisma.ts` reads `APP_DATABASE_URL` (falls back to `DATABASE_URL` so older `.env.local` files don't break). Transaction mode multiplexes Postgres connections — the EMAXCONNSESSION class of error goes away.
+- The `pg.Pool` `max` is set to `10` in the adapter config so a single leaked pool from HMR can't monopolize the pooler.
+
+**Why this is safe with `@prisma/adapter-pg`** — the adapter does **not** cache named prepared statements by default (`statementNameGenerator` is opt-in; see `@prisma/adapter-pg/dist/index.d.ts`). The historical PgBouncer-vs-Prisma incompatibility was driven by Prisma's old engine sending named prepared statements that PgBouncer transaction mode couldn't preserve. With the pg adapter sending unnamed statements, transaction-pooled connections work without `?pgbouncer=true` or any other flag.
+
+**Operational caveat** — long-running `prisma migrate` runs and the runtime app now read from different URLs. If someone copies only `DATABASE_URL` to a new `.env.local`, the runtime fallback kicks in and the app silently runs on the Session pooler — slower under load but functionally correct. `.env.example` documents both URLs.

@@ -51,11 +51,16 @@ export type CycleStatus = 'completed' | 'current' | 'upcoming'
 
 export interface Cycle {
   id: string
+  projectId: string
   number: number
   name: string
+  description: string | null
+  docUrl: string | null
   status: CycleStatus
   from: string
   to: string
+  fromIso: string
+  toIso: string
   scope: number
   startedCount: number
   startedPct: number
@@ -63,4 +68,24 @@ export interface Cycle {
   completedPct: number
   percent: number
   taskIds: string[]
+}
+
+export type TaskExternalRefKind = 'issue' | 'pr' | 'commit' | 'doc' | 'link'
+
+export interface TaskExternalRef {
+  id: string
+  taskId: string
+  kind: TaskExternalRefKind
+  url: string
+  label: string | null
+  createdAt: string
+}
+
+export interface ProjectExternalRef {
+  id: string
+  projectId: string
+  kind: TaskExternalRefKind
+  url: string
+  label: string | null
+  createdAt: string
 }

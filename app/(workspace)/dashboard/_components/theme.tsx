@@ -4,14 +4,13 @@ import {
   createContext,
   useCallback,
   useContext,
-  useMemo,
   useRef,
+  useState,
   type ComponentPropsWithoutRef,
   type ReactNode
 } from 'react'
 import { Moon, Sun } from 'lucide-react'
 import { flushSync } from 'react-dom'
-import { useTheme } from 'next-themes'
 
 import { cn } from '@/lib/utils'
 
@@ -25,18 +24,20 @@ interface ThemeCtx {
 
 const ThemeContext = createContext<ThemeCtx | null>(null)
 
-export function DashboardThemeProvider({ children }: { children: ReactNode }) {
-  const { resolvedTheme, setTheme } = useTheme()
-  const mode: Mode = resolvedTheme === 'dark' ? 'dark' : 'light'
-  const value = useMemo<ThemeCtx>(
-    () => ({
-      mode,
-      toggle: () => setTheme(mode === 'light' ? 'dark' : 'light'),
-      t: TOKENS[mode]
-    }),
-    [mode, setTheme]
+export function DashboardThemeProvider({
+  children,
+  initial = 'light'
+}: {
+  children: ReactNode
+  initial?: Mode
+}) {
+  const [mode, setMode] = useState<Mode>(initial)
+  const toggle = () => setMode((m) => (m === 'light' ? 'dark' : 'light'))
+  return (
+    <ThemeContext.Provider value={{ mode, toggle, t: TOKENS[mode] }}>
+      {children}
+    </ThemeContext.Provider>
   )
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }
 
 export function useDashTheme() {
@@ -54,8 +55,7 @@ export type TransitionVariant =
   | 'rectangle'
   | 'star'
 
-interface AnimatedThemeTogglerProps
-  extends ComponentPropsWithoutRef<'button'> {
+interface AnimatedThemeTogglerProps extends ComponentPropsWithoutRef<'button'> {
   duration?: number
   variant?: TransitionVariant
   fromCenter?: boolean
@@ -289,7 +289,7 @@ export const TOKENS = {
     chipActive: 'bg-zinc-900 text-white',
     btn: 'border-zinc-200 text-zinc-700 hover:bg-zinc-100',
     btnActive: 'bg-zinc-100 text-zinc-900',
-    accent: 'bg-red-500 text-white hover:bg-red-600',
+    accent: 'bg-teal-500 text-white hover:bg-teal-600',
     input: 'bg-white border-zinc-200 placeholder:text-zinc-400 text-zinc-900',
     detail: 'bg-white border-zinc-200',
     backLink: 'text-zinc-500 hover:text-zinc-900',
@@ -330,7 +330,7 @@ export const TOKENS = {
     chipActive: 'bg-white/10 text-white',
     btn: 'border-white/10 text-white/70 hover:bg-white/5 hover:text-white',
     btnActive: 'bg-white/10 text-white',
-    accent: 'bg-red-500 text-white hover:bg-red-500/90',
+    accent: 'bg-teal-500 text-white hover:bg-teal-500/90',
     input:
       'bg-white/[0.04] border-white/10 placeholder:text-white/30 text-white',
     detail: 'bg-black/95 border-white/10',

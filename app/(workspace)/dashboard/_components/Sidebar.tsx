@@ -3,7 +3,9 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import {
+  AtSign,
   Inbox,
+  Info,
   LayoutGrid,
   Star,
   Users,
@@ -21,11 +23,33 @@ import { useDashTheme } from './theme'
 import { useContextMenu } from './ContextMenu'
 import { useTaskActions } from './actions'
 import { Filter, X } from 'lucide-react'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from '@/components/ui/tooltip'
+
+// Single source of truth for what each sidebar destination does. Plain
+// language; what a member sees, not implementation. Toggled by the
+// "Show help hints" setting (Settings panel → DashboardShell state).
+const HINTS = {
+  all: 'Every task in your projects.',
+  mine: 'Tasks assigned to you.',
+  inbox: 'Tasks ready to start (Todo) or waiting for review.',
+  mentions: 'Tasks where someone @-mentioned you in a comment.',
+  archive: 'Completed cycles and old tasks.',
+  projects: 'Switch projects and manage members.',
+  updates: 'Recent activity on your projects — status changes, comments, mentions.',
+  symbols: 'Reference for the status and priority icons used on cards.',
+  settings: 'Card density, WIP limits, notifications, and help hints.'
+} as const
 
 type View =
   | 'all'
   | 'mine'
   | 'inbox'
+  | 'mentions'
   | 'projects'
   | 'updates'
   | 'settings'
@@ -33,15 +57,17 @@ type View =
   | 'archive'
 
 interface SidebarProps {
-  activeView: 'all' | 'mine' | 'inbox'
-  onView: (v: 'all' | 'mine' | 'inbox') => void
+  activeView: 'all' | 'mine' | 'inbox' | 'mentions'
+  onView: (v: 'all' | 'mine' | 'inbox' | 'mentions') => void
   statusFilter: TaskStatus | null
   onStatusFilter: (s: TaskStatus | null) => void
   assigneeFilter: string | null
   onAssigneeFilter: (id: string | null) => void
-  counts: { all: number; mine: number; inbox: number }
+  counts: { all: number; mine: number; inbox: number; mentions: number }
   secondary: View
   onSecondary: (v: View) => void
+  showHints: boolean
+  currentUserId: string
 }
 
 export default function Sidebar({
@@ -53,12 +79,18 @@ export default function Sidebar({
   onAssigneeFilter,
   counts,
   secondary,
-  onSecondary
+  onSecondary,
+  showHints,
+  currentUserId
 }: SidebarProps) {
   const { t } = useDashTheme()
   const { open } = useContextMenu()
   const a = useTaskActions()
   const team = useTeam()
+  const orderedTeam = [
+    ...team.filter((m) => m.id === currentUserId),
+    ...team.filter((m) => m.id !== currentUserId)
+  ]
 
   const memberMenu = (
     e: React.MouseEvent,
@@ -101,8 +133,9 @@ export default function Sidebar({
   }
 
   return (
+    <TooltipProvider delayDuration={150}>
     <aside
-      className={`flex h-full min-w-0 flex-col gap-5 overflow-y-auto border-r px-3 py-4 ${t.sidebar}`}
+      className={`flex h-full min-w-0 flex-col gap-5 overflow-y-auto border-r px-3 py-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden ${t.sidebar}`}
     >
       <Link
         href="/dashboard"
@@ -134,6 +167,7 @@ export default function Sidebar({
           count={counts.all}
           active={secondary === 'all'}
           onClick={() => onView('all')}
+          hint={showHints ? HINTS.all : undefined}
         />
         <SidebarItem
           icon={<Star className="size-3.5" />}
@@ -141,6 +175,7 @@ export default function Sidebar({
           count={counts.mine}
           active={secondary === 'mine'}
           onClick={() => onView('mine')}
+          hint={showHints ? HINTS.mine : undefined}
         />
         <SidebarItem
           icon={<Inbox className="size-3.5" />}
@@ -148,12 +183,22 @@ export default function Sidebar({
           count={counts.inbox}
           active={secondary === 'inbox'}
           onClick={() => onView('inbox')}
+          hint={showHints ? HINTS.inbox : undefined}
+        />
+        <SidebarItem
+          icon={<AtSign className="size-3.5" />}
+          label="Mentions"
+          count={counts.mentions}
+          active={secondary === 'mentions'}
+          onClick={() => onView('mentions')}
+          hint={showHints ? HINTS.mentions : undefined}
         />
         <SidebarItem
           icon={<ArchiveIcon className="size-3.5" />}
           label="Archive"
           active={secondary === 'archive'}
           onClick={() => onSecondary('archive')}
+          hint={showHints ? HINTS.archive : undefined}
         />
       </nav>
 
@@ -206,7 +251,7 @@ export default function Sidebar({
           </span>
           Everyone
         </SidebarFilter>
-        {team.map((m) => (
+        {orderedTeam.map((m) => (
           <SidebarFilter
             key={m.id}
             active={assigneeFilter === m.id}
@@ -225,27 +270,32 @@ export default function Sidebar({
           label="Projects"
           active={secondary === 'projects'}
           onClick={() => onSecondary('projects')}
+          hint={showHints ? HINTS.projects : undefined}
         />
         <SidebarItem
           icon={<Bell className="size-3.5" />}
           label="Updates"
           active={secondary === 'updates'}
           onClick={() => onSecondary('updates')}
+          hint={showHints ? HINTS.updates : undefined}
         />
         <SidebarItem
           icon={<Shapes className="size-3.5" />}
           label="Symbols"
           active={secondary === 'symbols'}
           onClick={() => onSecondary('symbols')}
+          hint={showHints ? HINTS.symbols : undefined}
         />
         <SidebarItem
           icon={<Settings className="size-3.5" />}
           label="Settings"
           active={secondary === 'settings'}
           onClick={() => onSecondary('settings')}
+          hint={showHints ? HINTS.settings : undefined}
         />
       </div>
     </aside>
+    </TooltipProvider>
   )
 }
 
@@ -254,32 +304,56 @@ function SidebarItem({
   label,
   count,
   active,
-  onClick
+  onClick,
+  hint
 }: {
   icon: React.ReactNode
   label: string
   count?: number
   active?: boolean
   onClick?: () => void
+  hint?: string
 }) {
   const { t } = useDashTheme()
   return (
-    <button
-      onClick={onClick}
-      className={`flex items-center justify-between rounded-md px-2 py-1.5 text-xs transition ${
-        active ? t.btnActive : `${t.tab}`
+    <div
+      className={`group flex items-center rounded-md text-xs transition ${
+        active ? t.btnActive : t.tab
       }`}
     >
-      <span className="flex items-center gap-2">
-        {icon}
-        {label}
-      </span>
-      {count !== undefined && (
-        <span className={`text-[10px] tabular-nums ${t.textSubtle}`}>
-          {count}
+      <button
+        onClick={onClick}
+        className="flex flex-1 items-center justify-between gap-2 px-2 py-1.5"
+      >
+        <span className="flex items-center gap-2">
+          {icon}
+          {label}
         </span>
+        {count !== undefined && (
+          <span className={`text-[10px] tabular-nums ${t.textSubtle}`}>
+            {count}
+          </span>
+        )}
+      </button>
+      {hint && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              role="button"
+              aria-label={`What is ${label}?`}
+              tabIndex={0}
+              className={`mr-1.5 flex size-4 cursor-help items-center justify-center rounded-full ${t.textSubtle} opacity-50 hover:opacity-100 focus:outline-none focus-visible:opacity-100`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Info className="size-3" />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="right" align="center">
+            {hint}
+          </TooltipContent>
+        </Tooltip>
       )}
-    </button>
+    </div>
   )
 }
 

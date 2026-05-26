@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Send } from 'lucide-react'
 import { BoardAssignee } from './boardData'
 import { useTeam } from './TeamContext'
@@ -47,28 +47,25 @@ export default function MentionInput({
   const matches = useMemo(() => {
     if (!trigger.active) return []
     const q = trigger.query.toLowerCase()
-    return targets.filter((m) =>
-      m.label.toLowerCase().includes(q)
-    ).slice(0, 6)
+    return targets.filter((m) => m.label.toLowerCase().includes(q)).slice(0, 6)
   }, [trigger, targets])
-
-  useEffect(() => {
-    setHighlight(0)
-  }, [trigger.query, trigger.active])
 
   const detectMention = (next: string, caret: number) => {
     const before = next.slice(0, caret)
     const at = before.lastIndexOf('@')
     if (at < 0) {
       setTrigger({ active: false, query: '', start: -1 })
+      setHighlight(0)
       return
     }
     const between = before.slice(at + 1)
     if (/[\s\n@]/.test(between)) {
       setTrigger({ active: false, query: '', start: -1 })
+      setHighlight(0)
       return
     }
     setTrigger({ active: true, query: between, start: at })
+    setHighlight(0)
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -138,11 +135,11 @@ export default function MentionInput({
           }
         }}
         placeholder={placeholder}
-        className={`flex-1 rounded-md border px-3 py-2 text-xs focus:outline-none focus:border-zinc-400 dark:focus:border-white/30 transition resize-none ${t.input}`}
+        className={`flex-1 resize-none rounded-md border px-3 py-2 text-xs transition focus:border-zinc-400 focus:outline-none dark:focus:border-white/30 ${t.input}`}
       />
       <button
         onClick={submit}
-        className={`h-9 px-3 rounded-md text-xs flex items-center gap-1.5 transition shrink-0 ${t.accent}`}
+        className={`flex h-9 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs transition ${t.accent}`}
       >
         <Send className="size-3.5" />
         Send
@@ -150,7 +147,7 @@ export default function MentionInput({
 
       {trigger.active && matches.length > 0 && (
         <div
-          className={`absolute bottom-full left-0 mb-1 w-64 rounded-md border shadow-xl py-1 z-30 ${t.detail}`}
+          className={`absolute bottom-full left-0 z-30 mb-1 w-64 rounded-md border py-1 shadow-xl ${t.detail}`}
         >
           {matches.map((m, i) => (
             <button
@@ -160,7 +157,7 @@ export default function MentionInput({
                 e.preventDefault()
                 handleSelectMention(m)
               }}
-              className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-left ${
+              className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs ${
                 highlight === i ? t.btnActive : t.tab
               }`}
             >
@@ -168,7 +165,7 @@ export default function MentionInput({
                 <Avatar user={m.member} size={20} />
               ) : (
                 <span
-                  className={`size-5 rounded-full text-[9px] font-semibold flex items-center justify-center ${t.surfaceMuted}`}
+                  className={`flex size-5 items-center justify-center rounded-full text-[9px] font-semibold ${t.surfaceMuted}`}
                 >
                   @
                 </span>
@@ -199,7 +196,7 @@ export function renderMentionedBody(body: string, team: BoardAssignee[]) {
     return (
       <span
         key={i}
-        className="inline-flex items-center rounded bg-red-500/15 text-red-500 px-1 py-0.5 font-medium"
+        className="inline-flex items-center rounded bg-teal-500/15 px-1 py-0.5 font-medium text-teal-500"
       >
         {chunk}
       </span>

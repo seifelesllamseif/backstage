@@ -17,6 +17,11 @@ import type {
 } from "./boardData";
 import type { TaskStatus, TaskPriority, RelationKind } from "./status";
 import type { TaskComment, TaskActivity } from "./TaskDetail";
+import type {
+  ProjectExternalRef,
+  TaskExternalRef,
+  TaskExternalRefKind,
+} from "./boardData";
 
 // Stable color rotation for assignees keyed by index.
 const COLOR_RING = [
@@ -160,13 +165,21 @@ export function mapTasks(
 
 type DashCycle = {
   id: string;
+  projectId: string;
   number: number;
   name: string;
+  description: string | null;
+  docUrl: string | null;
   status: "completed" | "current" | "upcoming";
   fromDate: Date | string;
   toDate: Date | string;
   tasks: { taskId: string }[];
 };
+
+function toIsoDate(d: Date | string): string {
+  const date = d instanceof Date ? d : new Date(d);
+  return date.toISOString().slice(0, 10);
+}
 
 export function mapCycle(cycle: DashCycle, allTasks: BoardTask[]): Cycle {
   const taskIds = cycle.tasks.map((t) => t.taskId);
@@ -179,11 +192,16 @@ export function mapCycle(cycle: DashCycle, allTasks: BoardTask[]): Cycle {
 
   return {
     id: cycle.id,
+    projectId: cycle.projectId,
     number: cycle.number,
     name: cycle.name,
+    description: cycle.description,
+    docUrl: cycle.docUrl,
     status: cycle.status,
     from: formatDueDate(cycle.fromDate as Date) ?? "",
     to: formatDueDate(cycle.toDate as Date) ?? "",
+    fromIso: toIsoDate(cycle.fromDate),
+    toIso: toIsoDate(cycle.toDate),
     scope,
     startedCount,
     startedPct: scope ? Math.round((startedCount / scope) * 100) : 0,
@@ -324,13 +342,81 @@ export function groupActivityByTask(
   for (const a of activity) {
     if (!a.entityId) continue;
     const list = out[a.entityId] ?? [];
+    const created = a.createdAt instanceof Date
+      ? a.createdAt
+      : new Date(a.createdAt);
     list.push({
       id: a.id,
       kind: activityKindFor(a.action),
       text: activityTextFor(a),
       at: formatTimestamp(a.createdAt),
+      atRaw: created.toISOString(),
     });
     out[a.entityId] = list;
+  }
+  return out;
+}
+
+// ─── External refs (PR / issue / doc links) ──────────────────────────────
+
+type DbExternalRef = {
+  id: string;
+  taskId: string;
+  kind: TaskExternalRefKind;
+  url: string;
+  label: string | null;
+  createdAt: Date | string;
+};
+
+export function groupExternalRefsByTask(
+  refs: DbExternalRef[],
+): Record<string, TaskExternalRef[]> {
+  const out: Record<string, TaskExternalRef[]> = {};
+  for (const r of refs) {
+    const list = out[r.taskId] ?? [];
+    const created = r.createdAt instanceof Date
+      ? r.createdAt
+      : new Date(r.createdAt);
+    list.push({
+      id: r.id,
+      taskId: r.taskId,
+      kind: r.kind,
+      url: r.url,
+      label: r.label,
+      createdAt: created.toISOString(),
+    });
+    out[r.taskId] = list;
+  }
+  return out;
+}
+
+type DbProjectExternalRef = {
+  id: string;
+  projectId: string;
+  kind: TaskExternalRefKind;
+  url: string;
+  label: string | null;
+  createdAt: Date | string;
+};
+
+export function groupExternalRefsByProject(
+  refs: DbProjectExternalRef[],
+): Record<string, ProjectExternalRef[]> {
+  const out: Record<string, ProjectExternalRef[]> = {};
+  for (const r of refs) {
+    const list = out[r.projectId] ?? [];
+    const created = r.createdAt instanceof Date
+      ? r.createdAt
+      : new Date(r.createdAt);
+    list.push({
+      id: r.id,
+      projectId: r.projectId,
+      kind: r.kind,
+      url: r.url,
+      label: r.label,
+      createdAt: created.toISOString(),
+    });
+    out[r.projectId] = list;
   }
   return out;
 }
