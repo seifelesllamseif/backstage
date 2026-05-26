@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
   type ComponentPropsWithoutRef,
@@ -11,6 +12,7 @@ import {
 } from 'react'
 import { Moon, Sun } from 'lucide-react'
 import { flushSync } from 'react-dom'
+import { useTheme } from 'next-themes'
 
 import { cn } from '@/lib/utils'
 
@@ -24,6 +26,13 @@ interface ThemeCtx {
 
 const ThemeContext = createContext<ThemeCtx | null>(null)
 
+// Bridges the dashboard's local theme tokens to the app-wide next-themes
+// state. Before, the dashboard had an independent mode that ignored the
+// global toggle, so switching theme on /portfolio left the dashboard in
+// its old mode. Now: `mode` mirrors `resolvedTheme` (so system / light /
+// dark all map cleanly) and `toggle()` calls `setTheme()` so the
+// existing AnimatedThemeToggler in the topbar moves both contexts in
+// lockstep.
 export function DashboardThemeProvider({
   children,
   initial = 'light'
@@ -31,8 +40,26 @@ export function DashboardThemeProvider({
   children: ReactNode
   initial?: Mode
 }) {
+  const { resolvedTheme, setTheme } = useTheme()
+  // First paint before next-themes has hydrated: fall back to `initial`
+  // (defaults to light). Once hydrated we sync to whatever the user has
+  // chosen globally.
   const [mode, setMode] = useState<Mode>(initial)
-  const toggle = () => setMode((m) => (m === 'light' ? 'dark' : 'light'))
+
+  useEffect(() => {
+    if (resolvedTheme === 'dark' || resolvedTheme === 'light') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMode(resolvedTheme)
+    }
+  }, [resolvedTheme])
+
+  const toggle = useCallback(() => {
+    // Flip via next-themes so /portfolio, /cockpit, etc. follow along.
+    const next = mode === 'light' ? 'dark' : 'light'
+    setTheme(next)
+    setMode(next)
+  }, [mode, setTheme])
+
   return (
     <ThemeContext.Provider value={{ mode, toggle, t: TOKENS[mode] }}>
       {children}
