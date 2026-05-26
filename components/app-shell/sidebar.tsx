@@ -45,7 +45,12 @@ const NAV: readonly NavItem[] = [
     icon: FolderKanban,
     prefix: '/projects'
   },
-  { href: '/profile', label: 'Profile', icon: UserRound, prefix: '/profile' }
+  {
+    href: '/portfolio',
+    label: 'Portfolio',
+    icon: UserRound,
+    prefix: '/portfolio'
+  }
 ]
 
 export function AppSidebar({
