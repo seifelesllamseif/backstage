@@ -1,6 +1,6 @@
 // Backstage — Prisma schema.
 //
-// Scope: slice-1 tables (company, crew_member, project, task) plus the
+// Scope: slice-1 tables (company, team_member, project, task) plus the
 // slice-2 handoff. Source-of-truth specs:
 //   docs/backstage-os-slice-1-plan.md §4
 //   docs/backstage-os-slice-2-plan.md §4
@@ -8,7 +8,7 @@
 //   docs/decisions/0015-slice-2-handoff-architecture.md
 //
 // Boundary: the `auth.users` table is owned by Supabase and is NOT
-// modeled here. crew_member.id receives its value from Supabase Auth
+// modeled here. team_member.id receives its value from Supabase Auth
 // and is linked by a hand-written FK appended to the init migration.
 // See docs/decisions/0002-supabase-prisma-boundary.md.
 
@@ -19,7 +19,7 @@ generator client {
 // url + directUrl live in prisma.config.ts at the repo root.
 // See docs/decisions/0007-prisma-7-adapter-pattern.md.
 //
-// Single-schema (public). The original `crew_member.id → auth.users.id` FK
+// Single-schema (public). The original `team_member.id → auth.users.id` FK
 // from decision 0002 was dropped during slice 2 because Prisma 7's drift
 // detection couldn't tolerate the cross-schema constraint without enumerating
 // every Supabase auth table — see decision 0016 for the revised boundary.
@@ -75,12 +75,12 @@ enum RelationKind {
   @@map("relation_kind")
 }
 
-enum CycleStatus {
+enum SprintStatus {
   completed
   current
   upcoming
 
-  @@map("cycle_status")
+  @@map("sprint_status")
 }
 
 enum HandoffStatus {
@@ -98,24 +98,24 @@ model Company {
   slug      String   @unique
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  crewMembers  CrewMember[]
+  teamMembers  TeamMember[]
   projects     Project[]
   tasks        Task[]
   handoffs     Handoff[]
   labels       Label[]
   comments     TaskComment[]
   activityLogs ActivityLog[]
-  cycles       Cycle[]
+  sprints       Sprint[]
   externalRefs TaskExternalRef[]
   projectExternalRefs ProjectExternalRef[]
 
-  @@map("company")
+  @@map("companies")
 }
 
-model CrewMember {
+model TeamMember {
   // INVARIANT: `id` is the matching `auth.users.id` from Supabase Auth.
   // Never use a generated UUID here. Every code path that inserts a
-  // crew_member row MUST pass the auth user's id (see prisma/seed.ts and any
+  // team_member row MUST pass the auth user's id (see prisma/seed.ts and any
   // future signup flow). No default — Prisma will refuse to insert without
   // an explicit id, which is the safety belt that catches mistakes.
   //
@@ -124,7 +124,12 @@ model CrewMember {
   // Supabase's auth tables. See decisions 0002 (superseded) and 0016.
   id             String     @id @db.Uuid
   companyId      String     @map("company_id") @db.Uuid
+  // Login email. Conventionally @verbivore.app (firstname.lastname).
+  // Unique per company. Used by Supabase Auth.
   email          String
+  // Personal/contact email (real mailbox, e.g. Gmail). Used for sending
+  // notifications and out-of-band communication. Nullable.
+  contactEmail   String?    @map("contact_email")
   // URL-safe handle, lowercase, dash-separated. Unique per company.
   // Generated from full_name at signup; stable across name changes
   // unless explicitly rotated. See lib/slug.ts.
@@ -133,7 +138,6 @@ model CrewMember {
   // once we're sure every row has one.
   slug           String?
   fullName       String     @map("full_name")
-  avatarInitials String?    @map("avatar_initials")
   avatarUrl      String?    @map("avatar_url")
   bio            String?
   socialInstagram String?   @map("social_instagram")
@@ -159,7 +163,7 @@ model CrewMember {
 
   @@unique([companyId, email])
   @@unique([companyId, slug])
-  @@map("crew_member")
+  @@map("team_members")
 }
 
 model Project {
@@ -176,11 +180,11 @@ model Project {
 
   company      Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   tasks        Task[]
-  cycles       Cycle[]
+  sprints       Sprint[]
   externalRefs ProjectExternalRef[]
 
   @@unique([companyId, name])
-  @@map("project")
+  @@map("projects")
 }
 
 model Task {
@@ -191,7 +195,7 @@ model Task {
   description String?
   status      TaskStatus   @default(backlog)
   priority    TaskPriority @default(none)
-  ref         String?      // Human-readable display ID, e.g. "SKAM-101"
+  ref         String?      // Human-readable display ID, e.g. "VERB-101"
   seqNumber   Int?         @map("seq_number") // Auto-increment per project for ref
   // Within-column ordering for the /dashboard board (decision 0022, slice 3b
   // drag-and-drop). Smaller = higher in the column. Nullable: rows seeded
@@ -210,16 +214,16 @@ model Task {
 
   company    Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   project    Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  assignee   CrewMember?         @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  lead       CrewMember?         @relation("TaskLead", fields: [leadId], references: [id], onDelete: SetNull)
-  creator    CrewMember?         @relation("TaskCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  assignee   TeamMember?         @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  lead       TeamMember?         @relation("TaskLead", fields: [leadId], references: [id], onDelete: SetNull)
+  creator    TeamMember?         @relation("TaskCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
   handoff    Handoff?
   labels     TaskLabel[]
   checklist  TaskChecklistItem[]
   comments   TaskComment[]
   depsOut    TaskDependency[]    @relation("TaskDepsOut")
   depsIn     TaskDependency[]    @relation("TaskDepsIn")
-  cycleTasks CycleTask[]
+  sprintTasks SprintTask[]
   externalRefs TaskExternalRef[]
 
   @@index([companyId])
@@ -227,7 +231,7 @@ model Task {
   @@index([assigneeId])
   @@index([leadId])
   @@index([status])
-  @@map("task")
+  @@map("tasks")
 }
 
 enum ExternalRefKind {
@@ -252,10 +256,10 @@ model TaskExternalRef {
 
   company Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   task    Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  creator CrewMember? @relation("ExternalRefCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  creator TeamMember? @relation("ExternalRefCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
 
   @@index([taskId])
-  @@map("task_external_ref")
+  @@map("task_external_refs")
 }
 
 // Project-scoped sibling of TaskExternalRef. Same enum, same URL parser —
@@ -273,10 +277,10 @@ model ProjectExternalRef {
 
   company  Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   project  Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  creator  CrewMember? @relation("ProjectExternalRefCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  creator  TeamMember? @relation("ProjectExternalRefCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
 
   @@index([projectId])
-  @@map("project_external_ref")
+  @@map("project_external_refs")
 }
 
 model Label {
@@ -289,7 +293,7 @@ model Label {
   tasks   TaskLabel[]
 
   @@unique([companyId, name])
-  @@map("label")
+  @@map("labels")
 }
 
 model TaskLabel {
@@ -300,7 +304,7 @@ model TaskLabel {
   label Label @relation(fields: [labelId], references: [id], onDelete: Cascade)
 
   @@id([taskId, labelId])
-  @@map("task_label")
+  @@map("task_labels")
 }
 
 model TaskDependency {
@@ -315,7 +319,7 @@ model TaskDependency {
   dependsOn Task @relation("TaskDepsIn", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
 
   @@unique([taskId, dependsOnTaskId])
-  @@map("task_dependency")
+  @@map("task_dependencies")
 }
 
 model TaskChecklistItem {
@@ -327,7 +331,7 @@ model TaskChecklistItem {
 
   task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
-  @@map("task_checklist_item")
+  @@map("task_checklist_items")
 }
 
 model TaskComment {
@@ -344,10 +348,10 @@ model TaskComment {
 
   company Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   task    Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  author  CrewMember? @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  author  TeamMember? @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: SetNull)
 
   @@index([taskId])
-  @@map("task_comment")
+  @@map("task_comments")
 }
 
 model ActivityLog {
@@ -361,14 +365,14 @@ model ActivityLog {
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   company Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  actor   CrewMember? @relation("ActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actor   TeamMember? @relation("ActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([companyId])
   @@index([entityType, entityId])
-  @@map("activity_log")
+  @@map("activity_logs")
 }
 
-model Cycle {
+model Sprint {
   id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   companyId   String      @map("company_id") @db.Uuid
   projectId   String      @map("project_id") @db.Uuid
@@ -376,30 +380,30 @@ model Cycle {
   name        String
   description String?
   // External planning doc (Google Doc, GitHub wiki, Notion, etc). Surfaced
-  // as a clickable doc icon on the cycle hero + card.
+  // as a clickable doc icon on the sprint hero + card.
   docUrl      String?     @map("doc_url")
-  status      CycleStatus @default(upcoming)
+  status      SprintStatus @default(upcoming)
   fromDate    DateTime    @map("from_date") @db.Date
   toDate      DateTime    @map("to_date") @db.Date
   createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
 
   company Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   project Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  tasks   CycleTask[]
+  tasks   SprintTask[]
 
   @@unique([projectId, number])
-  @@map("cycle")
+  @@map("sprints")
 }
 
-model CycleTask {
-  cycleId String @map("cycle_id") @db.Uuid
+model SprintTask {
+  sprintId String @map("sprint_id") @db.Uuid
   taskId  String @map("task_id") @db.Uuid
 
-  cycle Cycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  sprint Sprint @relation(fields: [sprintId], references: [id], onDelete: Cascade)
   task  Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
-  @@id([cycleId, taskId])
-  @@map("cycle_task")
+  @@id([sprintId, taskId])
+  @@map("sprint_tasks")
 }
 
 model Handoff {
@@ -426,10 +430,10 @@ model Handoff {
 
   company    Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   task       Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  fromMember CrewMember? @relation("HandoffFrom", fields: [fromMemberId], references: [id], onDelete: SetNull)
-  toMember   CrewMember? @relation("HandoffTo", fields: [toMemberId], references: [id], onDelete: SetNull)
+  fromMember TeamMember? @relation("HandoffFrom", fields: [fromMemberId], references: [id], onDelete: SetNull)
+  toMember   TeamMember? @relation("HandoffTo", fields: [toMemberId], references: [id], onDelete: SetNull)
 
   @@index([companyId])
   @@index([toMemberId])
-  @@map("handoff")
+  @@map("handoffs")
 }

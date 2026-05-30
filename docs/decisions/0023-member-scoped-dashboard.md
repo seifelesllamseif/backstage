@@ -9,7 +9,7 @@ decided_on: 2026-05-26
 
 Until now, `/dashboard` showed non-admin members:
 
-- **Team list (sidebar, pickers, mentions, filters)**: every CrewMember
+- **Team list (sidebar, pickers, mentions, filters)**: every TeamMember
   in the company.
 - **Updates panel**: every activity row in the company.
 - **Board**: every task in the company, narrowed *client-side* to those
@@ -40,7 +40,7 @@ the set of projects where the member has ≥1 assigned task**. Concretely:
 - **Projects (picker)**: scoped to `myProjectIds`. Members can't drill
   into a project they're not on; if the URL `?project=<id>` points at
   one, the scope locks to an empty set so they see nothing for it.
-- **Cycles, comments, activity**: scoped to the same task/project set.
+- **Sprints, comments, activity**: scoped to the same task/project set.
 
 Admins are unchanged — they keep the full company view.
 

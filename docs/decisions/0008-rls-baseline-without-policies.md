@@ -7,7 +7,7 @@ decided_on: 2026-05-23
 
 ## Context
 
-After the init migration ([0006](0006-prisma-migrations-workflow.md)) the five tables in `public` (`company`, `crew_member`, `project`, `task`, plus Prisma's `_prisma_migrations`) had RLS disabled. The Supabase MCP raised a critical advisory: every public-schema table is reachable via PostgREST using the `anon` key, and the `anon` key is published in the browser via `NEXT_PUBLIC_SUPABASE_ANON_KEY`. With RLS off and no row-level policies, *anyone with the anon key can read or modify every row* through a direct REST call — bypassing the app's Prisma server-side path entirely.
+After the init migration ([0006](0006-prisma-migrations-workflow.md)) the five tables in `public` (`company`, `team_member`, `project`, `task`, plus Prisma's `_prisma_migrations`) had RLS disabled. The Supabase MCP raised a critical advisory: every public-schema table is reachable via PostgREST using the `anon` key, and the `anon` key is published in the browser via `NEXT_PUBLIC_SUPABASE_ANON_KEY`. With RLS off and no row-level policies, *anyone with the anon key can read or modify every row* through a direct REST call — bypassing the app's Prisma server-side path entirely.
 
 The slice-1 plan §3 explicitly defers **RLS policies** to a later slice, framing it as "single company for now; add when multi-tenant is real." But "enable RLS with no policies" is a different lever: it's a deny-all baseline that costs five `ALTER TABLE` statements and removes the exposure without bringing policy design forward. Prisma keeps working unchanged because its `postgres` connection has `BYPASSRLS`.
 
@@ -17,7 +17,7 @@ Enable RLS on all five public-schema tables now. Write no policies. The five sta
 
 ```sql
 alter table public.company           enable row level security;
-alter table public.crew_member       enable row level security;
+alter table public.team_member       enable row level security;
 alter table public.project           enable row level security;
 alter table public.task              enable row level security;
 alter table public._prisma_migrations enable row level security;

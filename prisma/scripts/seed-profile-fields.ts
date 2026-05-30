@@ -1,4 +1,4 @@
-// Patch profile fields on the six SKAM members in an already-seeded DB.
+// Patch profile fields on the six Verbivore members in an already-seeded DB.
 // Idempotent — skips members whose bio is already populated.
 //
 // Run: pnpm tsx --env-file=.env.local prisma/scripts/seed-profile-fields.ts
@@ -10,12 +10,12 @@ import { seedProfileFields } from "../profile-data";
 
 async function main(): Promise<void> {
   const company = await prisma.company.findUnique({
-    where: { slug: "skam" },
+    where: { slug: "verbivore" },
     select: { id: true, name: true },
   });
   if (!company) {
     console.error(
-      "Patch aborted: no SKAM company. Run `pnpm db:seed` first to set up slice-1 data.",
+      "Patch aborted: no Verbivore company. Run `pnpm db:seed` first to set up slice-1 data.",
     );
     process.exit(1);
   }

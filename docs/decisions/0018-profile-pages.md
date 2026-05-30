@@ -7,7 +7,7 @@ decided_on: 2026-05-24
 
 ## Context
 
-Reference: `old/portfolio/_components/Portfolio.tsx` — a single-user bento dashboard with photo, bio, role, tasks, today/events, quote, socials, languages, framer-motion fade-in on mount. The user wants this shape "for every person" — every `crew_member` gets a profile page.
+Reference: `old/portfolio/_components/Portfolio.tsx` — a single-user bento dashboard with photo, bio, role, tasks, today/events, quote, socials, languages, framer-motion fade-in on mount. The user wants this shape "for every person" — every `team_member` gets a profile page.
 
 The reference is single-user (the founder's own home). Adapting to a multi-person product means: browseable URLs, schema additions for the profile data, and a redirect from "my profile" to my id.
 
@@ -17,11 +17,11 @@ The reference is single-user (the founder's own home). Adapting to a multi-perso
 
 - **`/profile/[slug]`** — every member's profile, browseable by anyone in the company. `slug` is a url-safe handle derived from `full_name` at signup (see `lib/slug.ts`); unique per company.
 - **`/profile`** (no slug) — redirects to `/profile/{currentMember.slug}`. The sidebar links here so a single nav entry serves everyone.
-- The directory list at `/profile` (everyone with avatar/role/tier) is **deferred** — comes when Slice 3's Crew Board lands or earlier if usage shows a need.
+- The directory list at `/profile` (everyone with avatar/role/tier) is **deferred** — comes when Slice 3's Team Board lands or earlier if usage shows a need.
 
 > Original draft used `/people/[id]` (UUID). Switched to `/people/[slug]` after the first review, then renamed `/people` → `/profile` because the sidebar item is labeled "Profile" and users were typing `/profile/<slug>` naturally. Slugs are populated for existing members by a manual migration (`20260524000000_add_member_slug`); the column is `String?` in Prisma until a follow-up migration tightens to `NOT NULL`.
 
-### Schema additions to `crew_member`
+### Schema additions to `team_member`
 
 Six new nullable columns, no defaults:
 
@@ -44,7 +44,7 @@ Reference's seven sections → Backstage's six (no gallery card; no quote card):
 
 | Reference slot | Backstage content |
 |---|---|
-| Name card (col-5) | Full name + access tier in SKAM red. |
+| Name card (col-5) | Full name + access tier in Verbivore red. |
 | Photo card (col-3, rows 1–2) | `avatarUrl` if present; large-initials fallback otherwise. |
 | Gallery card (col-4, rows 1–2) | Replaced by **Bio card**: bio text + role tier. Calm typography pass. |
 | Tasks card (col-5) | The member's open tasks (`assignee_id = member.id AND status NOT IN ('done','canceled')`), top 4–6, ordered by due date asc nulls last. Each row links to `/projects/[projectId]?task=<id>` (panel route from 0017). |
@@ -68,7 +68,7 @@ Add a `Profile` nav item to the sidebar. Icon: `UserRound` from lucide. Links to
 
 ## Consequences
 
-- **Six new columns on `crew_member`** — biggest schema change since slice 1. Migration drops cleanly because all are nullable; no data backfill required for empty values. Seed updates fill the existing six members with plausible content.
+- **Six new columns on `team_member`** — biggest schema change since slice 1. Migration drops cleanly because all are nullable; no data backfill required for empty values. Seed updates fill the existing six members with plausible content.
 - **`/old/portfolio` stays as the reference**, never imported. The new components live in `app/(authenticated)/people/[id]/`. No code from `old/` is copied — only idioms (bento grid shape, name-card treatment, fade-in pattern).
 - **No real photos in seed.** Initials fallback renders for all six members. If the user later drops images into `public/profile/<slug>.jpg` and updates `avatarUrl`, the photo card shows them.
 - **Editing is the next pass.** A follow-on commit adds `/people/[id]/edit` (own-profile only + admin override) with form actions writing to the new columns.

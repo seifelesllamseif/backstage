@@ -28,7 +28,7 @@ proxy.ts                                 # Next.js 16 proxy file at repo root
 lib/supabase/client.ts                   # createBrowserClient — for "use client" components
 lib/supabase/server.ts                   # createServerClient bound to next/headers cookies — for server components
 lib/supabase/proxy.ts                    # createServerClient bound to NextRequest/NextResponse cookies — used inside proxy.ts
-lib/dal.ts                               # verifySession() + getCurrentCrewMember() — server-only, React-cached
+lib/dal.ts                               # verifySession() + getCurrentTeamMember() — server-only, React-cached
 app/login/page.tsx                       # login form (client component, useActionState)
 app/login/actions.ts                     # signIn / signOut server actions
 app/page.tsx                             # root redirect: → /login if unauth, → /cockpit if auth
@@ -42,7 +42,7 @@ The `(authenticated)` route group's layout calls `verifySession()`. Any future p
 
 - The proxy refreshes tokens by calling `supabase.auth.getClaims()` once per navigation. If claims come back, cookies are passed through fresh; if not, the proxy lets the request continue and the layout decides what to do.
 - The DAL's `verifySession()` also uses `getClaims()`. On null, it `redirect("/login")`.
-- Server components that need the *user's domain row* call `getCurrentCrewMember()`, which composes `verifySession()` + a Prisma `crewMember.findUnique` by `id` (where `id` is the auth user id, per [0002](0002-supabase-prisma-boundary.md)).
+- Server components that need the *user's domain row* call `getCurrentTeamMember()`, which composes `verifySession()` + a Prisma `teamMember.findUnique` by `id` (where `id` is the auth user id, per [0002](0002-supabase-prisma-boundary.md)).
 - We never call `getSession()` for authorization. `getSession()` is reserved for places where we just need to know if a cookie exists, never to gate access.
 
 ### Route group gate, not proxy gate

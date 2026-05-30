@@ -1,8 +1,3 @@
-// Canonical helpers for handoff completeness.
-// Used by the handoff form (missing-field count), the Done gate
-// (`updateTaskStatus` / `updateTask`), and the Cockpit Handoffs block.
-// See docs/decisions/0015-slice-2-handoff-architecture.md.
-
 export const HANDOFF_FIELDS = [
   "whatItIs",
   "currentStatus",

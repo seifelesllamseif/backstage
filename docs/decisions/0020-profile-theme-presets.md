@@ -15,7 +15,7 @@ The app stays dark-only globally (decision 0017). Customization is **scoped to t
 
 ### What
 
-`crew_member` gets a `profile_theme` text column. Each member picks one of a curated set of preset palettes; that preset drives the bento's color tokens via `[data-theme="…"]`. Default is `"dark"` — existing members keep the look they have until they change it.
+`team_member` gets a `profile_theme` text column. Each member picks one of a curated set of preset palettes; that preset drives the bento's color tokens via `[data-theme="…"]`. Default is `"dark"` — existing members keep the look they have until they change it.
 
 ### Preset set (v1)
 
@@ -24,7 +24,7 @@ Four hand-tuned palettes:
 | Key       | Name   | Vibe                                                                                  |
 | --------- | ------ | ------------------------------------------------------------------------------------- |
 | `dark`    | Dark   | Default. Identical to the app's `:root` tokens — neutral charcoal + red accent.       |
-| `paper`   | Paper  | Warm paper-white, near-black ink, red accent. Lifted from the `SKAM_LIGHT` palette in `backstage/project/ui.jsx` (decision 0017 prepared this). |
+| `paper`   | Paper  | Warm paper-white, near-black ink, red accent. Lifted from the `VERBIVORE_LIGHT` palette in `backstage/project/ui.jsx` (decision 0017 prepared this). |
 | `mocha`   | Mocha  | Cream + chocolate brown. Warm light theme with brown accent, softer than Paper.       |
 | `ocean`   | Ocean  | Slate + teal. Alternative dark variant — cool slate base, teal accent.                |
 
@@ -49,7 +49,7 @@ Why **String** and not a Prisma enum:
 - Validation lives in app code via a zod `z.enum` referencing `PROFILE_THEMES`.
 
 Why **nullable** with `@default("dark")`:
-- Matches the rest of the slice-1 fields on `crew_member` (`avatar_url`, `bio`, socials are all `String?`). Nullable means "user hasn't engaged yet" and gives a clean `null` → fallback to default at every read site.
+- Matches the rest of the slice-1 fields on `team_member` (`avatar_url`, `bio`, socials are all `String?`). Nullable means "user hasn't engaged yet" and gives a clean `null` → fallback to default at every read site.
 
 ### Validation
 
@@ -99,7 +99,7 @@ A member with `profile_theme = null` reads as `"dark"` at every site. Existing m
 
 ## Palette tokens
 
-(SKAM_DARK and SKAM_LIGHT lifted from `lib/business-logic.ts` and `backstage/project/ui.jsx` respectively. Mocha and Ocean are new for this decision.)
+(VERBIVORE_DARK and VERBIVORE_LIGHT lifted from `lib/business-logic.ts` and `backstage/project/ui.jsx` respectively. Mocha and Ocean are new for this decision.)
 
 ### Dark — `:root` (unchanged)
 

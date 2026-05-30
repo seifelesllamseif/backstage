@@ -1,4 +1,4 @@
-// Serialize a project to markdown or JSON. Includes all tasks, all cycles,
+// Serialize a project to markdown or JSON. Includes all tasks, all sprints,
 // and the project-level external refs.
 
 import { STATUSES, STATUS_BY_ID } from '@/app/(workspace)/dashboard/_components/status'
@@ -17,7 +17,7 @@ export function projectToMarkdown(
 ): string {
   const lines: string[] = []
   const tasks = ctx.tasks.filter((task) => task.projectId === project.id)
-  const cycles = ctx.cycles.filter((c) => c.projectId === project.id)
+  const sprints = ctx.sprints.filter((c) => c.projectId === project.id)
   const projectRefs = ctx.refsByProject[project.id] ?? []
   const done = tasks.filter((t) => t.status === 'done').length
 
@@ -31,7 +31,7 @@ export function projectToMarkdown(
   lines.push(
     `- **Tasks:** ${done}/${tasks.length} done (${tasks.length} total)`
   )
-  lines.push(`- **Sprints:** ${cycles.length}`)
+  lines.push(`- **Sprints:** ${sprints.length}`)
 
   if (projectRefs.length > 0) {
     lines.push('')
@@ -43,17 +43,17 @@ export function projectToMarkdown(
     }
   }
 
-  if (cycles.length > 0) {
+  if (sprints.length > 0) {
     lines.push('')
     lines.push('## Sprints')
-    // Same sort order as the Cycles tab: current, then upcoming asc, then
+    // Same sort order as the Sprints tab: current, then upcoming asc, then
     // completed (newest first).
-    const order: Record<typeof cycles[number]['status'], number> = {
+    const order: Record<typeof sprints[number]['status'], number> = {
       current: 0,
       upcoming: 1,
       completed: 2,
     }
-    const sorted = [...cycles].sort((a, b) => {
+    const sorted = [...sprints].sort((a, b) => {
       const so = order[a.status] - order[b.status]
       if (so !== 0) return so
       if (a.status === 'completed') return b.number - a.number
@@ -99,7 +99,7 @@ export function projectToJson(
   options: ExportOptions = {}
 ): string {
   const tasks = ctx.tasks.filter((task) => task.projectId === project.id)
-  const cycles = ctx.cycles.filter((c) => c.projectId === project.id)
+  const sprints = ctx.sprints.filter((c) => c.projectId === project.id)
   const projectRefs = ctx.refsByProject[project.id] ?? []
 
   return JSON.stringify(
@@ -127,9 +127,9 @@ export function projectToJson(
           acc[s.id] = tasks.filter((t) => t.status === s.id).length
           return acc
         }, {}),
-        cyclesTotal: cycles.length,
+        sprintsTotal: sprints.length,
       },
-      cycles: cycles.map((c) => ({
+      sprints: sprints.map((c) => ({
         id: c.id,
         number: c.number,
         name: c.name,

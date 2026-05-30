@@ -10,10 +10,10 @@ import type { BoardTask } from '@/app/(workspace)/dashboard/_components/boardDat
 
 export interface ViewMeta {
   // Free-form title for the heading (e.g. "All tasks", "Mine - this week",
-  // "Phase 2 cycle").
+  // "Phase 2 sprint").
   title: string
   // How tasks should be grouped in the markdown output. JSON ignores this.
-  groupBy?: 'status' | 'priority' | 'cycle' | 'assignee' | 'none'
+  groupBy?: 'status' | 'priority' | 'sprint' | 'assignee' | 'none'
   // Optional time scope name shown in the markdown header.
   scopeLabel?: string
 }
@@ -90,24 +90,24 @@ export function viewToMarkdown(
       lines.push(`## ${name} (${list.length})`)
       for (const task of list) renderTask(task)
     }
-  } else if (grouping === 'cycle') {
-    const byCycle = new Map<string, BoardTask[]>()
+  } else if (grouping === 'sprint') {
+    const bySprint = new Map<string, BoardTask[]>()
     const unscheduled: BoardTask[] = []
     for (const task of tasks) {
-      const cycle = ctx.cycles.find((c) => c.taskIds.includes(task.id))
-      if (!cycle) {
+      const sprint = ctx.sprints.find((c) => c.taskIds.includes(task.id))
+      if (!sprint) {
         unscheduled.push(task)
         continue
       }
-      const list = byCycle.get(cycle.id) ?? []
+      const list = bySprint.get(sprint.id) ?? []
       list.push(task)
-      byCycle.set(cycle.id, list)
+      bySprint.set(sprint.id, list)
     }
-    for (const cycle of ctx.cycles) {
-      const list = byCycle.get(cycle.id)
+    for (const sprint of ctx.sprints) {
+      const list = bySprint.get(sprint.id)
       if (!list || list.length === 0) continue
       lines.push('')
-      lines.push(`## ${cycle.name} (${cycle.status}) - ${list.length} tasks`)
+      lines.push(`## ${sprint.name} (${sprint.status}) - ${list.length} tasks`)
       for (const task of list) renderTask(task)
     }
     if (unscheduled.length > 0) {

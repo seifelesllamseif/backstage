@@ -49,7 +49,7 @@ other main destinations; an earlier draft indented it but the visual
 hierarchy didn't carry its weight).
 
 Implementation is purely client-side: `TaskComment.mentions` is already
-a `String[]` of CrewMember IDs (`MentionInput` writes member.id when it
+a `String[]` of TeamMember IDs (`MentionInput` writes member.id when it
 matches `@FirstName`), and the dashboard's local `comments` state has
 all visible comments. We derive `mentionedTaskIds` from that state in a
 `useMemo` and filter `visibleTasks` against it when `view === 'mentions'`.

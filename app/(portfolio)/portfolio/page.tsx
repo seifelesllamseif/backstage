@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 import { prisma } from '@/lib/prisma'
-import { getCurrentCrewMember } from '@/lib/dal'
+import { getCurrentTeamMember } from '@/lib/dal'
 
 // /portfolio is every member's personal landing page. Replaces the old
 // (profile) route group: one page, one URL, always tied to the signed-in
@@ -30,12 +30,12 @@ function formatDue(d: Date | null): string {
 }
 
 export default async function PortfolioPage() {
-  const me = await getCurrentCrewMember()
+  const me = await getCurrentTeamMember()
   if (!me) {
-    throw new Error('No crew_member row for the current auth user.')
+    throw new Error('No team_member row for the current auth user.')
   }
 
-  const [openTasks, doneThisMonth, mentionsCount, currentCycle] =
+  const [openTasks, doneThisMonth, mentionsCount, currentSprint] =
     await Promise.all([
       prisma.task.findMany({
         where: {
@@ -73,7 +73,7 @@ export default async function PortfolioPage() {
           }
         })
         .catch(() => 0),
-      prisma.cycle.findFirst({
+      prisma.sprint.findFirst({
         where: { companyId: me.companyId, status: 'current' },
         include: {
           project: { select: { name: true } },
@@ -93,8 +93,8 @@ export default async function PortfolioPage() {
   // Sprint progress against the member's visible scope: count their open
   // tasks that live in the sprint vs the sprint's total task scope.
   let sprintProgress: { done: number; scope: number; percent: number } | null
-  if (currentCycle) {
-    const sprintTaskIds = new Set(currentCycle.tasks.map((t) => t.taskId))
+  if (currentSprint) {
+    const sprintTaskIds = new Set(currentSprint.tasks.map((t) => t.taskId))
     const completed = await prisma.task.count({
       where: {
         id: { in: [...sprintTaskIds] },
@@ -133,7 +133,6 @@ export default async function PortfolioPage() {
             name={me.fullName}
             role={ROLE_LABEL[me.accessTier as 'admin' | 'lead' | 'member']}
             avatarUrl={me.avatarUrl}
-            avatarInitials={me.avatarInitials}
             bio={me.bio}
           />
           <StatsCard
@@ -144,8 +143,8 @@ export default async function PortfolioPage() {
             mentions={mentionsCount}
           />
           <SprintCard
-            cycleName={currentCycle?.name ?? null}
-            projectName={currentCycle?.project?.name ?? null}
+            sprintName={currentSprint?.name ?? null}
+            projectName={currentSprint?.project?.name ?? null}
             progress={sprintProgress}
           />
         </div>
@@ -212,13 +211,11 @@ function IdentityCard({
   name,
   role,
   avatarUrl,
-  avatarInitials,
   bio
 }: {
   name: string
   role: string
   avatarUrl: string | null
-  avatarInitials: string | null
   bio: string | null
 }) {
   return (
@@ -233,7 +230,7 @@ function IdentityCard({
           />
         ) : (
           <div className="flex size-12 items-center justify-center rounded-full border border-border bg-muted text-xs font-medium text-foreground">
-            {(avatarInitials ?? name.slice(0, 2)).toUpperCase()}
+            {name.slice(0, 2).toUpperCase()}
           </div>
         )}
         <div className="flex min-w-0 flex-col">
@@ -306,11 +303,11 @@ function Stat({
 }
 
 function SprintCard({
-  cycleName,
+  sprintName,
   projectName,
   progress
 }: {
-  cycleName: string | null
+  sprintName: string | null
   projectName: string | null
   progress: { done: number; scope: number; percent: number } | null
 }) {
@@ -320,10 +317,10 @@ function SprintCard({
         <span className="text-[10px] tracking-[0.2em] text-muted-foreground uppercase">
           Current sprint
         </span>
-        {cycleName ? (
+        {sprintName ? (
           <>
             <span className="truncate text-sm font-medium text-foreground">
-              {cycleName}
+              {sprintName}
             </span>
             {projectName && (
               <span className="truncate text-[11px] text-muted-foreground">

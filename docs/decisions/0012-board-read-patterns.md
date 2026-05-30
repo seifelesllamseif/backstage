@@ -33,7 +33,7 @@ Things due sooner sit on top of their column. Undated tasks fall to the bottom. 
 Each card shows:
 
 - **Title** (full, wrapped, no truncation in slice 1).
-- **Assignee initials** in a small chip (or em-dash if unassigned). The `crew_member.avatar_initials` column already carries this; no derive-on-the-fly logic.
+- **Assignee initials** in a small chip (or em-dash if unassigned). The `team_member.avatar_initials` column already carries this; no derive-on-the-fly logic.
 - **Due date**, formatted via `date-fns` as `MMM d` (e.g. "May 27"). Red text if past today's date, default text otherwise. No "in 3d" or "Mon" relative phrasing for slice 1 — straight date.
 
 What's **not** on the card for slice 1:

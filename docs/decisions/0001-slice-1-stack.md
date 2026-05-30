@@ -7,7 +7,7 @@ decided_on: 2026-05-23
 
 ## Context
 
-Slice 1 ships a task tracker that gets one company off WhatsApp. The build plan (`docs/backstage-os-slice-1-plan.md`) names a thin set of capabilities: auth, projects, tasks on a six-column board, a cut-down Crew Cockpit. Anything outside that is later slices.
+Slice 1 ships a task tracker that gets one company off WhatsApp. The build plan (since deleted; see git history) named a thin set of capabilities: auth, projects, tasks on a six-column board, a cut-down Team Cockpit. Anything outside that is later slices.
 
 An over-stuffed `package.json` is its own kind of mess. Deps installed now must be earning their keep in slice 1 today, not three slices from now.
 
@@ -19,7 +19,7 @@ An over-stuffed `package.json` is its own kind of mess. Deps installed now must 
 
 | Package | Why it earns its keep in slice 1 |
 |---|---|
-| `prisma` (dev) + `@prisma/client` | Schema + migrations for the four slice-1 tables (`company`, `crew_member`, `project`, `task`). |
+| `prisma` (dev) + `@prisma/client` | Schema + migrations for the four slice-1 tables (`company`, `team_member`, `project`, `task`). |
 | `@prisma/adapter-pg` + `pg` + `@types/pg` (dev) | Required by Prisma 7's new runtime — the client doesn't connect on its own, it needs a driver adapter. See [0007](0007-prisma-7-adapter-pattern.md). |
 | `@prisma/config` (dev) | Type imports for `prisma.config.ts` at the repo root. The package is a transitive dep of `prisma`; we add it as a direct dev dep so TypeScript can resolve `import { defineConfig } from "@prisma/config"`. |
 | `@supabase/supabase-js` + `@supabase/ssr` | Auth (email login) and the Postgres connection. `@supabase/ssr` is the App-Router-aware cookie/session helper. |
@@ -39,7 +39,7 @@ Next.js 16 App Router, React 19, Tailwind v4, shadcn scaffold, `lucide-react`, P
 - **Resend** — transactional email belongs to slice 4 (weekly digest, invites). No slice-1 surface area.
 - **AI SDK / Gemini** — slice 5, after the knowledge base exists. The AI is only as good as the KB it reads.
 - **dnd-kit** — slice 1 uses a status dropdown to move cards across the board. Real drag-and-drop is a later polish step.
-- **TanStack Table** — only if/when the Crew Board (slice 3) needs heavy tabular UI.
+- **TanStack Table** — only if/when the Team Board (slice 3) needs heavy tabular UI.
 - **Recharts** — capacity bars are slice 3.
 - **uploadthing / Supabase Storage** — no file uploads in slice 1.
 - **@t3-oss/env-nextjs** — optional wrapper over Zod for env vars. Add only if hand-rolled validation gets clumsy.

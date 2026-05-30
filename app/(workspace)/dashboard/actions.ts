@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
-import { getCurrentCrewMember, requireAccessTier } from '@/lib/dal'
+import { getCurrentTeamMember, requireAccessTier } from '@/lib/dal'
 import { parseExternalRef } from '@/lib/externalRef'
 import { countMissingFields, isHandoffComplete } from '@/lib/handoff'
 import type { TaskStatus, TaskPriority, RelationKind } from '@prisma/client'
@@ -89,7 +89,7 @@ export type DashboardProject = Awaited<
 // ─── Read ─────────────────────────────────────────────────────────────────
 
 export async function fetchDashboardData(projectId?: string) {
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) throw new Error('Not signed in.')
 
   const isAdmin = member.accessTier === 'admin'
@@ -135,7 +135,6 @@ export async function fetchDashboardData(projectId?: string) {
         select: {
           id: true,
           fullName: true,
-          avatarInitials: true,
           avatarUrl: true,
           accessTier: true
         }
@@ -144,7 +143,6 @@ export async function fetchDashboardData(projectId?: string) {
         select: {
           id: true,
           fullName: true,
-          avatarInitials: true,
           avatarUrl: true,
           accessTier: true
         }
@@ -162,8 +160,8 @@ export async function fetchDashboardData(projectId?: string) {
           task: { select: { id: true, ref: true, title: true } }
         }
       },
-      cycleTasks: {
-        include: { cycle: { select: { id: true, name: true } } }
+      sprintTasks: {
+        include: { sprint: { select: { id: true, name: true } } }
       }
     },
     // Within-column ordering: explicit sortOrder first (3b drag/drop),
@@ -184,13 +182,13 @@ export async function fetchDashboardData(projectId?: string) {
     projects,
     allActiveProjects,
     labels,
-    cycles,
+    sprints,
     comments,
     activity,
     externalRefs,
     projectExternalRefs
   ] = await Promise.all([
-      prisma.crewMember.findMany({
+      prisma.teamMember.findMany({
         where: {
           companyId: member.companyId,
           ...(myProjectIds !== null ? { id: { in: [...teamMemberIds] } } : {})
@@ -198,7 +196,6 @@ export async function fetchDashboardData(projectId?: string) {
         select: {
           id: true,
           fullName: true,
-          avatarInitials: true,
           avatarUrl: true,
           accessTier: true
         },
@@ -231,7 +228,7 @@ export async function fetchDashboardData(projectId?: string) {
         where: { companyId: member.companyId },
         orderBy: { name: 'asc' }
       }),
-      prisma.cycle.findMany({
+      prisma.sprint.findMany({
         where: {
           companyId: member.companyId,
           ...(projectId
@@ -252,7 +249,7 @@ export async function fetchDashboardData(projectId?: string) {
         },
         include: {
           author: {
-            select: { id: true, fullName: true, avatarInitials: true }
+            select: { id: true, fullName: true }
           }
         },
         orderBy: { createdAt: 'asc' }
@@ -267,7 +264,7 @@ export async function fetchDashboardData(projectId?: string) {
         },
         include: {
           actor: {
-            select: { id: true, fullName: true, avatarInitials: true }
+            select: { id: true, fullName: true }
           }
         },
         orderBy: { createdAt: 'asc' }
@@ -301,7 +298,7 @@ export async function fetchDashboardData(projectId?: string) {
     projects,
     allActiveProjects,
     labels,
-    cycles,
+    sprints,
     comments,
     activity,
     externalRefs,
@@ -327,7 +324,7 @@ export async function createDashboardTask(data: {
   // bulk action.
   relations?: { kind: RelationKind; ref: string }[]
 }) {
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   // Generate sequential ref
@@ -431,7 +428,7 @@ export async function addTaskDependency(
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
   }
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const [source, target] = await Promise.all([
@@ -489,7 +486,7 @@ export async function removeTaskDependency(
 ) {
   const parsed = RemoveDepInput.safeParse(input)
   if (!parsed.success) return { error: 'Invalid input.' }
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const target = await prisma.task.findFirst({
@@ -534,7 +531,7 @@ export async function createBulkDashboardTasks(
   }
   const { drafts: validDrafts } = validated.data
 
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const project = await prisma.project.findFirst({
@@ -684,7 +681,7 @@ export async function updateDashboardTaskStatus(
   taskId: string,
   status: TaskStatus
 ): Promise<StatusChangeResult> {
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) {
     return { ok: false, reason: 'generic', message: 'Not signed in.' }
   }
@@ -754,7 +751,7 @@ export async function updateDashboardTaskPriority(
   taskId: string,
   priority: TaskPriority
 ) {
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const prev = await prisma.task.findFirst({
@@ -786,7 +783,7 @@ export async function updateDashboardTaskAssignee(
   taskId: string,
   assigneeId: string | null
 ) {
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const prev = await prisma.task.findFirst({
@@ -806,7 +803,7 @@ export async function updateDashboardTaskAssignee(
   if (prev.assigneeId !== assigneeId) {
     const toName = assigneeId
       ? ((
-          await prisma.crewMember.findUnique({
+          await prisma.teamMember.findUnique({
             where: { id: assigneeId },
             select: { fullName: true }
           })
@@ -837,7 +834,7 @@ export async function updateDashboardTaskLead(
   taskId: string,
   leadId: string | null
 ) {
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const prev = await prisma.task.findFirst({
@@ -857,7 +854,7 @@ export async function updateDashboardTaskLead(
   if (prev.leadId !== leadId) {
     const toName = leadId
       ? ((
-          await prisma.crewMember.findUnique({
+          await prisma.teamMember.findUnique({
             where: { id: leadId },
             select: { fullName: true }
           })
@@ -898,7 +895,7 @@ export async function moveDashboardTask(
   toStatus: TaskStatus,
   toIndex: number
 ): Promise<StatusChangeResult> {
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) {
     return { ok: false, reason: 'generic', message: 'Not signed in.' }
   }
@@ -998,7 +995,7 @@ export async function moveDashboardTask(
 }
 
 export async function deleteDashboardTask(taskId: string) {
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   await prisma.task.delete({ where: { id: taskId } })
@@ -1009,7 +1006,7 @@ export async function deleteDashboardTask(taskId: string) {
 }
 
 export async function duplicateDashboardTask(taskId: string) {
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const src = await prisma.task.findFirst({
@@ -1096,7 +1093,7 @@ export async function addComment(
   body: string,
   mentions?: string[]
 ) {
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const comment = await prisma.taskComment.create({
@@ -1121,7 +1118,7 @@ export async function addComment(
 }
 
 export async function editComment(commentId: string, body: string) {
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const trimmed = body.trim()
@@ -1155,7 +1152,7 @@ export async function editComment(commentId: string, body: string) {
 }
 
 export async function deleteComment(commentId: string) {
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const existing = await prisma.taskComment.findFirst({
@@ -1184,7 +1181,7 @@ export async function deleteComment(commentId: string) {
 // ─── Checklist ────────────────────────────────────────────────────────────
 
 export async function toggleChecklistItem(itemId: string, isDone: boolean) {
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   await prisma.taskChecklistItem.update({
@@ -1197,7 +1194,7 @@ export async function toggleChecklistItem(itemId: string, isDone: boolean) {
 }
 
 export async function addChecklistItem(taskId: string, text: string) {
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const last = await prisma.taskChecklistItem.findFirst({
@@ -1218,15 +1215,15 @@ export async function addChecklistItem(taskId: string, text: string) {
   return { ok: true }
 }
 
-// ─── Cycle CRUD ───────────────────────────────────────────────────────────
+// ─── Sprint CRUD ───────────────────────────────────────────────────────────
 
 const IsoDateStr = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD')
 
-const CycleStatusEnum = z.enum(['upcoming', 'current', 'completed'])
+const SprintStatusEnum = z.enum(['upcoming', 'current', 'completed'])
 
-const CreateCycleInput = z
+const CreateSprintInput = z
   .object({
     projectId: z.string().uuid(),
     name: z.string().trim().min(2).max(80),
@@ -1234,30 +1231,30 @@ const CreateCycleInput = z
     docUrl: z.string().trim().url().max(500).optional().nullable(),
     fromDate: IsoDateStr,
     toDate: IsoDateStr,
-    status: CycleStatusEnum.optional()
+    status: SprintStatusEnum.optional()
   })
   .refine((v) => v.fromDate <= v.toDate, {
     message: 'fromDate must be on or before toDate',
     path: ['toDate']
   })
 
-const UpdateCycleInput = z
+const UpdateSprintInput = z
   .object({
-    cycleId: z.string().uuid(),
+    sprintId: z.string().uuid(),
     name: z.string().trim().min(2).max(80).optional(),
     description: z.string().trim().max(1000).nullable().optional(),
     docUrl: z.string().trim().url().max(500).nullable().optional(),
     fromDate: IsoDateStr.optional(),
     toDate: IsoDateStr.optional(),
-    status: CycleStatusEnum.optional()
+    status: SprintStatusEnum.optional()
   })
   .refine(
     (v) => !v.fromDate || !v.toDate || v.fromDate <= v.toDate,
     { message: 'fromDate must be on or before toDate', path: ['toDate'] }
   )
 
-export async function createCycle(input: z.input<typeof CreateCycleInput>) {
-  const parsed = CreateCycleInput.safeParse(input)
+export async function createSprint(input: z.input<typeof CreateSprintInput>) {
+  const parsed = CreateSprintInput.safeParse(input)
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
   }
@@ -1270,14 +1267,14 @@ export async function createCycle(input: z.input<typeof CreateCycleInput>) {
   if (!project) return { error: 'Project not found.' }
 
   // Per-project sequential number, matches the @@unique(projectId, number).
-  const last = await prisma.cycle.findFirst({
+  const last = await prisma.sprint.findFirst({
     where: { projectId: project.id },
     orderBy: { number: 'desc' },
     select: { number: true }
   })
   const nextNumber = (last?.number ?? 0) + 1
 
-  const cycle = await prisma.cycle.create({
+  const sprint = await prisma.sprint.create({
     data: {
       companyId: member.companyId,
       projectId: project.id,
@@ -1292,21 +1289,21 @@ export async function createCycle(input: z.input<typeof CreateCycleInput>) {
   })
 
   revalidatePath('/dashboard')
-  return { cycle }
+  return { sprint }
 }
 
-export async function updateCycle(input: z.input<typeof UpdateCycleInput>) {
-  const parsed = UpdateCycleInput.safeParse(input)
+export async function updateSprint(input: z.input<typeof UpdateSprintInput>) {
+  const parsed = UpdateSprintInput.safeParse(input)
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
   }
   const member = await requireAccessTier(['admin', 'lead'])
 
-  const existing = await prisma.cycle.findFirst({
-    where: { id: parsed.data.cycleId, companyId: member.companyId },
+  const existing = await prisma.sprint.findFirst({
+    where: { id: parsed.data.sprintId, companyId: member.companyId },
     select: { id: true }
   })
-  if (!existing) return { error: 'Cycle not found.' }
+  if (!existing) return { error: 'Sprint not found.' }
 
   const patch: {
     name?: string
@@ -1325,7 +1322,7 @@ export async function updateCycle(input: z.input<typeof UpdateCycleInput>) {
   if (parsed.data.toDate) patch.toDate = new Date(parsed.data.toDate)
   if (parsed.data.status) patch.status = parsed.data.status
 
-  await prisma.cycle.update({
+  await prisma.sprint.update({
     where: { id: existing.id },
     data: patch
   })
@@ -1334,40 +1331,40 @@ export async function updateCycle(input: z.input<typeof UpdateCycleInput>) {
   return { ok: true as const }
 }
 
-export async function deleteCycle(cycleId: string) {
-  const parsed = z.string().uuid().safeParse(cycleId)
-  if (!parsed.success) return { error: 'Invalid cycle id.' }
+export async function deleteSprint(sprintId: string) {
+  const parsed = z.string().uuid().safeParse(sprintId)
+  if (!parsed.success) return { error: 'Invalid sprint id.' }
   const member = await requireAccessTier(['admin', 'lead'])
 
   // updateMany scoping covers both ownership check and the rare race where
   // someone else just deleted it — no row updated, no throw.
-  const res = await prisma.cycle.deleteMany({
+  const res = await prisma.sprint.deleteMany({
     where: { id: parsed.data, companyId: member.companyId }
   })
-  if (res.count === 0) return { error: 'Cycle not found.' }
+  if (res.count === 0) return { error: 'Sprint not found.' }
 
   revalidatePath('/dashboard')
   return { ok: true as const }
 }
 
-const CycleTaskInput = z.object({
-  cycleId: z.string().uuid(),
+const SprintTaskInput = z.object({
+  sprintId: z.string().uuid(),
   taskId: z.string().uuid()
 })
 
-export async function addTaskToCycle(
-  input: z.input<typeof CycleTaskInput>
+export async function addTaskToSprint(
+  input: z.input<typeof SprintTaskInput>
 ) {
-  const parsed = CycleTaskInput.safeParse(input)
+  const parsed = SprintTaskInput.safeParse(input)
   if (!parsed.success) return { error: 'Invalid input.' }
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   // Verify both rows belong to the caller's company before linking — same
   // pattern as task mutations: cross-company writes are silently dropped.
-  const [cycle, task] = await Promise.all([
-    prisma.cycle.findFirst({
-      where: { id: parsed.data.cycleId, companyId: member.companyId },
+  const [sprint, task] = await Promise.all([
+    prisma.sprint.findFirst({
+      where: { id: parsed.data.sprintId, companyId: member.companyId },
       select: { id: true }
     }),
     prisma.task.findFirst({
@@ -1375,11 +1372,11 @@ export async function addTaskToCycle(
       select: { id: true }
     })
   ])
-  if (!cycle || !task) return { error: 'Cycle or task not found.' }
+  if (!sprint || !task) return { error: 'Sprint or task not found.' }
 
-  await prisma.cycleTask.upsert({
-    where: { cycleId_taskId: { cycleId: cycle.id, taskId: task.id } },
-    create: { cycleId: cycle.id, taskId: task.id },
+  await prisma.sprintTask.upsert({
+    where: { sprintId_taskId: { sprintId: sprint.id, taskId: task.id } },
+    create: { sprintId: sprint.id, taskId: task.id },
     update: {}
   })
 
@@ -1387,19 +1384,19 @@ export async function addTaskToCycle(
   return { ok: true as const }
 }
 
-export async function removeTaskFromCycle(
-  input: z.input<typeof CycleTaskInput>
+export async function removeTaskFromSprint(
+  input: z.input<typeof SprintTaskInput>
 ) {
-  const parsed = CycleTaskInput.safeParse(input)
+  const parsed = SprintTaskInput.safeParse(input)
   if (!parsed.success) return { error: 'Invalid input.' }
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
-  await prisma.cycleTask.deleteMany({
+  await prisma.sprintTask.deleteMany({
     where: {
-      cycleId: parsed.data.cycleId,
+      sprintId: parsed.data.sprintId,
       taskId: parsed.data.taskId,
-      cycle: { companyId: member.companyId }
+      sprint: { companyId: member.companyId }
     }
   })
 
@@ -1456,7 +1453,7 @@ export async function addTaskExternalRef(
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
   }
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const parsedUrl = parseExternalRef(parsed.data.url)
@@ -1495,7 +1492,7 @@ export async function addTaskExternalRef(
 export async function removeTaskExternalRef(refId: string) {
   const parsed = z.string().uuid().safeParse(refId)
   if (!parsed.success) return { error: 'Invalid ref id.' }
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const existing = await prisma.taskExternalRef.findFirst({
@@ -1532,7 +1529,7 @@ export async function addProjectExternalRef(
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
   }
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const parsedUrl = parseExternalRef(parsed.data.url)
@@ -1562,7 +1559,7 @@ export async function addProjectExternalRef(
 export async function removeProjectExternalRef(refId: string) {
   const parsed = z.string().uuid().safeParse(refId)
   if (!parsed.success) return { error: 'Invalid ref id.' }
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const res = await prisma.projectExternalRef.deleteMany({
@@ -1604,7 +1601,7 @@ const SubmitHandoffInput = z.object({
 export async function fetchTaskHandoff(taskId: string) {
   const parsed = z.string().uuid().safeParse(taskId)
   if (!parsed.success) return { error: 'Invalid task id.' }
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const handoff = await prisma.handoff.findFirst({
@@ -1634,7 +1631,7 @@ export async function submitHandoffAndMoveDone(
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
   }
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
 
   const task = await prisma.task.findFirst({
@@ -1713,4 +1710,136 @@ async function logActivity(
       metadata: metadata ? (metadata as object) : undefined
     }
   })
+}
+
+// ─── Project CRUD (used by Panels.tsx) ────────────────────────────────────
+
+const CreateProjectSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(2, { error: 'Name must be at least 2 characters.' })
+    .max(80, { error: 'Name must be at most 80 characters.' }),
+  kind: z.enum(['standard', 'operations'])
+})
+
+const ArchiveProjectSchema = z.object({ projectId: z.uuid() })
+
+export type RenameProjectState =
+  | { error: string; fieldErrors?: Record<string, string[]> }
+  | undefined
+
+const RenameProjectSchema = z.object({
+  projectId: z.uuid(),
+  name: z
+    .string()
+    .trim()
+    .min(2, { error: 'Name must be at least 2 characters.' })
+    .max(80, { error: 'Name must be at most 80 characters.' })
+})
+
+export async function createProjectInPlace(
+  formData: FormData
+): Promise<{ error?: string } | undefined> {
+  const member = await requireAccessTier(['admin', 'lead'])
+
+  const parsed = CreateProjectSchema.safeParse({
+    name: formData.get('name'),
+    kind: formData.get('kind') ?? 'standard'
+  })
+  if (!parsed.success) {
+    return { error: 'Please enter a valid name (2 to 80 chars).' }
+  }
+
+  try {
+    await prisma.project.create({
+      data: {
+        companyId: member.companyId,
+        name: parsed.data.name,
+        kind: parsed.data.kind
+      }
+    })
+  } catch (e) {
+    const message =
+      e instanceof Error && 'code' in e && e.code === 'P2002'
+        ? 'A project with that name already exists.'
+        : "Couldn't create the project. Try again."
+    return { error: message }
+  }
+
+  revalidatePath('/dashboard')
+  return undefined
+}
+
+export async function archiveProjectInPlace(
+  formData: FormData
+): Promise<{ error?: string } | undefined> {
+  const member = await requireAccessTier(['admin', 'lead'])
+
+  const parsed = ArchiveProjectSchema.safeParse({
+    projectId: formData.get('projectId')
+  })
+  if (!parsed.success) return { error: 'Invalid project id.' }
+
+  // updateMany scoped by companyId so a wrong id doesn't leak the existence
+  // of cross-company rows via a 404 vs 200 distinction.
+  await prisma.project.updateMany({
+    where: { id: parsed.data.projectId, companyId: member.companyId },
+    data: { isArchived: true }
+  })
+
+  revalidatePath('/dashboard')
+  return undefined
+}
+
+export async function unarchiveProject(
+  formData: FormData
+): Promise<{ error?: string } | undefined> {
+  const member = await requireAccessTier(['admin', 'lead'])
+
+  const parsed = ArchiveProjectSchema.safeParse({
+    projectId: formData.get('projectId')
+  })
+  if (!parsed.success) return { error: 'Invalid project id.' }
+
+  await prisma.project.updateMany({
+    where: { id: parsed.data.projectId, companyId: member.companyId },
+    data: { isArchived: false }
+  })
+
+  revalidatePath('/dashboard')
+  return undefined
+}
+
+export async function renameProject(
+  formData: FormData
+): Promise<RenameProjectState> {
+  const member = await requireAccessTier(['admin', 'lead'])
+
+  const parsed = RenameProjectSchema.safeParse({
+    projectId: formData.get('projectId'),
+    name: formData.get('name')
+  })
+  if (!parsed.success) {
+    return {
+      error: 'Invalid input.',
+      fieldErrors: z.flattenError(parsed.error).fieldErrors
+    }
+  }
+
+  try {
+    await prisma.project.updateMany({
+      where: { id: parsed.data.projectId, companyId: member.companyId },
+      data: { name: parsed.data.name }
+    })
+  } catch (e) {
+    const message =
+      e instanceof Error && 'code' in e && e.code === 'P2002'
+        ? 'A project with that name already exists.'
+        : "Couldn't rename the project. Try again."
+    return { error: message }
+  }
+
+  revalidatePath('/dashboard')
+  return undefined
 }

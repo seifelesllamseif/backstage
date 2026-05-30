@@ -23,9 +23,9 @@ This decision codifies that split for step 5 so future-me doesn't re-litigate it
 
 ### Authorization
 
-- Create, update, updateStatus on tasks: **any signed-in crew_member in the same company.** No tier gate. Slice 1 trusts the team; per-row gates land with RLS in slice 3+.
+- Create, update, updateStatus on tasks: **any signed-in team_member in the same company.** No tier gate. Slice 1 trusts the team; per-row gates land with RLS in slice 3+.
 - Archive project: **admin + lead only.** Same gate as create.
-- Every action validates `companyId` matches `getCurrentCrewMember().companyId` before any write. Targeting a UUID from another company gets a `notFound()`-equivalent response, never a successful write.
+- Every action validates `companyId` matches `getCurrentTeamMember().companyId` before any write. Targeting a UUID from another company gets a `notFound()`-equivalent response, never a successful write.
 
 ### Validation
 

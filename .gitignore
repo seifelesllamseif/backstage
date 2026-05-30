@@ -41,9 +41,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# local reference material (portfolio mockup the bento was modeled on)
-/old
+# local reference material
+/reference
 
-# storybook
 *storybook.log
 storybook-static
+debug-storybook.log

@@ -74,7 +74,7 @@ On a single-user dev machine the practical risk is low, but rotate the DB passwo
 
 ## Revision — 2026-05-26: split the runtime URL onto the Transaction pooler
 
-The original decision pointed both `prisma migrate` and the runtime adapter at the **Session pooler** (port 5432), with a footnote acknowledging the upgrade path was "two URLs" if we outgrew it. The slice-3b dashboard's fan-out (`fetchDashboardData` in `app/(workspace)/dashboard/actions.ts` runs 7 parallel queries, each with relation includes that issue follow-up queries) outgrew it: Supavisor's session-mode `pool_size: 15` started returning `EMAXCONNSESSION` after a few Turbopack HMR cycles in dev.
+The original decision pointed both `prisma migrate` and the runtime adapter at the **Session pooler** (port 5432), with a footnote acknowledging the upgrade path was "two URLs" if we outgrew it. The slice-3b dashboard's fan-out (`fetchDashboardData` in `app/(workspace)/dashboard/actions.ts` runs 7 parallel queries, each with relation includes that issue follow-up queries) outgrew it: Supavisor's session-mode `pool_size: 15` started returning `EMAXCONNSESSION` after a few Turbopack HMR sprints in dev.
 
 **Resolution** — take the upgrade path foreshadowed in the original footnote:
 

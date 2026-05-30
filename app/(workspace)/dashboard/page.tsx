@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { prisma } from '@/lib/prisma'
-import { getCurrentCrewMember } from '@/lib/dal'
+import { getCurrentTeamMember } from '@/lib/dal'
 import { fetchDashboardData } from './actions'
 import DashboardShell from './_components/DashboardShell'
 import {
@@ -8,7 +8,7 @@ import {
   groupCommentsByTask,
   groupExternalRefsByProject,
   groupExternalRefsByTask,
-  mapCycles,
+  mapSprints,
   mapMembers,
   mapTasks
 } from './_components/mappers'
@@ -29,7 +29,7 @@ export async function generateMetadata({
   if (!projectParam) {
     return { title: 'All Projects · Verbivore', description }
   }
-  const member = await getCurrentCrewMember()
+  const member = await getCurrentTeamMember()
   if (!member) {
     return { title: 'Task Handoff · Verbivore', description }
   }
@@ -53,7 +53,7 @@ export default async function DashboardPage({
 
   const members = mapMembers(data.members)
   const tasks = mapTasks(data.tasks, members, data.members)
-  const cycles = mapCycles(data.cycles, tasks)
+  const sprints = mapSprints(data.sprints, tasks)
   const commentsByTask = groupCommentsByTask(data.comments)
   const activityByTask = groupActivityByTask(data.activity)
   const externalRefsByTask = groupExternalRefsByTask(data.externalRefs)
@@ -76,7 +76,7 @@ export default async function DashboardPage({
       initial={{
         tasks,
         members,
-        cycles,
+        sprints,
         projects: data.projects.map((p) => ({
           id: p.id,
           name: p.name,

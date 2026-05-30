@@ -7,7 +7,7 @@ import { Eye, EyeOff } from 'lucide-react'
 import { z } from 'zod'
 
 import { cn } from '@/lib/utils'
-import { signIn, type LoginState } from '@/app/login/actions'
+import { signIn, type LoginState } from '@/app/(authentication)/login/actions'
 import { Button } from '@/components/ui/button'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'

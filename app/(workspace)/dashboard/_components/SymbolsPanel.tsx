@@ -22,7 +22,7 @@ import RelationIcon from './RelationIcon'
 import { useDashTheme } from './theme'
 import type {
   BoardTask,
-  Cycle,
+  Sprint,
   ProjectExternalRef,
   TaskExternalRef,
   TaskExternalRefKind
@@ -50,8 +50,8 @@ const STATUS_DESC: Record<TaskStatus, string> = {
 
 const PRIORITY_DESC: Record<TaskPriority, string> = {
   urgent: 'Drop other work - handle today.',
-  high: 'Schedule before less-critical work in this cycle.',
-  medium: 'Plan within the current cycle.',
+  high: 'Schedule before less-critical work in this sprint.',
+  medium: 'Plan within the current sprint.',
   low: 'Nice to have; pick up when time allows.',
   none: 'No priority set yet.'
 }
@@ -64,7 +64,7 @@ const RELATION_DESC: Record<RelationKind, string> = {
   sub_issue: 'Smaller part of a parent task.'
 }
 
-const CYCLE_STATUSES: {
+const SPRINT_STATUSES: {
   id: 'upcoming' | 'current' | 'completed'
   label: string
   desc: string
@@ -126,7 +126,7 @@ const LINK_KINDS: {
 
 interface SymbolsPanelProps {
   tasks: BoardTask[]
-  cycles: Cycle[]
+  sprints: Sprint[]
   refsByTask: Record<string, TaskExternalRef[]>
   refsByProject: Record<string, ProjectExternalRef[]>
   onFilterByStatus: (status: TaskStatus) => void
@@ -135,7 +135,7 @@ interface SymbolsPanelProps {
 
 export default function SymbolsPanel({
   tasks,
-  cycles,
+  sprints,
   refsByTask,
   refsByProject,
   onFilterByStatus,
@@ -186,15 +186,15 @@ export default function SymbolsPanel({
     return c
   }, [tasks])
 
-  const cycleCounts = useMemo(() => {
+  const sprintCounts = useMemo(() => {
     const c: Record<'upcoming' | 'current' | 'completed', number> = {
       upcoming: 0,
       current: 0,
       completed: 0
     }
-    for (const cycle of cycles) c[cycle.status] = (c[cycle.status] ?? 0) + 1
+    for (const sprint of sprints) c[sprint.status] = (c[sprint.status] ?? 0) + 1
     return c
-  }, [cycles])
+  }, [sprints])
 
   const linkCounts = useMemo(() => {
     const c: Record<TaskExternalRefKind, number> = {
@@ -280,16 +280,16 @@ export default function SymbolsPanel({
 
         <Section
           title="Sprint statuses"
-          hint="Lifecycle of a sprint in the Sprints tab."
+          hint="Lifesprint of a sprint in the Sprints tab."
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {CYCLE_STATUSES.map((c) => (
+            {SPRINT_STATUSES.map((c) => (
               <SymbolCell
                 key={c.id}
-                icon={<CycleDot status={c.id} />}
+                icon={<SprintDot status={c.id} />}
                 label={c.label}
                 description={c.desc}
-                count={cycleCounts[c.id]}
+                count={sprintCounts[c.id]}
               />
             ))}
           </div>
@@ -394,7 +394,7 @@ function SymbolCell({
   return <div className={baseClass}>{inner}</div>
 }
 
-function CycleDot({
+function SprintDot({
   status
 }: {
   status: 'upcoming' | 'current' | 'completed'

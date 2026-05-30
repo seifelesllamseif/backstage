@@ -1,8 +1,3 @@
-// Slice-2 handoff sample data + idempotent seeder.
-// Used by both prisma/seed.ts (fresh seed) and
-// prisma/scripts/seed-slice-2-handoffs.ts (patch an existing seeded DB).
-// See docs/decisions/0015-slice-2-handoff-architecture.md.
-
 import type { PrismaClient } from "@prisma/client";
 
 type HandoffStatus = "in_progress" | "blocked" | "ready_for_review" | "done";
@@ -31,7 +26,7 @@ export const HANDOFF_SAMPLES: readonly Sample[] = [
       "Three-act outline finished, beats numbered, cold-open scenario chosen and approved.",
     stillLeft:
       "Nothing on this task; the next step lives in 'Lock script for ep 1'.",
-    fileLinks: "Drive: SKAM > Pilot > Outlines > ep1-outline-v3.docx",
+    fileLinks: "Drive: Verbivore > Pilot > Outlines > ep1-outline-v3.docx",
     gotchas:
       "Watch the act-2 transition — casting choice for Lead changes the pacing there. Re-check after casting locks.",
     whoToAsk:
@@ -75,7 +70,7 @@ export const HANDOFF_SAMPLES: readonly Sample[] = [
       "First draft, table read, second draft with notes incorporated, locations confirmed with Tariq.",
     stillLeft:
       "Tariq's act-3 notes, one more polish pass, hand to production.",
-    fileLinks: "Drive: SKAM > Pilot > Scripts > ep1-draft-v2.fdx",
+    fileLinks: "Drive: Verbivore > Pilot > Scripts > ep1-draft-v2.fdx",
     // gotchas, whoToAsk intentionally null — partial handoff.
   },
 ];

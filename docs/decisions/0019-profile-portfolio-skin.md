@@ -14,7 +14,7 @@ Decision 0018 shipped the working bento at `/profile/[slug]` — real data bindi
 - Components are presentational shells that take `boxClass`, `variants`, and `textSizeClass` props — one level of indirection less idiomatic than the rest of the codebase, where page-specific JSX co-locates with the page and uses the semantic `card` class directly.
 - Colors are hard-coded grayscale (`text-black`, `bg-gray-200`, `bg-amber-400`, `bg-white/10`). The app uses semantic tokens (`bg-card`, `text-foreground`, `text-accent`, `border-border`) so dark mode and theming work.
 - One component (`NavigationBar`) duplicates the authenticated layout's shell.
-- One component (`ProfileImage`) renders a cursor-tracking quote tooltip from a `quoteText` prop. Decision 0018 explicitly omitted `quote_text` from `crew_member`.
+- One component (`ProfileImage`) renders a cursor-tracking quote tooltip from a `quoteText` prop. Decision 0018 explicitly omitted `quote_text` from `team_member`.
 
 The honest "wholesale move" is therefore **adopt the visual idioms, not the file structure**, matching the rule established by decision 0017: *"port the idioms (PersonChip shape, StatusPill colors, Card padding, sidebar shell), not the inline-style JSX itself."*
 
@@ -70,7 +70,7 @@ Going forward the live `profile-bento.tsx` is the source of truth — both archi
 
 ## Skipped (deliberately)
 
-- **Add `quote_text` / `quote_author` to `crew_member`** — explicitly rejected in decision 0018, reaffirmed here.
+- **Add `quote_text` / `quote_author` to `team_member`** — explicitly rejected in decision 0018, reaffirmed here.
 - **A real "Projects" surface on the profile** — the data model doesn't have member↔project links, and there's no usage signal pulling for it. Returns to the queue if a usage week surfaces a need.
 - **Light mode** — slice-1 plan §10 dark-only stance carries over (decision 0017).
 - **`/profile` (no slug) and `/cockpit`, `/projects/[id]` styling** — out of scope; this is page-by-page.

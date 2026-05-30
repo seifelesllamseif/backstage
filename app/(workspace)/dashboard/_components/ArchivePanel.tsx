@@ -15,7 +15,7 @@ import {
   List as ListIcon,
   Columns3
 } from 'lucide-react'
-import { BoardTask, Cycle } from './boardData'
+import { BoardTask, Sprint } from './boardData'
 import { useTeam } from './TeamContext'
 import {
   PRIORITY_LABEL,
@@ -36,7 +36,7 @@ import TaskDetailContent, {
 import { TaskPriority } from './status'
 
 interface ArchivePanelProps {
-  cycles: Cycle[]
+  sprints: Sprint[]
   tasks: BoardTask[]
   comments: Record<string, TaskCommentLite[]>
   activity: Record<string, TaskActivityLite[]>
@@ -47,7 +47,7 @@ interface ArchivePanelProps {
 }
 
 export default function ArchivePanel({
-  cycles,
+  sprints,
   tasks,
   comments,
   activity,
@@ -60,7 +60,7 @@ export default function ArchivePanel({
   const containerRef = useRef<HTMLDivElement>(null)
 
   const defaultActive =
-    cycles.find((cycle) => cycle.status === 'current')?.id ?? cycles[0]?.id
+    sprints.find((sprint) => sprint.status === 'current')?.id ?? sprints[0]?.id
   const [activeId, setActiveId] = useState<string | undefined>(defaultActive)
   const [query, setQuery] = useState('')
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
@@ -76,14 +76,14 @@ export default function ArchivePanel({
         const containerRect = container.getBoundingClientRect()
         const focus = containerRect.top + containerRect.height * 0.38
         const sections =
-          container.querySelectorAll<HTMLElement>('[data-cycle-id]')
+          container.querySelectorAll<HTMLElement>('[data-sprint-id]')
         let closest: { id: string; dist: number } | null = null
         sections.forEach((node) => {
           const rect = node.getBoundingClientRect()
           const center = rect.top + rect.height / 2
           const dist = Math.abs(center - focus)
           if (!closest || dist < closest.dist) {
-            closest = { id: node.dataset.cycleId ?? '', dist }
+            closest = { id: node.dataset.sprintId ?? '', dist }
           }
         })
         const c = closest as { id: string; dist: number } | null
@@ -105,18 +105,18 @@ export default function ArchivePanel({
   }, [tasks])
 
   const ordered = useMemo(() => {
-    const completed = cycles.filter((c) => c.status === 'completed')
-    const current = cycles.filter((c) => c.status === 'current')
-    const upcoming = cycles.filter((c) => c.status === 'upcoming')
+    const completed = sprints.filter((c) => c.status === 'completed')
+    const current = sprints.filter((c) => c.status === 'current')
+    const upcoming = sprints.filter((c) => c.status === 'upcoming')
     return [...completed, ...current, ...upcoming]
-  }, [cycles])
+  }, [sprints])
 
   const activeIndex = ordered.findIndex((c) => c.id === activeId)
   const jumpTo = (idx: number) => {
-    const cycle = ordered[idx]
-    if (!cycle) return
+    const sprint = ordered[idx]
+    if (!sprint) return
     const node = containerRef.current?.querySelector<HTMLElement>(
-      `[data-cycle-id="${cycle.id}"]`
+      `[data-sprint-id="${sprint.id}"]`
     )
     node?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
@@ -138,7 +138,7 @@ export default function ArchivePanel({
           <button
             onClick={() => jumpTo(Math.max(0, activeIndex - 1))}
             className={`flex size-7 items-center justify-center rounded-md border ${t.btn}`}
-            aria-label="Previous cycle"
+            aria-label="Previous sprint"
           >
             <ArrowLeft className="size-3.5" />
           </button>
@@ -147,7 +147,7 @@ export default function ArchivePanel({
               jumpTo(Math.min(ordered.length - 1, activeIndex + 1))
             }
             className={`flex size-7 items-center justify-center rounded-md border ${t.btn}`}
-            aria-label="Next cycle"
+            aria-label="Next sprint"
           >
             <ArrowRight className="size-3.5" />
           </button>
@@ -203,9 +203,9 @@ export default function ArchivePanel({
       </div>
 
       <div className="flex flex-col gap-3 px-4 py-4">
-        {ordered.map((cycle) => {
-          const isFocused = cycle.id === activeId
-          const cycleTasks = cycle.taskIds
+        {ordered.map((sprint) => {
+          const isFocused = sprint.id === activeId
+          const sprintTasks = sprint.taskIds
             .map((id) => tasksById.get(id))
             .filter((task): task is BoardTask => Boolean(task))
             .filter((task) =>
@@ -215,12 +215,12 @@ export default function ArchivePanel({
                 : true
             )
           return (
-            <CycleSection
-              key={cycle.id}
-              cycle={cycle}
-              tasks={cycleTasks}
+            <SprintSection
+              key={sprint.id}
+              sprint={sprint}
+              tasks={sprintTasks}
               isFocused={isFocused}
-              onSelect={() => setActiveId(cycle.id)}
+              onSelect={() => setActiveId(sprint.id)}
               expandedTaskId={expandedTaskId}
               onToggleTask={(id) =>
                 setExpandedTaskId((cur) => (cur === id ? null : id))
@@ -240,8 +240,8 @@ export default function ArchivePanel({
   )
 }
 
-function CycleSection({
-  cycle,
+function SprintSection({
+  sprint,
   tasks,
   isFocused,
   onSelect,
@@ -254,7 +254,7 @@ function CycleSection({
   onChangeAssignee,
   onAddComment
 }: {
-  cycle: Cycle
+  sprint: Sprint
   tasks: BoardTask[]
   isFocused: boolean
   onSelect: () => void
@@ -270,11 +270,11 @@ function CycleSection({
   const { t, mode } = useDashTheme()
 
   const progressColor =
-    cycle.status === 'completed'
+    sprint.status === 'completed'
       ? mode === 'light'
         ? 'bg-emerald-300'
         : 'bg-emerald-500/60'
-      : cycle.status === 'current'
+      : sprint.status === 'current'
         ? mode === 'light'
           ? 'bg-amber-400'
           : 'bg-amber-500/70'
@@ -283,11 +283,11 @@ function CycleSection({
           : 'bg-white/15'
 
   const trackBg =
-    cycle.status === 'completed'
+    sprint.status === 'completed'
       ? mode === 'light'
         ? 'bg-emerald-100'
         : 'bg-emerald-500/15'
-      : cycle.status === 'current'
+      : sprint.status === 'current'
         ? mode === 'light'
           ? 'bg-amber-100'
           : 'bg-amber-500/15'
@@ -296,7 +296,7 @@ function CycleSection({
           : 'bg-white/10'
 
   const cardBg =
-    cycle.status === 'current'
+    sprint.status === 'current'
       ? mode === 'light'
         ? 'bg-white border-zinc-200 shadow-lg shadow-amber-500/10'
         : 'bg-zinc-900/80 border-white/15 shadow-2xl shadow-amber-500/10'
@@ -305,11 +305,11 @@ function CycleSection({
         : 'bg-zinc-900/40 border-white/10'
 
   const statusBadge =
-    cycle.status === 'completed'
+    sprint.status === 'completed'
       ? mode === 'light'
         ? 'bg-zinc-100 text-zinc-700 border-zinc-200'
         : 'bg-white/5 text-white/70 border-white/10'
-      : cycle.status === 'current'
+      : sprint.status === 'current'
         ? mode === 'light'
           ? 'bg-amber-100 text-amber-700 border-amber-200'
           : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
@@ -319,7 +319,7 @@ function CycleSection({
 
   return (
     <section
-      data-cycle-id={cycle.id}
+      data-sprint-id={sprint.id}
       onClick={onSelect}
       className={`group rounded-2xl border transition-[opacity,box-shadow] duration-300 ${cardBg} ${
         isFocused ? '' : 'opacity-95 hover:opacity-100'
@@ -329,55 +329,55 @@ function CycleSection({
         <div className="col-span-1 flex min-w-0 flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className={`truncate text-base font-semibold ${t.text}`}>
-              {cycle.name}
+              {sprint.name}
             </h3>
             <span
               className={`rounded-md px-2 py-0.5 text-[10px] tracking-wider uppercase ${statusBadge}`}
             >
-              {cycle.status === 'completed'
+              {sprint.status === 'completed'
                 ? 'Completed'
-                : cycle.status === 'current'
+                : sprint.status === 'current'
                   ? 'Current'
                   : 'Upcoming'}
             </span>
             <span
               className={`rounded-md px-2 py-0.5 text-[10px] tracking-wider uppercase ${t.surfaceMuted} ${t.textMuted}`}
             >
-              {cycle.from} → {cycle.to}
+              {sprint.from} → {sprint.to}
             </span>
             <span
               className={`text-[10px] tracking-wider uppercase ${t.textSubtle}`}
             >
-              · Cycle {cycle.number}
+              · Sprint {sprint.number}
             </span>
           </div>
           <div className={`h-2 overflow-hidden rounded-full ${trackBg}`}>
             <div
               className={`h-full ${progressColor} transition-all duration-700`}
-              style={{ width: `${cycle.percent}%` }}
+              style={{ width: `${sprint.percent}%` }}
             />
           </div>
         </div>
 
         <div className="flex flex-col items-end justify-start">
           <span className={`text-sm tabular-nums ${t.text}`}>
-            {cycle.percent}%
+            {sprint.percent}%
           </span>
         </div>
-        <Stat label="Scope" value={`${cycle.scope} tickets`} />
+        <Stat label="Scope" value={`${sprint.scope} tickets`} />
         <Stat
           label="Started"
-          value={`${cycle.startedCount} · ${cycle.startedPct}%`}
+          value={`${sprint.startedCount} · ${sprint.startedPct}%`}
         />
         <Stat
           label="Completed"
-          value={`${cycle.completedCount} · ${cycle.completedPct}%`}
+          value={`${sprint.completedCount} · ${sprint.completedPct}%`}
         />
       </header>
 
       <div className={`border-t ${t.border} flex flex-col gap-4 px-5 py-4`}>
-        <CycleToolbar />
-        <CycleTasks
+        <SprintToolbar />
+        <SprintTasks
           tasks={tasks}
           expandedTaskId={expandedTaskId}
           onToggleTask={onToggleTask}
@@ -405,7 +405,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   )
 }
 
-function CycleToolbar() {
+function SprintToolbar() {
   const { t } = useDashTheme()
   const team = useTeam()
   return (
@@ -476,7 +476,7 @@ function ToolbarPill({ label }: { label: string }) {
   )
 }
 
-function CycleTasks({
+function SprintTasks({
   tasks,
   expandedTaskId,
   onToggleTask,

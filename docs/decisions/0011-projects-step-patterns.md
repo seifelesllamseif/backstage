@@ -7,7 +7,7 @@ decided_on: 2026-05-23
 
 ## Context
 
-Slice-1 step 3 ships the projects list + a create form. The plan §5.3 says "a simple list of projects. Create a project. Open one to its board." Three small patterns get locked in here because they'll repeat across every later list/create surface (tasks, handoffs, crew profiles…).
+Slice-1 step 3 ships the projects list + a create form. The plan §5.3 says "a simple list of projects. Create a project. Open one to its board." Three small patterns get locked in here because they'll repeat across every later list/create surface (tasks, handoffs, team profiles…).
 
 ## Decision
 
@@ -22,10 +22,10 @@ The UI hide is a UX nicety; the server check is the actual security boundary. A 
 
 ### 2. Every read and write is scoped by the current user's company
 
-`getCurrentCrewMember()` returns the crew_member row, which carries `companyId`. Every query and insert in this step uses that value as the filter / required field:
+`getCurrentTeamMember()` returns the team_member row, which carries `companyId`. Every query and insert in this step uses that value as the filter / required field:
 
 ```ts
-const member = await getCurrentCrewMember();
+const member = await getCurrentTeamMember();
 const projects = await prisma.project.findMany({
   where: { companyId: member.companyId, isArchived: false },
   orderBy: [{ kind: "asc" }, { name: "asc" }],

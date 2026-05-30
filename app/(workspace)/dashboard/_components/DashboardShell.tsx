@@ -15,7 +15,7 @@ import {
   X,
   PlusCircle
 } from 'lucide-react'
-import { signOut } from '@/app/login/actions'
+import { signOut } from '@/app/(authentication)/login/actions'
 import {
   DndContext,
   DragOverlay,
@@ -48,7 +48,7 @@ import {
   removeTaskDependency
 } from '../actions'
 import { parseExternalRef as parseExternalRefClient } from '@/lib/externalRef'
-import type { BoardAssignee, BoardTask, Cycle } from './boardData'
+import type { BoardAssignee, BoardTask, Sprint } from './boardData'
 import {
   STATUSES,
   STATUS_BY_ID,
@@ -68,12 +68,12 @@ import NewTaskModal from './NewTaskModal'
 import Timeline from './Timeline'
 import FilterPanel from './FilterPanel'
 import { ProjectsPanel, SettingsPanel, UpdatesPanel } from './Panels'
-import CyclesPanel from './CyclesPanel'
-import CycleHero from './CycleHero'
+import SprintsPanel from './SprintsPanel'
+import SprintHero from './SprintHero'
 import HandoffSheet from './HandoffSheet'
 import { CopyButton, type CopyMenuItem } from '@/components/ui/copy-button'
 import { viewToJson, viewToMarkdown } from '@/lib/export/view'
-import { cycleToJson, cycleToMarkdown } from '@/lib/export/cycle'
+import { sprintToJson, sprintToMarkdown } from '@/lib/export/sprint'
 import { taskToJson, taskToMarkdown } from '@/lib/export/task'
 import { projectToJson, projectToMarkdown } from '@/lib/export/project'
 import { isInScope, type TimeScope } from '@/lib/export/timeRange'
@@ -101,7 +101,7 @@ export type View =
 export interface DashboardInitial {
   tasks: BoardTask[]
   members: BoardAssignee[]
-  cycles: Cycle[]
+  sprints: Sprint[]
   projects: {
     id: string
     name: string
@@ -186,7 +186,7 @@ function buildViewMarkdown(args: {
 
 function scopedTasks(
   tasks: BoardTask[],
-  scope: Exclude<TimeScope, 'all' | 'cycle'>
+  scope: Exclude<TimeScope, 'all' | 'sprint'>
 ): BoardTask[] {
   const now = new Date()
   // "Today / This week / This month" buckets are based on updatedAt so the
@@ -203,7 +203,7 @@ function buildViewCopyMenu(args: {
   groupBy: GroupBy
   currentProjectId: string | null
   projects: { id: string; name: string }[]
-  cycles: Cycle[]
+  sprints: Sprint[]
 }): CopyMenuItem[] {
   const baseTitle = viewTitle(args.view, args.currentProjectId, args.projects)
   const meta = (extra?: string) => ({
@@ -290,19 +290,19 @@ function buildViewCopyMenu(args: {
     }
   )
 
-  const projectScopedCycles = args.currentProjectId
-    ? args.cycles.filter((c) => c.projectId === args.currentProjectId)
-    : args.cycles
-  if (projectScopedCycles.length > 0) {
+  const projectScopedSprints = args.currentProjectId
+    ? args.sprints.filter((c) => c.projectId === args.currentProjectId)
+    : args.sprints
+  if (projectScopedSprints.length > 0) {
     items.push({
-      id: 'by-cycle',
+      id: 'by-sprint',
       label: 'Copy by sprint',
       description: 'Pick a sprint to export',
       separatorBefore: true,
-      submenu: projectScopedCycles.map((c) => ({
-        id: `cycle-${c.id}`,
+      submenu: projectScopedSprints.map((c) => ({
+        id: `sprint-${c.id}`,
         label: `${c.name} (${c.status})`,
-        getContent: () => cycleToMarkdown(c, args.ctx),
+        getContent: () => sprintToMarkdown(c, args.ctx),
         toastLabel: `sprint ${c.name}`
       }))
     })
@@ -355,7 +355,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   const [activity, setActivity] = useState<Record<string, TaskActivity[]>>(
     initial.activityByTask
   )
-  const [cycles, setCycles] = useState<Cycle[]>(initial.cycles)
+  const [sprints, setSprints] = useState<Sprint[]>(initial.sprints)
   const [externalRefs, setExternalRefs] = useState<
     Record<string, TaskExternalRef[]>
   >(initial.externalRefsByTask)
@@ -381,8 +381,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   }, [initial.activityByTask])
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setCycles(initial.cycles)
-  }, [initial.cycles])
+    setSprints(initial.sprints)
+  }, [initial.sprints])
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setExternalRefs(initial.externalRefsByTask)
@@ -393,14 +393,14 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   }, [initial.externalRefsByProject])
 
   const [view, setView] = useState<View>('all')
-  const [tab, setTab] = useState<'board' | 'list' | 'timeline' | 'cycles'>(
+  const [tab, setTab] = useState<'board' | 'list' | 'timeline' | 'sprints'>(
     'board'
   )
-  // The Cycles tab is project-scoped. If the user navigates back to "All
+  // The Sprints tab is project-scoped. If the user navigates back to "All
   // projects" while on it, drop them on Board so they don't see a blank
   // panel.
   useEffect(() => {
-    if (tab === 'cycles' && !initial.currentProjectId) {
+    if (tab === 'sprints' && !initial.currentProjectId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setTab('board')
     }
@@ -418,8 +418,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority[]>([])
   const [assigneeFilter, setAssigneeFilter] = useState<string[]>([])
   const [tagFilter, setTagFilter] = useState<string[]>([])
-  // Sprint filter holds cycle ids. A task matches the filter if it belongs
-  // to any selected sprint (via cycle.taskIds). Works for both admin and
+  // Sprint filter holds sprint ids. A task matches the filter if it belongs
+  // to any selected sprint (via sprint.taskIds). Works for both admin and
   // members; member view stays scoped by their project visibility.
   const [sprintFilter, setSprintFilter] = useState<string[]>([])
 
@@ -446,11 +446,11 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       cur.includes(tag) ? cur.filter((x) => x !== tag) : [...cur, tag]
     )
   }
-  const toggleSprint = (cycleId: string) => {
+  const toggleSprint = (sprintId: string) => {
     setSprintFilter((cur) =>
-      cur.includes(cycleId)
-        ? cur.filter((x) => x !== cycleId)
-        : [...cur, cycleId]
+      cur.includes(sprintId)
+        ? cur.filter((x) => x !== sprintId)
+        : [...cur, sprintId]
     )
   }
 
@@ -551,11 +551,11 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     }
     if (sprintFilter.length > 0) {
       // Build the set of task ids that live in any selected sprint once,
-      // then filter — avoids an O(filters × cycles × tasks) inner loop.
+      // then filter — avoids an O(filters × sprints × tasks) inner loop.
       const allowed = new Set<string>()
-      for (const cycle of cycles) {
-        if (sprintFilter.includes(cycle.id)) {
-          for (const tid of cycle.taskIds) allowed.add(tid)
+      for (const sprint of sprints) {
+        if (sprintFilter.includes(sprint.id)) {
+          for (const tid of sprint.taskIds) allowed.add(tid)
         }
       }
       list = list.filter((task) => allowed.has(task.id))
@@ -578,7 +578,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     assigneeFilter,
     tagFilter,
     sprintFilter,
-    cycles,
+    sprints,
     query,
     currentUserId,
     mentionedTaskIds
@@ -723,7 +723,10 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     })
   }
 
-  const addRelation = (taskId: string, rel: { kind: import('./status').RelationKind; ref: string }) => {
+  const addRelation = (
+    taskId: string,
+    rel: { kind: import('./status').RelationKind; ref: string }
+  ) => {
     // Optimistic append. If the server rejects (unknown ref, self-ref,
     // etc.) we roll back to the snapshot and toast the message.
     let snapshot: BoardTask[] | null = null
@@ -789,10 +792,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         task.id === id ? { ...task, lead: member ?? undefined } : task
       )
     )
-    logActivityLocal(
-      id,
-      member ? `Lead set to ${member.name}` : 'Lead cleared'
-    )
+    logActivityLocal(id, member ? `Lead set to ${member.name}` : 'Lead cleared')
     startTransition(async () => {
       const res = await updateDashboardTaskLead(id, leadId)
       if ('error' in res) {
@@ -1386,12 +1386,12 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     : null
 
   // Shared export context for every CopyButton on the page. The serializers
-  // in lib/export consume this shape, so the Topbar / Project / Cycle /
+  // in lib/export consume this shape, so the Topbar / Project / Sprint /
   // Updates / Task buttons all reuse the same context build.
   const exportCtx: ExportContext = useMemo(
     () => ({
       tasks,
-      cycles,
+      sprints,
       projects: initial.projects,
       members: team,
       commentsByTask: comments,
@@ -1401,7 +1401,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     }),
     [
       tasks,
-      cycles,
+      sprints,
       initial.projects,
       team,
       comments,
@@ -1766,7 +1766,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                     groupBy,
                     currentProjectId: initial.currentProjectId,
                     projects: initial.projects,
-                    cycles
+                    sprints
                   })}
                 />
               }
@@ -1791,7 +1791,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               sprintFilter={sprintFilter}
               onToggleSprint={toggleSprint}
               onClearSprint={() => setSprintFilter([])}
-              allSprints={cycles
+              allSprints={sprints
                 .filter(
                   (c) =>
                     !initial.currentProjectId ||
@@ -1883,68 +1883,75 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                     <div className="flex h-full min-h-0 flex-col">
                       {initial.currentProjectId &&
                         (() => {
-                          const currentCycle =
-                            cycles.find(
+                          const currentSprint =
+                            sprints.find(
                               (c) =>
                                 c.projectId === initial.currentProjectId &&
                                 c.status === 'current'
                             ) ?? null
                           return (
-                            <CycleHero
-                              cycle={currentCycle}
+                            <SprintHero
+                              sprint={currentSprint}
                               canEdit={
                                 initial.currentMember.accessTier === 'admin' ||
                                 initial.currentMember.accessTier === 'lead'
                               }
-                              onPlan={() => setTab('cycles')}
-                              onEdit={() => setTab('cycles')}
+                              onPlan={() => setTab('sprints')}
+                              onEdit={() => setTab('sprints')}
                               copySlot={
-                                currentCycle ? (
+                                currentSprint ? (
                                   <CopyButton
                                     primaryLabel="Copy sprint"
-                                    primaryToastLabel={`sprint ${currentCycle.name} as Markdown`}
+                                    primaryToastLabel={`sprint ${currentSprint.name} as Markdown`}
                                     primaryGetContent={() =>
-                                      cycleToMarkdown(currentCycle, exportCtx)
+                                      sprintToMarkdown(currentSprint, exportCtx)
                                     }
                                     menu={[
                                       {
                                         id: 'md-full',
                                         label: 'Copy as Markdown',
                                         getContent: () =>
-                                          cycleToMarkdown(
-                                            currentCycle,
+                                          sprintToMarkdown(
+                                            currentSprint,
                                             exportCtx
                                           ),
-                                        toastLabel: `sprint ${currentCycle.name} as Markdown`
+                                        toastLabel: `sprint ${currentSprint.name} as Markdown`
                                       },
                                       {
                                         id: 'md-slim',
                                         label: 'Copy as Markdown (no comments)',
                                         getContent: () =>
-                                          cycleToMarkdown(
-                                            currentCycle,
+                                          sprintToMarkdown(
+                                            currentSprint,
                                             exportCtx,
                                             {
                                               withoutCommentsAndActivity: true
                                             }
                                           ),
-                                        toastLabel: `sprint ${currentCycle.name} as Markdown`
+                                        toastLabel: `sprint ${currentSprint.name} as Markdown`
                                       },
                                       {
                                         id: 'json-full',
                                         label: 'Copy as JSON',
                                         getContent: () =>
-                                          cycleToJson(currentCycle, exportCtx),
-                                        toastLabel: `sprint ${currentCycle.name} as JSON`
+                                          sprintToJson(
+                                            currentSprint,
+                                            exportCtx
+                                          ),
+                                        toastLabel: `sprint ${currentSprint.name} as JSON`
                                       },
                                       {
                                         id: 'json-slim',
                                         label: 'Copy as JSON (no comments)',
                                         getContent: () =>
-                                          cycleToJson(currentCycle, exportCtx, {
-                                            withoutCommentsAndActivity: true
-                                          }),
-                                        toastLabel: `sprint ${currentCycle.name} as JSON`
+                                          sprintToJson(
+                                            currentSprint,
+                                            exportCtx,
+                                            {
+                                              withoutCommentsAndActivity: true
+                                            }
+                                          ),
+                                        toastLabel: `sprint ${currentSprint.name} as JSON`
                                       }
                                     ]}
                                   />
@@ -2014,20 +2021,20 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   {tab === 'timeline' && (
                     <Timeline tasks={filtered} onSelect={setSelectedId} />
                   )}
-                  {tab === 'cycles' && initial.currentProjectId && (
-                    <CyclesPanel
+                  {tab === 'sprints' && initial.currentProjectId && (
+                    <SprintsPanel
                       projectId={initial.currentProjectId}
-                      cycles={cycles.filter(
+                      sprints={sprints.filter(
                         (c) => c.projectId === initial.currentProjectId
                       )}
-                      setCycles={setCycles}
+                      setSprints={setSprints}
                       tasks={tasks.filter(
                         (t) => t.projectId === initial.currentProjectId
                       )}
                       accessTier={initial.currentMember.accessTier}
                       onOpenTask={setSelectedId}
-                      renderCycleCopySlot={(cycleId) => {
-                        const c = cycles.find((x) => x.id === cycleId)
+                      renderSprintCopySlot={(sprintId) => {
+                        const c = sprints.find((x) => x.id === sprintId)
                         if (!c) return null
                         return (
                           <CopyButton
@@ -2035,7 +2042,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                             iconOnly
                             primaryToastLabel={`sprint ${c.name} as Markdown`}
                             primaryGetContent={() =>
-                              cycleToMarkdown(c, exportCtx)
+                              sprintToMarkdown(c, exportCtx)
                             }
                           />
                         )
@@ -2116,7 +2123,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               {view === 'symbols' && (
                 <SymbolsPanel
                   tasks={visibleTasks}
-                  cycles={cycles}
+                  sprints={sprints}
                   refsByTask={externalRefs}
                   refsByProject={projectExternalRefs}
                   onFilterByStatus={(status) => {
@@ -2135,7 +2142,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               )}
               {view === 'archive' && (
                 <ArchivePanel
-                  cycles={cycles}
+                  sprints={sprints}
                   tasks={visibleTasks}
                   comments={comments}
                   activity={activity}

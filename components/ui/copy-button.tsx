@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 // Shape of a single entry in the dropdown. Each entry produces a string via
 // `getContent()` and announces what was copied via `toastLabel`.
 //
-// A `submenu` lets us nest options (e.g. "By cycle > Phase 1, Phase 2").
+// A `submenu` lets us nest options (e.g. "By sprint > Phase 1, Phase 2").
 // The submenu is rendered inline as an accordion, not as a flyout, to
 // avoid building a portal positioning layer just for this.
 export interface CopyMenuItem {

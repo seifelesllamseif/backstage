@@ -24,7 +24,7 @@ export function PersonChip({
   nameOnly = false,
 }: {
   name: string;
-  /** Override the auto-derived initials. Useful when DB carries `avatar_initials`. */
+  /** Override the auto-derived initials. */
   initials?: string;
   size?: Size;
   muted?: boolean;

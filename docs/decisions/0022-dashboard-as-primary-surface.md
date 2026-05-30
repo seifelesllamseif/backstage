@@ -7,8 +7,8 @@ decided_on: 2026-05-25
 
 ## Context
 
-After slices 1 and 2 shipped, slice-3-intake (`docs/slice-3-intake.md`)
-revealed that the app wasn't being used: 1 of 6 seeded accounts has
+After slices 1 and 2 shipped, the slice-3 intake (since deleted; see
+git history) revealed that the app wasn't being used: 1 of 6 seeded accounts has
 ever signed in, 0 tasks were created post-seed, at most 1 fresh
 handoff. The original slice-3 plan was a capacity board, but writing
 a capacity feature for a company that hasn't yet trusted the task
@@ -17,7 +17,7 @@ board is building on top of a feature nobody is using.
 In parallel, a Linear-style `/dashboard` route landed
 (commit `9636abf`) with its own `DashboardShell` chrome (sidebar,
 topbar, task drawer, multi-project board) and most of the supporting
-schema (priority, labels, refs, checklists, relations, cycles,
+schema (priority, labels, refs, checklists, relations, sprints,
 comments, activity). The user has stated they will use `/dashboard`
 more than the existing per-project board at `/projects/[id]`.
 

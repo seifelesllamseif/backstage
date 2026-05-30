@@ -8,7 +8,7 @@
 import type {
   BoardAssignee,
   BoardTask,
-  Cycle,
+  Sprint,
   ProjectExternalRef,
   TaskExternalRef,
 } from '@/app/(workspace)/dashboard/_components/boardData'
@@ -26,7 +26,7 @@ export interface ProjectLite {
 
 export interface ExportContext {
   tasks: BoardTask[]
-  cycles: Cycle[]
+  sprints: Sprint[]
   projects: ProjectLite[]
   members: BoardAssignee[]
   commentsByTask: Record<string, TaskComment[]>

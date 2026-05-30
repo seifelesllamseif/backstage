@@ -5,14 +5,10 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 // Node 20 has no native WebSocket; @supabase/realtime-js throws without one.
-// See docs/decisions/0010-auth-architecture.md.
+// Decision 0010.
 if (typeof globalThis.WebSocket === "undefined") {
   (globalThis as unknown as { WebSocket: unknown }).WebSocket = WebSocket;
 }
-
-// Supabase client for server components and server actions.
-// Reads cookies from next/headers; writes are best-effort (server components
-// can't set cookies — the proxy handles refresh writes instead).
 
 export async function createClient() {
   const cookieStore = await cookies();
@@ -31,9 +27,8 @@ export async function createClient() {
               cookieStore.set(name, value, options);
             }
           } catch {
-            // Called from a server component — cookies can only be set in
-            // server actions, route handlers, or the proxy. Safe to ignore;
-            // the proxy will write refreshed cookies on the next navigation.
+            // Server components can't set cookies; the proxy refreshes them on
+            // the next navigation. Safe to swallow.
           }
         },
       },

@@ -11,7 +11,7 @@ import type {
 import type {
   BoardAssignee,
   BoardTask,
-  Cycle,
+  Sprint,
   TaskRelation,
   ChecklistItem,
 } from "./boardData";
@@ -54,7 +54,7 @@ export function mapMember(
 ): BoardAssignee {
   return {
     id: member.id,
-    initials: member.avatarInitials ?? initialsFromName(member.fullName),
+    initials: initialsFromName(member.fullName),
     name: member.fullName,
     color: memberColor(index),
     photo: member.avatarUrl ?? undefined,
@@ -163,9 +163,9 @@ export function mapTasks(
   return tasks.map((t) => mapTask(t, byDbId));
 }
 
-// ─── Cycles ───────────────────────────────────────────────────────────────
+// ─── Sprints ───────────────────────────────────────────────────────────────
 
-type DashCycle = {
+type DashSprint = {
   id: string;
   projectId: string;
   number: number;
@@ -183,27 +183,27 @@ function toIsoDate(d: Date | string): string {
   return date.toISOString().slice(0, 10);
 }
 
-export function mapCycle(cycle: DashCycle, allTasks: BoardTask[]): Cycle {
-  const taskIds = cycle.tasks.map((t) => t.taskId);
-  const cycleTasks = allTasks.filter((t) => taskIds.includes(t.id));
-  const scope = cycleTasks.length;
-  const startedCount = cycleTasks.filter(
+export function mapSprint(sprint: DashSprint, allTasks: BoardTask[]): Sprint {
+  const taskIds = sprint.tasks.map((t) => t.taskId);
+  const sprintTasks = allTasks.filter((t) => taskIds.includes(t.id));
+  const scope = sprintTasks.length;
+  const startedCount = sprintTasks.filter(
     (t) => t.status !== "backlog" && t.status !== "unscoped",
   ).length;
-  const completedCount = cycleTasks.filter((t) => t.status === "done").length;
+  const completedCount = sprintTasks.filter((t) => t.status === "done").length;
 
   return {
-    id: cycle.id,
-    projectId: cycle.projectId,
-    number: cycle.number,
-    name: cycle.name,
-    description: cycle.description,
-    docUrl: cycle.docUrl,
-    status: cycle.status,
-    from: formatDueDate(cycle.fromDate as Date) ?? "",
-    to: formatDueDate(cycle.toDate as Date) ?? "",
-    fromIso: toIsoDate(cycle.fromDate),
-    toIso: toIsoDate(cycle.toDate),
+    id: sprint.id,
+    projectId: sprint.projectId,
+    number: sprint.number,
+    name: sprint.name,
+    description: sprint.description,
+    docUrl: sprint.docUrl,
+    status: sprint.status,
+    from: formatDueDate(sprint.fromDate as Date) ?? "",
+    to: formatDueDate(sprint.toDate as Date) ?? "",
+    fromIso: toIsoDate(sprint.fromDate),
+    toIso: toIsoDate(sprint.toDate),
     scope,
     startedCount,
     startedPct: scope ? Math.round((startedCount / scope) * 100) : 0,
@@ -214,8 +214,8 @@ export function mapCycle(cycle: DashCycle, allTasks: BoardTask[]): Cycle {
   };
 }
 
-export function mapCycles(cycles: DashCycle[], allTasks: BoardTask[]): Cycle[] {
-  return cycles.map((c) => mapCycle(c, allTasks));
+export function mapSprints(sprints: DashSprint[], allTasks: BoardTask[]): Sprint[] {
+  return sprints.map((c) => mapSprint(c, allTasks));
 }
 
 // ─── Comments + Activity ─────────────────────────────────────────────────
@@ -227,7 +227,7 @@ type DbComment = {
   createdAt: Date | string;
   editedAt: Date | string | null;
   mentions: string[];
-  author: { id: string; fullName: string; avatarInitials: string | null } | null;
+  author: { id: string; fullName: string } | null;
 };
 
 type DbActivity = {
@@ -236,7 +236,7 @@ type DbActivity = {
   action: string;
   createdAt: Date | string;
   metadata: unknown;
-  actor: { id: string; fullName: string; avatarInitials: string | null } | null;
+  actor: { id: string; fullName: string } | null;
 };
 
 function formatTimestamp(d: Date | string): string {
@@ -260,8 +260,7 @@ export function groupCommentsByTask(
       id: c.id,
       author: authorName,
       authorId: c.author?.id ?? null,
-      authorInitials:
-        c.author?.avatarInitials ?? initialsFromName(authorName),
+      authorInitials: initialsFromName(authorName),
       body: c.body,
       at: formatTimestamp(c.createdAt),
       editedAt: c.editedAt

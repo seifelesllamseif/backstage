@@ -1,13 +1,13 @@
 // Idempotent seeder for the /dashboard demo data.
 // Run: pnpm tsx --env-file=.env.local prisma/scripts/seed-dashboard.ts
 //
-// Mirrors the 24 BOARD_TASKS, 10 labels, and 5 cycles that the dashboard
+// Mirrors the 24 BOARD_TASKS, 10 labels, and 5 sprints that the dashboard
 // used to render from hardcoded constants (see boardData.ts). Creates a
-// dedicated "SKAM Series" project so the SKAM-### refs round-trip cleanly
+// dedicated "Verbivore Series" project so the VERB-### refs round-trip cleanly
 // through createDashboardTask()'s prefix rule (project name → first word).
 //
-// Idempotency: if any task with a ref starting "SKAM-" already exists in
-// the SKAM company, the script exits without writing. Run after pnpm db:seed.
+// Idempotency: if any task with a ref starting "VERB-" already exists in
+// the Verbivore company, the script exits without writing. Run after pnpm db:seed.
 
 import type { Prisma, PrismaClient } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
@@ -41,7 +41,7 @@ interface SeedTask {
 
 const TASKS: SeedTask[] = [
   {
-    ref: 'SKAM-101',
+    ref: 'VERB-101',
     title: 'Episode 1 — final colour grade',
     status: 'in_progress',
     priority: 'urgent',
@@ -49,8 +49,8 @@ const TASKS: SeedTask[] = [
     tags: ['Series'],
     due: 'May 25',
     relations: [
-      { kind: 'blocked_by', ref: 'SKAM-102' },
-      { kind: 'sub_issue', ref: 'SKAM-107' }
+      { kind: 'blocked_by', ref: 'VERB-102' },
+      { kind: 'sub_issue', ref: 'VERB-107' }
     ],
     checklist: [
       { text: 'Lock color reference', done: true },
@@ -61,14 +61,14 @@ const TASKS: SeedTask[] = [
     ]
   },
   {
-    ref: 'SKAM-102',
+    ref: 'VERB-102',
     title: 'Score handoff — bridge cue v3',
     status: 'in_review',
     priority: 'high',
     assignee: 'ay',
     tags: ['Audio'],
     due: 'May 24',
-    relations: [{ kind: 'blocks', ref: 'SKAM-101' }],
+    relations: [{ kind: 'blocks', ref: 'VERB-101' }],
     checklist: [
       { text: 'Compose theme', done: true },
       { text: 'Director feedback round 1', done: true },
@@ -76,7 +76,7 @@ const TASKS: SeedTask[] = [
     ]
   },
   {
-    ref: 'SKAM-103',
+    ref: 'VERB-103',
     title: 'Storyboard pass — opening sequence',
     status: 'done',
     priority: 'medium',
@@ -85,7 +85,7 @@ const TASKS: SeedTask[] = [
     due: 'May 18'
   },
   {
-    ref: 'SKAM-104',
+    ref: 'VERB-104',
     title: 'Cast confirmations — supporting roles',
     status: 'todo',
     priority: 'high',
@@ -100,7 +100,7 @@ const TASKS: SeedTask[] = [
     ]
   },
   {
-    ref: 'SKAM-105',
+    ref: 'VERB-105',
     title: 'Location scout — Istanbul rooftops',
     status: 'in_progress',
     priority: 'medium',
@@ -109,7 +109,7 @@ const TASKS: SeedTask[] = [
     due: 'May 26'
   },
   {
-    ref: 'SKAM-106',
+    ref: 'VERB-106',
     title: 'Sound design — episode 2 ambience',
     status: 'backlog',
     priority: 'low',
@@ -118,7 +118,7 @@ const TASKS: SeedTask[] = [
     due: 'Jun 02'
   },
   {
-    ref: 'SKAM-107',
+    ref: 'VERB-107',
     title: 'Script polish — episode 3',
     status: 'in_review',
     priority: 'medium',
@@ -127,7 +127,7 @@ const TASKS: SeedTask[] = [
     due: 'May 23'
   },
   {
-    ref: 'SKAM-108',
+    ref: 'VERB-108',
     title: 'Marketing trailer cutdown — 30s',
     status: 'todo',
     priority: 'urgent',
@@ -136,17 +136,17 @@ const TASKS: SeedTask[] = [
     due: 'May 22'
   },
   {
-    ref: 'SKAM-109',
+    ref: 'VERB-109',
     title: 'Posters — alt directions',
     status: 'unscoped',
     priority: 'none',
     assignee: 'lk',
     tags: ['Design'],
     due: 'Jun 05',
-    relations: [{ kind: 'parent', ref: 'SKAM-110' }]
+    relations: [{ kind: 'parent', ref: 'VERB-110' }]
   },
   {
-    ref: 'SKAM-110',
+    ref: 'VERB-110',
     title: 'Press kit — final assets',
     status: 'done',
     priority: 'low',
@@ -155,7 +155,7 @@ const TASKS: SeedTask[] = [
     due: 'May 15'
   },
   {
-    ref: 'SKAM-111',
+    ref: 'VERB-111',
     title: 'Color reference deck',
     status: 'canceled',
     priority: 'low',
@@ -163,7 +163,7 @@ const TASKS: SeedTask[] = [
     tags: ['Design']
   },
   {
-    ref: 'SKAM-112',
+    ref: 'VERB-112',
     title: 'Episode 1 — final mix approval',
     status: 'todo',
     priority: 'high',
@@ -172,16 +172,16 @@ const TASKS: SeedTask[] = [
     due: 'May 28'
   },
   {
-    ref: 'SKAM-113',
+    ref: 'VERB-113',
     title: 'Episode 1 — duplicate render request',
     status: 'duplicate',
     priority: 'low',
     assignee: 'na',
     tags: ['Series'],
-    relations: [{ kind: 'parent', ref: 'SKAM-101' }]
+    relations: [{ kind: 'parent', ref: 'VERB-101' }]
   },
   {
-    ref: 'SKAM-114',
+    ref: 'VERB-114',
     title: 'Triage — incoming press requests',
     status: 'backlog',
     priority: 'medium',
@@ -191,7 +191,7 @@ const TASKS: SeedTask[] = [
     // 'triage' relation to INBOX is dropped — INBOX isn't a real task.
   },
   {
-    ref: 'SKAM-090',
+    ref: 'VERB-090',
     title: 'Pilot pitch deck — final round',
     status: 'done',
     priority: 'high',
@@ -200,7 +200,7 @@ const TASKS: SeedTask[] = [
     due: 'Apr 6'
   },
   {
-    ref: 'SKAM-091',
+    ref: 'VERB-091',
     title: 'Brand guidelines v1',
     status: 'done',
     priority: 'medium',
@@ -209,7 +209,7 @@ const TASKS: SeedTask[] = [
     due: 'Apr 4'
   },
   {
-    ref: 'SKAM-092',
+    ref: 'VERB-092',
     title: 'Workspace IT setup',
     status: 'done',
     priority: 'low',
@@ -218,7 +218,7 @@ const TASKS: SeedTask[] = [
     due: 'Apr 1'
   },
   {
-    ref: 'SKAM-093',
+    ref: 'VERB-093',
     title: 'Casting pipeline — leads',
     status: 'done',
     priority: 'high',
@@ -227,7 +227,7 @@ const TASKS: SeedTask[] = [
     due: 'Apr 5'
   },
   {
-    ref: 'SKAM-094',
+    ref: 'VERB-094',
     title: 'Theme song — first draft',
     status: 'canceled',
     priority: 'low',
@@ -235,7 +235,7 @@ const TASKS: SeedTask[] = [
     tags: ['Audio']
   },
   {
-    ref: 'SKAM-095',
+    ref: 'VERB-095',
     title: 'Episode 1 — first cut',
     status: 'done',
     priority: 'urgent',
@@ -244,7 +244,7 @@ const TASKS: SeedTask[] = [
     due: 'Apr 20'
   },
   {
-    ref: 'SKAM-096',
+    ref: 'VERB-096',
     title: 'Initial location list',
     status: 'done',
     priority: 'medium',
@@ -253,7 +253,7 @@ const TASKS: SeedTask[] = [
     due: 'Apr 18'
   },
   {
-    ref: 'SKAM-097',
+    ref: 'VERB-097',
     title: 'Wardrobe direction — leads',
     status: 'done',
     priority: 'medium',
@@ -262,7 +262,7 @@ const TASKS: SeedTask[] = [
     due: 'Apr 19'
   },
   {
-    ref: 'SKAM-098',
+    ref: 'VERB-098',
     title: 'Episode 2 — script lock',
     status: 'done',
     priority: 'high',
@@ -271,7 +271,7 @@ const TASKS: SeedTask[] = [
     due: 'May 2'
   },
   {
-    ref: 'SKAM-099',
+    ref: 'VERB-099',
     title: 'Editor — onboarding',
     status: 'done',
     priority: 'low',
@@ -280,7 +280,7 @@ const TASKS: SeedTask[] = [
     due: 'May 1'
   },
   {
-    ref: 'SKAM-100',
+    ref: 'VERB-100',
     title: 'Episode 2 — first cut',
     status: 'done',
     priority: 'urgent',
@@ -303,7 +303,7 @@ const LABELS: { name: string; color: string }[] = [
   { name: 'Strategy', color: 'teal' }
 ]
 
-interface SeedCycle {
+interface SeedSprint {
   number: number
   name: string
   status: 'completed' | 'current' | 'upcoming'
@@ -312,14 +312,14 @@ interface SeedCycle {
   taskRefs: string[]
 }
 
-const CYCLES: SeedCycle[] = [
+const SPRINTS: SeedSprint[] = [
   {
     number: 10,
     name: 'Foundation',
     status: 'completed',
     from: 'Mar 24',
     to: 'Apr 6',
-    taskRefs: ['SKAM-090', 'SKAM-091', 'SKAM-092', 'SKAM-093']
+    taskRefs: ['VERB-090', 'VERB-091', 'VERB-092', 'VERB-093']
   },
   {
     number: 11,
@@ -327,7 +327,7 @@ const CYCLES: SeedCycle[] = [
     status: 'completed',
     from: 'Apr 7',
     to: 'Apr 20',
-    taskRefs: ['SKAM-094', 'SKAM-095', 'SKAM-096', 'SKAM-097']
+    taskRefs: ['VERB-094', 'VERB-095', 'VERB-096', 'VERB-097']
   },
   {
     number: 12,
@@ -335,7 +335,7 @@ const CYCLES: SeedCycle[] = [
     status: 'completed',
     from: 'Apr 21',
     to: 'May 4',
-    taskRefs: ['SKAM-110', 'SKAM-103', 'SKAM-098', 'SKAM-099', 'SKAM-100']
+    taskRefs: ['VERB-110', 'VERB-103', 'VERB-098', 'VERB-099', 'VERB-100']
   },
   {
     number: 13,
@@ -344,18 +344,18 @@ const CYCLES: SeedCycle[] = [
     from: 'May 5',
     to: 'May 28',
     taskRefs: [
-      'SKAM-101',
-      'SKAM-102',
-      'SKAM-104',
-      'SKAM-105',
-      'SKAM-107',
-      'SKAM-108',
-      'SKAM-112',
-      'SKAM-106',
-      'SKAM-114',
-      'SKAM-111',
-      'SKAM-113',
-      'SKAM-109'
+      'VERB-101',
+      'VERB-102',
+      'VERB-104',
+      'VERB-105',
+      'VERB-107',
+      'VERB-108',
+      'VERB-112',
+      'VERB-106',
+      'VERB-114',
+      'VERB-111',
+      'VERB-113',
+      'VERB-109'
     ]
   },
   {
@@ -368,15 +368,15 @@ const CYCLES: SeedCycle[] = [
   }
 ]
 
-// 'na' = founder/admin, 'mr' = producer/lead, etc. Pair each demo persona with
-// the closest seeded crew_member from prisma/seed.ts so role + access tier line
-// up with what the hardcoded TEAM implied.
+// Demo-persona codes ('na', 'ay', 'mr', 'lk', 'em') are opaque keys from the
+// reference design. Mapped positionally to the first 5 PEOPLE in
+// prisma/seed.ts so dashboard sample tasks land on real seeded members.
 const ASSIGNEE_EMAIL: Record<TeamKey, string> = {
-  na: 'iman@skam.test',
-  ay: 'omar@skam.test',
-  mr: 'tariq@skam.test',
-  lk: 'nadia@skam.test',
-  em: 'layla@skam.test'
+  na: 'iona.douglas@verbivore.app',
+  ay: 'seifelesllam.seif@verbivore.app',
+  mr: 'maryam.baig@verbivore.app',
+  lk: 'asim.selim@verbivore.app',
+  em: 'oheneba.bosompem@verbivore.app'
 }
 
 const MONTHS: Record<string, number> = {
@@ -407,33 +407,33 @@ export async function seedDashboard(
   project: string
   tasks: number
   labels: number
-  cycles: number
+  sprints: number
   skipped: boolean
 }> {
   const existing = await db.task.findFirst({
-    where: { companyId, ref: { startsWith: 'SKAM-' } },
+    where: { companyId, ref: { startsWith: 'VERB-' } },
     select: { id: true }
   })
   if (existing) {
-    return { project: '', tasks: 0, labels: 0, cycles: 0, skipped: true }
+    return { project: '', tasks: 0, labels: 0, sprints: 0, skipped: true }
   }
 
   const project = await db.project.upsert({
-    where: { companyId_name: { companyId, name: 'SKAM Series' } },
+    where: { companyId_name: { companyId, name: 'Verbivore Series' } },
     update: {},
-    create: { companyId, name: 'SKAM Series', kind: 'standard' }
+    create: { companyId, name: 'Verbivore Series', kind: 'standard' }
   })
 
-  const crewRows = await db.crewMember.findMany({
+  const teamRows = await db.teamMember.findMany({
     where: { companyId },
     select: { id: true, email: true }
   })
-  const memberByEmail = new Map(crewRows.map((m) => [m.email, m.id]))
+  const memberByEmail = new Map(teamRows.map((m) => [m.email, m.id]))
   const requiredEmails = Object.values(ASSIGNEE_EMAIL)
   for (const email of requiredEmails) {
     if (!memberByEmail.has(email)) {
       throw new Error(
-        `Dashboard seed needs crew member ${email} (run \`pnpm db:seed\` first).`
+        `Dashboard seed needs team member ${email} (run \`pnpm db:seed\` first).`
       )
     }
   }
@@ -512,9 +512,9 @@ export async function seedDashboard(
     })
   }
 
-  // Cycles + cycle_task joins.
-  for (const c of CYCLES) {
-    const cycle = await db.cycle.upsert({
+  // Sprints + sprint_task joins.
+  for (const c of SPRINTS) {
+    const sprint = await db.sprint.upsert({
       where: { projectId_number: { projectId: project.id, number: c.number } },
       update: {
         name: c.name,
@@ -535,9 +535,9 @@ export async function seedDashboard(
     const joinRows = c.taskRefs
       .map((ref) => taskIdByRef.get(ref))
       .filter((id): id is string => Boolean(id))
-      .map((taskId) => ({ cycleId: cycle.id, taskId }))
+      .map((taskId) => ({ sprintId: sprint.id, taskId }))
     if (joinRows.length) {
-      await db.cycleTask.createMany({ data: joinRows, skipDuplicates: true })
+      await db.sprintTask.createMany({ data: joinRows, skipDuplicates: true })
     }
   }
 
@@ -545,19 +545,19 @@ export async function seedDashboard(
     project: project.name,
     tasks: TASKS.length,
     labels: LABELS.length,
-    cycles: CYCLES.length,
+    sprints: SPRINTS.length,
     skipped: false
   }
 }
 
 async function main(): Promise<void> {
   const company = await prisma.company.findUnique({
-    where: { slug: 'skam' },
+    where: { slug: 'verbivore' },
     select: { id: true, name: true }
   })
   if (!company) {
     console.error(
-      'Dashboard seed aborted: no SKAM company. Run `pnpm db:seed` first.'
+      'Dashboard seed aborted: no Verbivore company. Run `pnpm db:seed` first.'
     )
     process.exit(1)
   }
@@ -566,11 +566,11 @@ async function main(): Promise<void> {
   const result = await seedDashboard(prisma, company.id)
 
   if (result.skipped) {
-    console.log('Skipped — SKAM-### tasks already exist.')
+    console.log('Skipped — VERB-### tasks already exist.')
     return
   }
   console.log(
-    `Done. Project "${result.project}", ${result.tasks} tasks, ${result.labels} labels, ${result.cycles} cycles.`
+    `Done. Project "${result.project}", ${result.tasks} tasks, ${result.labels} labels, ${result.sprints} sprints.`
   )
 }
 

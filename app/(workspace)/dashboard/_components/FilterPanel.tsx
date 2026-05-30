@@ -33,7 +33,7 @@ interface FilterPanelProps {
   // Sprint filter. The panel only renders the chip group when there are
   // sprints to pick from; in projects with no sprints the row stays hidden.
   sprintFilter: string[]
-  onToggleSprint: (cycleId: string) => void
+  onToggleSprint: (sprintId: string) => void
   onClearSprint: () => void
   allSprints: {
     id: string

@@ -1,7 +1,3 @@
-// Profile content for the six seeded SKAM members. Used by both the main
-// seed (fresh DB) and prisma/scripts/seed-profile-fields.ts (patch existing).
-// See docs/decisions/0018-profile-pages.md.
-
 import type { PrismaClient } from "@prisma/client";
 
 type ProfileSample = {
@@ -16,52 +12,60 @@ type ProfileSample = {
 
 export const PROFILE_SAMPLES: readonly ProfileSample[] = [
   {
-    email: "iman@skam.test",
-    bio: "Founder of SKAM. Director and producer, building a studio that takes work seriously and people more so. Less interested in being right than in shipping something the team is proud of.",
-    socialInstagram: "https://instagram.com/skam.studio",
-    socialLinkedin: "https://linkedin.com/in/iman-hadi",
-    socialWhatsapp: "https://wa.me/00000000001",
-    languages: ["English", "Arabic", "Turkish"],
-  },
-  {
-    email: "tariq@skam.test",
-    bio: "Producer at SKAM. Lives in spreadsheets, prefers a call. Spends his days untangling the gap between what's planned and what's actually possible — likes the days when those are close.",
-    socialInstagram: "https://instagram.com/tariqyusuf",
-    socialLinkedin: "https://linkedin.com/in/tariq-yusuf",
-    socialWhatsapp: "https://wa.me/00000000002",
-    languages: ["English", "Arabic"],
-  },
-  {
-    email: "layla@skam.test",
-    bio: "Designer at SKAM. Storyboards, titles, set graphics, anything that lives on screen. Thinks rough is faster than wrong and shares early.",
-    socialInstagram: "https://instagram.com/laylasaeed",
-    socialLinkedin: null,
-    socialWhatsapp: "https://wa.me/00000000003",
-    languages: ["English", "Arabic", "French"],
-  },
-  {
-    email: "omar@skam.test",
-    bio: "Sound at SKAM. Ambience, dialog, the mix that nobody notices because it's right. Spends weekends recording rooms.",
-    socialInstagram: "https://instagram.com/omarkhalil",
-    socialLinkedin: "https://linkedin.com/in/omar-khalil",
-    socialWhatsapp: null,
-    languages: ["English", "Arabic"],
-  },
-  {
-    email: "nadia@skam.test",
-    bio: "Casting at SKAM. Reads more than she sleeps. Knows half the working actors in two cities and gets back to people the same day.",
-    socialInstagram: "https://instagram.com/nadiafarouk",
-    socialLinkedin: "https://linkedin.com/in/nadia-farouk",
-    socialWhatsapp: "https://wa.me/00000000005",
-    languages: ["English", "Arabic", "Turkish"],
-  },
-  {
-    email: "karim@skam.test",
-    bio: "Writer at SKAM. First draft fast, ninth draft slow. Believes the cold open is the only contract you sign with the audience.",
+    email: "iona.douglas@verbivore.app",
+    bio: "Founder of Verbivore. Builds the team and the product, in that order. Less interested in being right than in shipping what gets used.",
     socialInstagram: null,
-    socialLinkedin: "https://linkedin.com/in/karim-saleh",
-    socialWhatsapp: "https://wa.me/00000000006",
-    languages: ["English", "Arabic"],
+    socialLinkedin: null,
+    socialWhatsapp: null,
+    languages: ["English"],
+  },
+  {
+    email: "seifelesllam.seif@verbivore.app",
+    bio: "Full-stack at Verbivore. Backend to UI, takes things end to end. Believes the boring path is usually the fastest.",
+    socialInstagram: null,
+    socialLinkedin: null,
+    socialWhatsapp: null,
+    languages: ["English"],
+  },
+  {
+    email: "maryam.baig@verbivore.app",
+    bio: "Full-stack at Verbivore. Reads RFCs for fun, ships small PRs. Cares about the test that catches the regression before it ships.",
+    socialInstagram: null,
+    socialLinkedin: null,
+    socialWhatsapp: null,
+    languages: ["English"],
+  },
+  {
+    email: "asim.selim@verbivore.app",
+    bio: "UI/UX at Verbivore. Flows, components, the friction nobody asked about until it was gone. First sketch fast, ninth iteration slow.",
+    socialInstagram: null,
+    socialLinkedin: null,
+    socialWhatsapp: null,
+    languages: ["English"],
+  },
+  {
+    email: "oheneba.bosompem@verbivore.app",
+    bio: "Frontend at Verbivore. React, accessibility, the polish that ships. Thinks rough is faster than wrong and shares early.",
+    socialInstagram: null,
+    socialLinkedin: null,
+    socialWhatsapp: null,
+    languages: ["English"],
+  },
+  {
+    email: "corentin.boissie@verbivore.app",
+    bio: "Cybersecurity at Verbivore. Threat models, audits, the controls nobody notices until they save you. Reads incident postmortems on weekends.",
+    socialInstagram: null,
+    socialLinkedin: null,
+    socialWhatsapp: null,
+    languages: ["English"],
+  },
+  {
+    email: "radmila.tantaeva@verbivore.app",
+    bio: "Transcription at Verbivore. Captures the spoken word with the precision the written one needs. Faster than you would expect, accurate where it counts.",
+    socialInstagram: null,
+    socialLinkedin: null,
+    socialWhatsapp: null,
+    languages: ["English"],
   },
 ];
 
@@ -74,7 +78,7 @@ export async function seedProfileFields(
   let missing = 0;
 
   for (const profile of PROFILE_SAMPLES) {
-    const member = await prisma.crewMember.findFirst({
+    const member = await prisma.teamMember.findFirst({
       where: { companyId, email: profile.email },
       select: { id: true, bio: true, languages: true },
     });
@@ -90,7 +94,7 @@ export async function seedProfileFields(
       skipped += 1;
       continue;
     }
-    await prisma.crewMember.update({
+    await prisma.teamMember.update({
       where: { id: member.id },
       data: {
         bio: profile.bio,

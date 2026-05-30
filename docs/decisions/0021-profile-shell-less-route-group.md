@@ -35,7 +35,7 @@ export default async function ProfileLayout({ children }: { children: React.Reac
 }
 ```
 
-Identical security path to `(authenticated)/layout.tsx` (same `verifySession()` call). Difference: no Shell, no member fetch in the layout. The bento page already fetches `getCurrentCrewMember()` itself, so nothing is lost.
+Identical security path to `(authenticated)/layout.tsx` (same `verifySession()` call). Difference: no Shell, no member fetch in the layout. The bento page already fetches `getCurrentTeamMember()` itself, so nothing is lost.
 
 ### Navigation exit affordance
 

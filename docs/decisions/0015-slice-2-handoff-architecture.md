@@ -84,7 +84,7 @@ failure.
 
 A DB-level `GENERATED ALWAYS AS` column or a `BEFORE UPDATE` trigger that
 re-enforces the gate stays viable for a later slice — the same pattern as
-the auth FK (`prisma/sql/crew_member_auth_fk.sql`). For slice 2, the
+the auth FK (`prisma/sql/team_member_auth_fk.sql`). For slice 2, the
 app-level gate is what ships.
 
 ## Field shape

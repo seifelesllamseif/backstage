@@ -1,6 +1,6 @@
 // Serialize a single task to markdown or JSON. Used by the Copy task
 // button on the task detail panel and also reused by the view + project
-// + cycle exporters when they include nested tasks.
+// + sprint exporters when they include nested tasks.
 
 import {
   defaultExternalRefLabel,
@@ -14,8 +14,8 @@ import type {
 import { EXPORT_VERSION } from './types'
 import type { BoardTask } from '@/app/(workspace)/dashboard/_components/boardData'
 
-function findCycleForTask(taskId: string, ctx: ExportContext) {
-  return ctx.cycles.find((c) => c.taskIds.includes(taskId)) ?? null
+function findSprintForTask(taskId: string, ctx: ExportContext) {
+  return ctx.sprints.find((c) => c.taskIds.includes(taskId)) ?? null
 }
 
 function findProjectForTask(task: BoardTask, ctx: ExportContext) {
@@ -32,7 +32,7 @@ export function taskToMarkdown(
   const status = STATUS_BY_ID[task.status]?.label ?? task.status
   const priority = PRIORITY_LABEL[task.priority] ?? task.priority
   const project = findProjectForTask(task, ctx)
-  const cycle = findCycleForTask(task.id, ctx)
+  const sprint = findSprintForTask(task.id, ctx)
 
   lines.push(`# [${task.ref}] ${task.title}`)
   lines.push('')
@@ -44,8 +44,8 @@ export function taskToMarkdown(
     const repo = project.githubRepo ? ` (${project.githubRepo})` : ''
     lines.push(`- **Project:** ${project.name}${repo}`)
   }
-  if (cycle) {
-    lines.push(`- **Sprint:** ${cycle.name} (${cycle.status})`)
+  if (sprint) {
+    lines.push(`- **Sprint:** ${sprint.name} (${sprint.status})`)
   }
   if (task.due) lines.push(`- **Due:** ${task.due}`)
   if (task.tags && task.tags.length > 0) {
@@ -114,7 +114,7 @@ export function taskToJsonObject(
   options: ExportOptions = {}
 ): Record<string, unknown> {
   const project = findProjectForTask(task, ctx)
-  const cycle = findCycleForTask(task.id, ctx)
+  const sprint = findSprintForTask(task.id, ctx)
   const refs = ctx.refsByTask[task.id] ?? []
   const comments = ctx.commentsByTask[task.id] ?? []
   const activity = ctx.activityByTask[task.id] ?? []
@@ -131,8 +131,8 @@ export function taskToJsonObject(
     project: project
       ? { id: project.id, name: project.name, githubRepo: project.githubRepo }
       : null,
-    cycle: cycle
-      ? { id: cycle.id, name: cycle.name, status: cycle.status }
+    sprint: sprint
+      ? { id: sprint.id, name: sprint.name, status: sprint.status }
       : null,
     due: task.due ?? null,
     dueAt: task.dueAt ?? null,

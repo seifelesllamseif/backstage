@@ -69,7 +69,7 @@ original 45-section list. Ordered.
    `activity_log` scoped to `company_id`. Currently if two people are looking
    at the board, one move doesn't appear for the other until refresh.
    *Caveat: only useful once more than one person is actually logged in
-   regularly (see `slice-3-intake.md` — that hasn't happened yet).*
+   regularly (which hasn't happened yet).*
 2. **Drawer depth** (advice §3) — inline title edit, due-date picker,
    project selector, "open in full page" link, copy-link button.
 3. **Auto-scroll on drag near board edges** (advice §1) — `@dnd-kit/auto-scroll`
@@ -105,28 +105,25 @@ with decisions already in `docs/decisions/`:
 | §10 — `task_assignees` many-to-many | Slice-2 handoff gate assumes one owner per task (handoff has one "from", one "to"). | decision 0015 |
 | §10 — `statuses` as a customizable table | `TaskStatus` enum is wired into the handoff state machine. Custom per-workspace statuses break the Done gate. | decision 0015 |
 | §11, §27 — `owner / admin / member / viewer` roles | We have `access_tier { admin, lead, member }`. Tier names are different on purpose. | slice-1 plan §4 |
-| §1 — Collapsed columns / multiple assignees / watchers | Adds surface area without addressing why people aren't using the app yet. | slice-3-intake |
+| §1 — Collapsed columns / multiple assignees / watchers | Adds surface area without addressing why people aren't using the app yet. | decision 0022 |
 | §26, §29 — Workspace switcher / multi-workspace | Single company. | decisions 0002, 0016 |
 
 ---
 
 ## What the data still says
 
-`slice-3-intake.md`: **1 of 6 accounts has ever signed in. 0 tasks created
-post-seed. At most 1 fresh handoff.** The pivot we made (decision 0022 —
+At the time of the slice-3 pivot: **1 of 6 accounts had ever signed in. 0 tasks
+created post-seed. At most 1 fresh handoff.** The pivot we made (decision 0022 —
 `/dashboard` as primary surface) is the bet that better daily-driver UX
 will pull people in. If after a usage week the numbers don't move, the
 honest read is: features aren't the bottleneck, and items 1–10 above
 don't matter yet.
-
-Re-read the intake doc before starting any of the "next" items.
 
 ---
 
 ## Quick reference
 
 - All decisions: `docs/decisions/`
-- Slice 3 plan (in progress): `docs/slice-3-plan.md`
 - Slice 3 pivot: `docs/decisions/0022-dashboard-as-primary-surface.md`
 - Schema: `prisma/schema.prisma`
 - Dashboard code: `app/(workspace)/dashboard/`

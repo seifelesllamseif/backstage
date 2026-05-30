@@ -6,7 +6,7 @@
 // boundaries because the user thinks in their local calendar; using UTC
 // would mean "this week" rolls over at midnight UTC, which feels wrong.
 
-export type TimeScope = 'today' | 'week' | 'month' | 'all' | 'cycle'
+export type TimeScope = 'today' | 'week' | 'month' | 'all' | 'sprint'
 
 export interface TimeScopeOption {
   id: TimeScope
@@ -18,7 +18,7 @@ export const TIME_SCOPE_OPTIONS: TimeScopeOption[] = [
   { id: 'week', label: 'This week' },
   { id: 'month', label: 'This month' },
   { id: 'all', label: 'All' },
-  { id: 'cycle', label: 'By sprint' },
+  { id: 'sprint', label: 'By sprint' },
 ]
 
 function startOfDay(d: Date): Date {
@@ -47,7 +47,7 @@ function parseDate(value: string | Date | null | undefined): Date | null {
 
 export function isInScope(
   value: string | Date | null | undefined,
-  scope: Exclude<TimeScope, 'all' | 'cycle'>,
+  scope: Exclude<TimeScope, 'all' | 'sprint'>,
   now: Date = new Date()
 ): boolean {
   const d = parseDate(value)

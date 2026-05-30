@@ -25,14 +25,14 @@ The reference is `/backstage/project/*.jsx` — the Claude Design handoff bundle
 - **Projects list** (`/projects`) — low traffic and not visually broken. Returns to the queue if it becomes a sore spot in real usage.
 - **Login page** — already minimal and not on the daily-use surface.
 - **Standalone task edit page** (`/projects/[id]/tasks/[taskId]`) — redirects to `/projects/[id]?task=<id>` so the panel is the only editor. Saves a duplicate UI surface; preserves direct URLs.
-- **Light mode** — slice-1 plan §10 said dark only. The design bundle includes light tokens; we don't wire them yet. If a future slice needs a light variant, the design's `SKAM_LIGHT` palette is ready to drop into `globals.css`.
+- **Light mode** — slice-1 plan §10 said dark only. The design bundle includes light tokens; we don't wire them yet. If a future slice needs a light variant, the design's `VERBIVORE_LIGHT` palette is ready to drop into `globals.css`.
 
 ### Implementation conventions
 
 - **Primitives live in `components/ui/`** alongside shadcn-generated components — they're our components regardless of origin. Names: `person-chip.tsx`, `status-pill.tsx`, `filter-chip.tsx`, `icon-button.tsx`.
 - **Icons via `lucide-react`** wherever possible (already in deps). Custom inline SVGs only when lucide has no match.
 - **Status colors via existing `@theme` tokens** — `text-info` (in_progress), `text-warning` (in_review), `text-success` (done), `text-muted-foreground` (backlog/unscoped/todo), `text-foreground/40` (canceled). Tints use Tailwind v4's `bg-info/10` syntax.
-- **Red discipline** — buttons primary CTA uses `bg-accent` (SKAM red `#E24B4A`); attention markers (overdue, blocks-Done) use `text-destructive` (same hex). This reconciles plan §10's "red for attention only" with the design's red-primary-button by treating the primary button as itself an attention marker (one per surface).
+- **Red discipline** — buttons primary CTA uses `bg-accent` (Verbivore red `#E24B4A`); attention markers (overdue, blocks-Done) use `text-destructive` (same hex). This reconciles plan §10's "red for attention only" with the design's red-primary-button by treating the primary button as itself an attention marker (one per surface).
 
 ### Task panel: search-param routing
 
@@ -47,8 +47,8 @@ The existing `/projects/[id]/tasks/[taskId]/page.tsx` is replaced by a thin redi
 
 ## Consequences
 
-- **Three new primitive components in `components/ui/`** — usable on later screens (crew profile, etc.) when those slices arrive.
+- **Three new primitive components in `components/ui/`** — usable on later screens (team profile, etc.) when those slices arrive.
 - **The `(authenticated)` route group now has a layout chrome.** Every protected page renders inside Shell. Cockpit and projects list get the chrome for free.
 - **The `/tasks/[taskId]` route changes meaning** — was a destination, becomes a redirect. Bookmarks survive because they end up at the same panel via the search-param URL.
 - **The handoff section now lives inside the panel.** A future slice that wants a dedicated handoff page can rebuild the standalone view; this pass treats handoff editing as inseparable from the task it belongs to (which is what the design's `project-task-panel.jsx` says).
-- **Dark only.** When the demand comes, the SKAM_LIGHT tokens from the design bundle drop straight into a `.light` selector in `globals.css`.
+- **Dark only.** When the demand comes, the VERBIVORE_LIGHT tokens from the design bundle drop straight into a `.light` selector in `globals.css`.

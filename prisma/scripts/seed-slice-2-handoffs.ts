@@ -1,7 +1,7 @@
 // Idempotent slice-2 handoff seeder for an already-seeded DB.
 // Run: pnpm tsx --env-file=.env.local prisma/scripts/seed-slice-2-handoffs.ts
 //
-// Looks up the SKAM company, then inserts handoffs for the four sample tasks
+// Looks up the Verbivore company, then inserts handoffs for the four sample tasks
 // by title. Skips any task that already has a handoff. Safe to re-run.
 // See docs/decisions/0015-slice-2-handoff-architecture.md.
 
@@ -10,12 +10,12 @@ import { seedSlice2Handoffs } from "../slice-2-handoffs";
 
 async function main(): Promise<void> {
   const company = await prisma.company.findUnique({
-    where: { slug: "skam" },
+    where: { slug: "verbivore" },
     select: { id: true, name: true },
   });
   if (!company) {
     console.error(
-      "Patch aborted: no SKAM company. Run `pnpm db:seed` first to set up slice-1 data.",
+      "Patch aborted: no Verbivore company. Run `pnpm db:seed` first to set up slice-1 data.",
     );
     process.exit(1);
   }

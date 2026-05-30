@@ -45,9 +45,9 @@ import {
   archiveProjectInPlace,
   createProjectInPlace,
   renameProject,
+  setProjectGithubRepo,
   unarchiveProject
-} from '@/app/(authenticated)/projects/actions'
-import { setProjectGithubRepo } from '../actions'
+} from '../actions'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1034,7 +1034,7 @@ const BUCKETS: {
 
 function scopedUpdates(
   rows: UpdateRow[],
-  scope: Exclude<TimeScope, 'all' | 'cycle'>
+  scope: Exclude<TimeScope, 'all' | 'sprint'>
 ): UpdateRow[] {
   const now = new Date()
   return rows.filter((row) => isInScope(row.atRaw, scope, now))

@@ -1,14 +1,17 @@
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono, Inter } from 'next/font/google'
+import { DM_Sans, Fraunces, Geist_Mono } from 'next/font/google'
 import '@/styles/globals.css'
 import 'sonner/dist/styles.css'
 import { cn } from '@/lib/utils'
 import { Providers } from './providers'
 
-const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
+const dmSans = DM_Sans({
+  variable: '--font-sans',
+  subsets: ['latin']
+})
 
-const geistSans = Geist({
-  variable: '--font-geist-sans',
+const fraunces = Fraunces({
+  variable: '--font-display',
   subsets: ['latin']
 })
 
@@ -36,10 +39,10 @@ export default function RootLayout({
       className={cn(
         'h-full',
         'antialiased',
-        geistSans.variable,
+        dmSans.variable,
+        fraunces.variable,
         geistMono.variable,
-        'font-sans',
-        inter.variable
+        'font-sans'
       )}
     >
       <body className="flex min-h-full flex-col">

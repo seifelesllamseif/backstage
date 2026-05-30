@@ -49,16 +49,16 @@ export interface BoardTask {
   checklist?: ChecklistItem[]
 }
 
-export type CycleStatus = 'completed' | 'current' | 'upcoming'
+export type SprintStatus = 'completed' | 'current' | 'upcoming'
 
-export interface Cycle {
+export interface Sprint {
   id: string
   projectId: string
   number: number
   name: string
   description: string | null
   docUrl: string | null
-  status: CycleStatus
+  status: SprintStatus
   from: string
   to: string
   fromIso: string
