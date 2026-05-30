@@ -1,0 +1,47 @@
+import { Meta, Title, Subtitle } from '@storybook/addon-docs/blocks'
+
+<Meta title="Get started" />
+
+<Title>Verbivore Backstage UI</Title>
+
+<Subtitle>Component library for the internal ops platform</Subtitle>
+
+This Storybook hosts the UI primitives under `components/ui/`. Each story
+file lives next to its component (e.g. `components/ui/button.stories.tsx`)
+and is verified by `vitest --project storybook` on every CI run.
+
+## Browse
+
+Pick a component from the `ui/` group in the sidebar. Every component has:
+
+- A **Docs** page (auto-generated) with the controls table, source, and
+  every story rendered inline.
+- A **Default** story plus variants.
+
+## Theme
+
+Use the **Theme** toolbar to flip between light and dark. The toggle adds
+`class="dark"` to `<html>`, which the Tailwind tokens in
+`styles/globals.css` respond to.
+
+## Run the tests
+
+```sh
+pnpm exec vitest --project storybook run
+```
+
+This launches a headless Chromium via Playwright and runs every story
+(plus their `play` functions). The same command runs in
+`.github/workflows/storybook-tests.yml`.
+
+## Adding a story
+
+Colocate the file with the component:
+
+```sh
+components/ui/my-thing.tsx
+components/ui/my-thing.stories.tsx
+```
+
+Tag the meta with `'ai-generated'` if it was scaffolded by an agent and
+hasn't been hand-reviewed yet, or `'needs-work'` if a `play` is failing.
