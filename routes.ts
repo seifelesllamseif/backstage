@@ -21,7 +21,8 @@ export const protectedRoutes: string[] = [
   '/dashboard',
   '/cockpit',
   '/projects',
-  '/profile'
+  '/profile',
+  '/onboarding'
 ]
 
 /**
@@ -42,6 +43,13 @@ export const DEFAULT_LOGIN_ROUTE: string = '/login'
  * @type {string}
  */
 export const DEFAULT_REDIRECT_ROUTE: string = '/dashboard'
+
+/**
+ * Onboarding wizard route. New accounts (avatar_url IS NULL) are funneled
+ * here before reaching the app. See docs/decisions/0029-onboarding-flow.md.
+ * @type {string}
+ */
+export const ONBOARDING_ROUTE: string = '/onboarding'
 
 // TODO (multi-tenant, post-slice-1): when Backstage adds a second tenant,
 // this file is also the place for MAIN_DOMAIN_SUBDOMAINS, PRODUCTION_DOMAINS,

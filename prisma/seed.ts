@@ -1,13 +1,12 @@
 import WebSocket from 'ws'
 import { createClient } from '@supabase/supabase-js'
-import { prisma } from '../lib/prisma'
 import { slugify } from '../lib/slug'
 import { seedSlice2Handoffs } from './slice-2-handoffs'
 import { seedProfileFields } from './profile-data'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
-const DEV_PASSWORD = 'backstage-dev'
+const DEV_PASSWORD = 'AStrong1!'
 
 if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
   console.error(
@@ -89,26 +88,40 @@ function daysFromToday(n: number): Date {
   return d
 }
 
+function toDateOnly(d: Date | null): string | null {
+  if (!d) return null
+  return d.toISOString().slice(0, 10)
+}
+
 async function main(): Promise<void> {
-  const existing = await prisma.company.findUnique({
-    where: { slug: 'verbivore' }
-  })
+  const { data: existing, error: existingErr } = await supabase
+    .from('companies')
+    .select('id')
+    .eq('slug', 'verbivore')
+    .maybeSingle()
+  if (existingErr) {
+    console.error(`Seed aborted: failed to check existing company: ${existingErr.message}`)
+    process.exit(1)
+  }
   if (existing) {
-    console.error(
-      'Seed aborted: company "verbivore" already exists. Run `pnpm prisma migrate reset` to start over.'
-    )
+    console.error('Seed aborted: company "verbivore" already exists. Truncate the public schema and retry.')
     process.exit(1)
   }
 
   console.log('Creating company Verbivore...')
-  const company = await prisma.company.create({
-    data: { name: 'Verbivore', slug: 'verbivore' }
-  })
+  const { data: company, error: companyErr } = await supabase
+    .from('companies')
+    .insert({ name: 'Verbivore', slug: 'verbivore' })
+    .select('id')
+    .single()
+  if (companyErr || !company) {
+    throw new Error(`Failed to create company: ${companyErr?.message ?? 'no data returned'}`)
+  }
+  const companyId = company.id as string
 
-  console.log(
-    `Creating ${PEOPLE.length} auth users + matching team_member rows...`
-  )
+  console.log(`Creating ${PEOPLE.length} auth users + matching team_member rows...`)
   const idByEmail = new Map<string, string>()
+  const teamMemberRows: Array<Record<string, unknown>> = []
   for (const p of PEOPLE) {
     const { data, error } = await supabase.auth.admin.createUser({
       email: p.email,
@@ -121,27 +134,36 @@ async function main(): Promise<void> {
         `Failed to create auth user for ${p.email}: ${error?.message ?? 'unknown error'}`
       )
     }
-    await prisma.teamMember.create({
-      data: {
-        id: data.user.id,
-        companyId: company.id,
-        email: p.email,
-        contactEmail: p.contactEmail,
-        slug: slugify(p.fullName, p.email),
-        fullName: p.fullName,
-        accessTier: p.tier
-      }
+    teamMemberRows.push({
+      id: data.user.id,
+      company_id: companyId,
+      email: p.email,
+      contact_email: p.contactEmail,
+      slug: slugify(p.fullName, p.email),
+      full_name: p.fullName,
+      access_tier: p.tier
     })
     idByEmail.set(p.email, data.user.id)
   }
+  const { error: tmErr } = await supabase.from('team_members').insert(teamMemberRows)
+  if (tmErr) throw new Error(`Failed to insert team_members: ${tmErr.message}`)
 
   console.log('Creating 2 projects (Operations + Pilot Episode)...')
-  const ops = await prisma.project.create({
-    data: { companyId: company.id, name: 'Operations', kind: 'operations' }
-  })
-  const pilot = await prisma.project.create({
-    data: { companyId: company.id, name: 'Pilot Episode', kind: 'standard' }
-  })
+  const { data: projects, error: projErr } = await supabase
+    .from('projects')
+    .insert([
+      { company_id: companyId, name: 'Operations', kind: 'operations' },
+      { company_id: companyId, name: 'Pilot Episode', kind: 'standard' }
+    ])
+    .select('id, name')
+  if (projErr || !projects || projects.length !== 2) {
+    throw new Error(`Failed to create projects: ${projErr?.message ?? 'unexpected result'}`)
+  }
+  const opsProj = projects.find((p) => p.name === 'Operations')
+  const pilotProj = projects.find((p) => p.name === 'Pilot Episode')
+  if (!opsProj || !pilotProj) throw new Error('Project lookup missing after insert')
+  const opsId = opsProj.id as string
+  const pilotId = pilotProj.id as string
 
   const id = (email: string): string => {
     const v = idByEmail.get(email)
@@ -166,9 +188,8 @@ async function main(): Promise<void> {
   }
 
   const tasks: SeedTask[] = [
-    // Pilot Episode
     {
-      projectId: pilot.id,
+      projectId: pilotId,
       title: 'Write episode 1 outline',
       status: 'done',
       assigneeId: id('maryam.baig@verbivore.app'),
@@ -176,7 +197,7 @@ async function main(): Promise<void> {
       createdBy: id('iona.douglas@verbivore.app')
     },
     {
-      projectId: pilot.id,
+      projectId: pilotId,
       title: 'Cast lead role',
       status: 'in_review',
       assigneeId: id('radmila.tantaeva@verbivore.app'),
@@ -184,7 +205,7 @@ async function main(): Promise<void> {
       createdBy: id('iona.douglas@verbivore.app')
     },
     {
-      projectId: pilot.id,
+      projectId: pilotId,
       title: 'Design opening titles',
       status: 'in_progress',
       assigneeId: id('oheneba.bosompem@verbivore.app'),
@@ -192,7 +213,7 @@ async function main(): Promise<void> {
       createdBy: id('iona.douglas@verbivore.app')
     },
     {
-      projectId: pilot.id,
+      projectId: pilotId,
       title: 'Record location ambience',
       status: 'todo',
       assigneeId: id('corentin.boissie@verbivore.app'),
@@ -200,15 +221,15 @@ async function main(): Promise<void> {
       createdBy: id('iona.douglas@verbivore.app')
     },
     {
-      projectId: pilot.id,
+      projectId: pilotId,
       title: 'Storyboard cold open',
       status: 'in_progress',
       assigneeId: id('oheneba.bosompem@verbivore.app'),
       dueDate: daysFromToday(-2),
       createdBy: id('iona.douglas@verbivore.app')
-    }, // overdue
+    },
     {
-      projectId: pilot.id,
+      projectId: pilotId,
       title: 'Hire DP',
       status: 'in_progress',
       assigneeId: id('iona.douglas@verbivore.app'),
@@ -216,7 +237,7 @@ async function main(): Promise<void> {
       createdBy: id('asim.selim@verbivore.app')
     },
     {
-      projectId: pilot.id,
+      projectId: pilotId,
       title: 'Lock script for ep 1',
       status: 'in_review',
       assigneeId: id('maryam.baig@verbivore.app'),
@@ -224,16 +245,15 @@ async function main(): Promise<void> {
       createdBy: id('iona.douglas@verbivore.app')
     },
     {
-      projectId: pilot.id,
+      projectId: pilotId,
       title: 'Scout primary location',
       status: 'backlog',
       assigneeId: null,
       dueDate: null,
       createdBy: id('iona.douglas@verbivore.app')
     },
-    // Operations
     {
-      projectId: ops.id,
+      projectId: opsId,
       title: 'Set up shared Drive structure',
       status: 'done',
       assigneeId: id('asim.selim@verbivore.app'),
@@ -241,7 +261,7 @@ async function main(): Promise<void> {
       createdBy: id('asim.selim@verbivore.app')
     },
     {
-      projectId: ops.id,
+      projectId: opsId,
       title: 'Onboard new intern',
       status: 'todo',
       assigneeId: id('iona.douglas@verbivore.app'),
@@ -249,7 +269,7 @@ async function main(): Promise<void> {
       createdBy: id('asim.selim@verbivore.app')
     },
     {
-      projectId: ops.id,
+      projectId: opsId,
       title: 'Renew studio insurance',
       status: 'todo',
       assigneeId: id('asim.selim@verbivore.app'),
@@ -257,15 +277,15 @@ async function main(): Promise<void> {
       createdBy: id('asim.selim@verbivore.app')
     },
     {
-      projectId: ops.id,
+      projectId: opsId,
       title: 'Pay invoices for camera rental',
       status: 'in_progress',
       assigneeId: id('asim.selim@verbivore.app'),
       dueDate: daysFromToday(-1),
       createdBy: id('asim.selim@verbivore.app')
-    }, // overdue
+    },
     {
-      projectId: ops.id,
+      projectId: opsId,
       title: 'Update equipment inventory',
       status: 'backlog',
       assigneeId: null,
@@ -273,7 +293,7 @@ async function main(): Promise<void> {
       createdBy: id('asim.selim@verbivore.app')
     },
     {
-      projectId: ops.id,
+      projectId: opsId,
       title: 'Plan Q3 team offsite',
       status: 'unscoped',
       assigneeId: null,
@@ -281,7 +301,7 @@ async function main(): Promise<void> {
       createdBy: id('asim.selim@verbivore.app')
     },
     {
-      projectId: ops.id,
+      projectId: opsId,
       title: 'Cancel old SaaS subscriptions',
       status: 'canceled',
       assigneeId: id('iona.douglas@verbivore.app'),
@@ -291,36 +311,35 @@ async function main(): Promise<void> {
   ]
 
   console.log(`Creating ${tasks.length} tasks...`)
-  for (const t of tasks) {
-    await prisma.task.create({
-      data: {
-        companyId: company.id,
-        projectId: t.projectId,
-        title: t.title,
-        status: t.status,
-        assigneeId: t.assigneeId,
-        dueDate: t.dueDate,
-        createdBy: t.createdBy
-      }
-    })
-  }
+  const { error: taskErr } = await supabase.from('tasks').insert(
+    tasks.map((t) => ({
+      company_id: companyId,
+      project_id: t.projectId,
+      title: t.title,
+      status: t.status,
+      assignee_id: t.assigneeId,
+      due_date: toDateOnly(t.dueDate),
+      created_by: t.createdBy
+    }))
+  )
+  if (taskErr) throw new Error(`Failed to insert tasks: ${taskErr.message}`)
 
   console.log('Creating slice-2 handoff samples...')
-  const handoffs = await seedSlice2Handoffs(prisma, company.id)
+  const handoffs = await seedSlice2Handoffs(supabase, companyId)
 
   console.log('Filling profile fields (bio, socials, languages)...')
-  const profiles = await seedProfileFields(prisma, company.id)
+  const profiles = await seedProfileFields(supabase, companyId)
 
   console.log('')
   console.log(
-    `Seeded Verbivore — 6 people, 2 projects, ${tasks.length} tasks, ${handoffs.inserted} handoffs, ${profiles.updated} profile patches.`
+    `Seeded Verbivore - ${PEOPLE.length} people, 2 projects, ${tasks.length} tasks, ${handoffs.inserted} handoffs, ${profiles.updated} profile patches.`
   )
   console.log('')
   console.log(`Login password (all users): ${DEV_PASSWORD}`)
   console.log('')
   console.log('  tier    email                          name')
   console.log(
-    '  ─────── ──────────────────────────────  ───────────────────────────'
+    '  ------- ------------------------------ ---------------------------'
   )
   for (const p of PEOPLE) {
     console.log(
@@ -330,11 +349,7 @@ async function main(): Promise<void> {
   console.log('')
 }
 
-main()
-  .catch((e) => {
-    console.error(e)
-    process.exit(1)
-  })
-  .finally(async () => {
-    await prisma.$disconnect()
-  })
+main().catch((e) => {
+  console.error(e)
+  process.exit(1)
+})

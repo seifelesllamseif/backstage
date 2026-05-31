@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { updateSession } from '@/lib/supabase/proxy'
+import { updateSession } from '@/supabase/proxy'
 import {
   DEFAULT_LOGIN_ROUTE,
   DEFAULT_REDIRECT_ROUTE,

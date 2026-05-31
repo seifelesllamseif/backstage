@@ -24,8 +24,21 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-export const prisma = globalForPrisma.prisma ?? createClient()
-
-if (process.env.NODE_ENV !== 'production') {
-  globalForPrisma.prisma = prisma
+function getClient(): PrismaClient {
+  if (!globalForPrisma.prisma) {
+    globalForPrisma.prisma = createClient()
+  }
+  return globalForPrisma.prisma
 }
+
+// Lazy proxy: the env-var check (and PrismaClient instantiation) happens on
+// first property access, not at module load. Routes that never touch the DB
+// keep working even when APP_DATABASE_URL is unset. Matters during the
+// Supabase JS migration where most routes shouldn't need Prisma at all.
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, prop) {
+    const client = getClient()
+    const value = Reflect.get(client, prop)
+    return typeof value === 'function' ? value.bind(client) : value
+  }
+})

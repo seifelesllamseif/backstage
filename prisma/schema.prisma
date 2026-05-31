@@ -147,6 +147,15 @@ model TeamMember {
   // Member's personal theme for /profile/[slug]. One of PROFILE_THEMES
   // (lib/profile-themes.ts). Null reads as "dark". See decision 0020.
   profileTheme   String?    @default("dark") @map("profile_theme")
+  // Onboarding additions. Decision 0029.
+  roleFocus      String?    @map("role_focus")
+  timezone       String?
+  workStyle      String?    @map("work_style")
+  headline       String?
+  workLinks      Json?      @map("work_links")
+  skills         Json?
+  // Resume marker for the onboarding wizard. Decision 0029.
+  onboardingStep Int        @default(0) @map("onboarding_step")
   accessTier     AccessTier @default(member) @map("access_tier")
   createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
