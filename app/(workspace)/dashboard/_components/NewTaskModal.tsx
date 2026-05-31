@@ -17,10 +17,20 @@ import {
 interface NewTaskModalProps {
   open: boolean
   defaultStatus?: TaskStatus
+  // Optional pre-selected assignee / priority when opening from a non-
+  // status board grouping (Group: Assignee, Group: Priority). undefined
+  // means "no prefill, fall back to the form default".
+  defaultAssigneeId?: string | null
+  defaultPriority?: TaskPriority
   members: BoardAssignee[]
   labels: { id: string; name: string }[]
   projects: { id: string; name: string }[]
   defaultProjectId: string | null
+  // Pre-fill the due date with the active sprint's end (YYYY-MM-DD).
+  // DashboardShell computes this from the current / next-upcoming sprint
+  // for the active project so new tasks inside a running sprint inherit
+  // its deadline.
+  defaultDueDate?: string | null
   // Pool for the relation picker autocomplete. Visible tasks scoped by
   // the caller.
   candidateTasks: { id: string; ref: string; title: string; status: TaskStatus }[]
@@ -51,10 +61,13 @@ type Tab = 'manual' | 'ai'
 export default function NewTaskModal({
   open,
   defaultStatus = 'todo',
+  defaultAssigneeId,
+  defaultPriority,
   members,
   labels,
   projects,
   defaultProjectId,
+  defaultDueDate = null,
   candidateTasks,
   onClose,
   onCreate,
@@ -122,6 +135,9 @@ export default function NewTaskModal({
         {tab === 'manual' ? (
           <ManualTab
             defaultStatus={defaultStatus}
+            defaultAssigneeId={defaultAssigneeId}
+            defaultPriority={defaultPriority}
+            defaultDueDate={defaultDueDate}
             members={members}
             candidateTasks={candidateTasks}
             onClose={onClose}
@@ -133,6 +149,7 @@ export default function NewTaskModal({
             labels={labels}
             projects={projects}
             defaultProjectId={defaultProjectId}
+            defaultDueDate={defaultDueDate}
             candidateTasks={candidateTasks}
             onClose={onClose}
             onCreateBulk={onCreateBulk}
@@ -147,12 +164,18 @@ export default function NewTaskModal({
 
 function ManualTab({
   defaultStatus,
+  defaultAssigneeId,
+  defaultPriority,
+  defaultDueDate,
   members,
   candidateTasks,
   onClose,
   onCreate
 }: {
   defaultStatus: TaskStatus
+  defaultAssigneeId?: string | null
+  defaultPriority?: TaskPriority
+  defaultDueDate: string | null
   members: BoardAssignee[]
   candidateTasks: {
     id: string
@@ -168,18 +191,22 @@ function ManualTab({
   const { t } = useDashTheme()
   const [title, setTitle] = useState('')
   const [status, setStatus] = useState<TaskStatus>(defaultStatus)
-  const [priority, setPriority] = useState<TaskPriority>('medium')
-  const [assigneeId, setAssigneeId] = useState<string | null>(null)
-  const [due, setDue] = useState('')
+  const [priority, setPriority] = useState<TaskPriority>(
+    defaultPriority ?? 'medium'
+  )
+  const [assigneeId, setAssigneeId] = useState<string | null>(
+    defaultAssigneeId ?? null
+  )
+  const [due, setDue] = useState(defaultDueDate ?? '')
   const [tagsInput, setTagsInput] = useState('')
   const [pendingRelations, setPendingRelations] = useState<TaskRelation[]>([])
 
   const reset = () => {
     setTitle('')
     setStatus(defaultStatus)
-    setPriority('medium')
-    setAssigneeId(null)
-    setDue('')
+    setPriority(defaultPriority ?? 'medium')
+    setAssigneeId(defaultAssigneeId ?? null)
+    setDue(defaultDueDate ?? '')
     setTagsInput('')
     setPendingRelations([])
   }
@@ -347,6 +374,7 @@ function AiTab({
   labels,
   projects,
   defaultProjectId,
+  defaultDueDate,
   candidateTasks,
   onClose,
   onCreateBulk
@@ -355,6 +383,7 @@ function AiTab({
   labels: { id: string; name: string }[]
   projects: { id: string; name: string }[]
   defaultProjectId: string | null
+  defaultDueDate: string | null
   candidateTasks: {
     id: string
     ref: string
@@ -458,7 +487,9 @@ function AiTab({
           status: d.status ?? 'backlog',
           priority: d.priority ?? 'medium',
           assigneeId: d.assigneeId,
-          dueDate: d.dueDate,
+          // Fall back to the active sprint's end date when the draft
+          // didn't specify one. Drafts that DO set a due_date keep it.
+          dueDate: d.dueDate ?? defaultDueDate,
           labelIds: d.labelIds,
           newLabelNames: d.unknownLabels,
           relations: d.relations.length > 0 ? d.relations : undefined

@@ -202,7 +202,16 @@ export default function SymbolsPanel({
       issue: 0,
       commit: 0,
       doc: 0,
-      link: 0
+      link: 0,
+      supabase: 0,
+      github: 0,
+      figma: 0,
+      verbivore: 0,
+      vercel: 0,
+      bunny: 0,
+      sentry: 0,
+      gcloud: 0,
+      stripe: 0
     }
     for (const list of Object.values(refsByTask)) {
       for (const ref of list) c[ref.kind] = (c[ref.kind] ?? 0) + 1

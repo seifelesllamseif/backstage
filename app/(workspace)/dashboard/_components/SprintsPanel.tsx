@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   DndContext,
@@ -124,8 +125,17 @@ export default function SprintsPanel({
 }: SprintsPanelProps) {
   const { t } = useDashTheme()
   const router = useRouter()
+  const queryClient = useQueryClient()
   const canEdit = accessTier === 'admin' || accessTier === 'lead'
   const [pending, startTransition] = useTransition()
+  // Sprint rows + the board's SprintHero both come from React Query
+  // (DashboardChrome -> fetchInitial -> initial.sprints). router.refresh
+  // alone won't reflect a status/date/title change - we have to invalidate
+  // the cache so the chrome refetches.
+  const refreshDashboard = () => {
+    queryClient.invalidateQueries({ queryKey: ['dashboardInitial'] })
+    router.refresh()
+  }
   const [showNew, setShowNew] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Sprint | null>(null)
@@ -187,7 +197,7 @@ export default function SprintsPanel({
       }
       toast.success('Sprint created.')
       setShowNew(false)
-      router.refresh()
+      refreshDashboard()
     })
   }
 
@@ -218,7 +228,7 @@ export default function SprintsPanel({
       }
       toast.success('Sprint updated.')
       setEditingId(null)
-      router.refresh()
+      refreshDashboard()
     })
   }
 
@@ -233,7 +243,7 @@ export default function SprintsPanel({
       }
       toast.success('Sprint deleted.')
       setPendingDelete(null)
-      router.refresh()
+      refreshDashboard()
     })
   }
 
@@ -257,7 +267,6 @@ export default function SprintsPanel({
     // target sprint (and remove from any other sprint — a task can only
     // belong to one at a time in this UX).
     setSprints((cur) => {
-      // eslint-disable-next-line react-hooks/exhaustive-deps
       return cur.map((c) => {
         if (c.id === sprintId) {
           if (c.taskIds.includes(taskId)) return c
@@ -277,7 +286,7 @@ export default function SprintsPanel({
       if ('error' in res) {
         toast.error(res.error)
         // Rollback by re-fetching the server's authoritative state.
-        router.refresh()
+        refreshDashboard()
         return
       }
       // Don't refresh on success — the optimistic state already matches
@@ -298,7 +307,7 @@ export default function SprintsPanel({
       const res = await removeTaskFromSprint({ sprintId, taskId })
       if ('error' in res) {
         toast.error(res.error)
-        router.refresh()
+        refreshDashboard()
       }
     })
   }
@@ -426,6 +435,7 @@ export default function SprintsPanel({
 
             <UnscheduledColumn
               tasks={unscheduledTasks}
+              canEdit={canEdit}
               onOpenTask={onOpenTask}
             />
           </div>
@@ -441,9 +451,7 @@ export default function SprintsPanel({
             >
               {activeDragTask.ref}
             </span>
-            <span className={`truncate ${t.text}`}>
-              {activeDragTask.title}
-            </span>
+            <span className={`truncate ${t.text}`}>{activeDragTask.title}</span>
           </div>
         ) : null}
       </DragOverlay>
@@ -515,7 +523,7 @@ function SprintCard({
       ref={setNodeRef}
       className={`flex flex-col gap-3 rounded-xl border p-4 transition ${t.column} ${
         isOver
-          ? 'border-teal-500 bg-teal-500/[0.04] ring-2 ring-teal-500/30 dark:bg-teal-500/10'
+          ? 'border-teal-500 bg-teal-500/4 ring-2 ring-teal-500/30 dark:bg-teal-500/10'
           : ''
       }`}
     >
@@ -650,7 +658,7 @@ function SprintCard({
         )}
         {tasksInSprint.length > 0 && isOver && (
           <li
-            className={`rounded-md border border-dashed border-teal-500 px-2.5 py-1.5 text-center text-[11px] italic text-teal-600 dark:text-teal-300`}
+            className={`rounded-md border border-dashed border-teal-500 px-2.5 py-1.5 text-center text-[11px] text-teal-600 italic dark:text-teal-300`}
           >
             Release to add here
           </li>
@@ -662,9 +670,11 @@ function SprintCard({
 
 function UnscheduledColumn({
   tasks,
+  canEdit,
   onOpenTask
 }: {
   tasks: BoardTask[]
+  canEdit: boolean
   onOpenTask: (id: string) => void
 }) {
   const { t } = useDashTheme()
@@ -692,6 +702,7 @@ function UnscheduledColumn({
             <DraggableTaskRow
               key={task.id}
               task={task}
+              draggable={canEdit}
               onOpenTask={onOpenTask}
             />
           ))
@@ -703,14 +714,16 @@ function UnscheduledColumn({
 
 function DraggableTaskRow({
   task,
+  draggable,
   onOpenTask
 }: {
   task: BoardTask
+  draggable: boolean
   onOpenTask: (id: string) => void
 }) {
   const { t } = useDashTheme()
   const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({ id: task.id })
+    useDraggable({ id: task.id, disabled: !draggable })
 
   const style = transform
     ? {
@@ -722,11 +735,15 @@ function DraggableTaskRow({
     <li
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
+      {...(draggable ? attributes : {})}
+      {...(draggable ? listeners : {})}
       onClick={() => onOpenTask(task.id)}
-      className={`flex cursor-grab items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs transition select-none ${t.column} ${
-        isDragging ? 'opacity-40' : 'hover:border-zinc-400 dark:hover:border-white/30'
+      className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs transition select-none ${
+        draggable ? 'cursor-grab' : 'cursor-pointer'
+      } ${t.column} ${
+        isDragging
+          ? 'opacity-40'
+          : 'hover:border-zinc-400 dark:hover:border-white/30'
       }`}
     >
       <span
@@ -841,7 +858,9 @@ function SprintForm({
 
       <div className="grid grid-cols-3 gap-2">
         <label className="flex flex-col gap-1">
-          <span className={`text-[10px] tracking-wider uppercase ${t.textMuted}`}>
+          <span
+            className={`text-[10px] tracking-wider uppercase ${t.textMuted}`}
+          >
             Start
           </span>
           <input
@@ -853,7 +872,9 @@ function SprintForm({
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className={`text-[10px] tracking-wider uppercase ${t.textMuted}`}>
+          <span
+            className={`text-[10px] tracking-wider uppercase ${t.textMuted}`}
+          >
             End
           </span>
           <input
@@ -866,7 +887,9 @@ function SprintForm({
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className={`text-[10px] tracking-wider uppercase ${t.textMuted}`}>
+          <span
+            className={`text-[10px] tracking-wider uppercase ${t.textMuted}`}
+          >
             Status
           </span>
           <select

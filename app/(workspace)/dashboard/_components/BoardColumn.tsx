@@ -2,10 +2,7 @@
 
 import { Plus, Filter, Trash2, Inbox } from 'lucide-react'
 import { useDroppable } from '@dnd-kit/core'
-import {
-  SortableContext,
-  verticalListSortingStrategy
-} from '@dnd-kit/sortable'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { BoardTask } from './boardData'
 import { TaskStatus } from './status'
 import StatusIcon from './StatusIcon'
@@ -84,25 +81,25 @@ export default function BoardColumn({
     <div
       ref={setNodeRef}
       onContextMenu={columnMenu}
-      className={`flex flex-col w-[260px] shrink-0 rounded-xl border backdrop-blur-sm transition ${t.column} ${
+      className={`flex w-65 shrink-0 flex-col rounded-xl border backdrop-blur-sm transition ${t.column} ${
         isOver ? 'ring-2 ring-teal-500/30 ring-offset-0' : ''
       }`}
     >
       <div
-        className={`flex items-center justify-between px-3 py-2.5 border-b ${t.columnHeader}`}
+        className={`flex items-center justify-between border-b px-3 py-2.5 ${t.columnHeader}`}
       >
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
           {statusId && (
             <StatusIcon status={statusId} className="size-3.5 shrink-0" />
           )}
           <span
-            className={`text-xs uppercase tracking-wider truncate ${t.text}`}
+            className={`truncate text-xs tracking-wider uppercase ${t.text}`}
           >
             {title}
           </span>
           <span
             className={`text-[10px] tabular-nums ${
-              overLimit ? 'text-red-500 font-semibold' : t.textSubtle
+              overLimit ? 'font-semibold text-red-500' : t.textSubtle
             }`}
           >
             {tasks.length}
@@ -112,7 +109,7 @@ export default function BoardColumn({
         {onAdd && (
           <button
             onClick={onAdd}
-            className={`size-5 rounded ${t.btn} text-base leading-none flex items-center justify-center transition`}
+            className={`size-5 rounded ${t.btn} flex items-center justify-center text-base leading-none transition`}
             aria-label="Add task"
           >
             +
@@ -120,7 +117,7 @@ export default function BoardColumn({
         )}
       </div>
       <div
-        className={`flex flex-col overflow-y-auto flex-1 min-h-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden ${
+        className={`flex min-h-0 flex-1 scrollbar-none flex-col overflow-y-auto [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden ${
           density === 'compact' ? 'gap-1 p-1.5' : 'gap-2 p-2'
         }`}
       >
@@ -134,13 +131,14 @@ export default function BoardColumn({
               task={task}
               selected={selectedTaskId === task.id}
               draggable={Boolean(droppableId)}
+              density={density}
               onClick={() => onSelect(task.id)}
             />
           ))}
         </SortableContext>
         {tasks.length === 0 && isOver && (
           <div
-            className="rounded-lg border-2 border-dashed border-teal-400/60 bg-teal-500/5 px-3 py-2.5 min-h-[78px]"
+            className="min-h-19.5 rounded-lg border-2 border-dashed border-teal-400/60 bg-teal-500/5 px-3 py-2.5"
             aria-hidden
           />
         )}
@@ -152,7 +150,9 @@ export default function BoardColumn({
             aria-label={`Add task to ${title}`}
           >
             <Inbox className="size-4 opacity-60 group-hover:opacity-100" />
-            <span className="text-[11px]">Nothing in {title.toLowerCase()}</span>
+            <span className="text-[11px]">
+              Nothing in {title.toLowerCase()}
+            </span>
             <span className={`text-[10px] ${t.textFaint}`}>
               Click to add a task
             </span>

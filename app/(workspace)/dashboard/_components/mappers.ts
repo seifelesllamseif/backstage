@@ -7,7 +7,7 @@ import type {
   DashboardTask,
   DashboardMember,
   DashboardProject,
-} from "../actions";
+} from "../types";
 import type {
   BoardAssignee,
   BoardTask,
@@ -59,6 +59,7 @@ export function mapMember(
     color: memberColor(index),
     photo: member.avatarUrl ?? undefined,
     role: member.accessTier,
+    slug: member.slug ?? null,
   };
 }
 
@@ -66,7 +67,9 @@ export function mapMembers(members: DashboardMember[]): BoardAssignee[] {
   return members.map((m, i) => mapMember(m, i));
 }
 
-function formatDueDate(d: Date | null | undefined): string | undefined {
+function formatDueDate(
+  d: Date | string | null | undefined,
+): string | undefined {
   if (!d) return undefined;
   const date = typeof d === "string" ? new Date(d) : d;
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -115,21 +118,10 @@ export function mapTask(
     projectId: task.projectId ?? undefined,
     tags: tags.length ? tags : undefined,
     due: formatDueDate(task.dueDate),
-    dueAt: task.dueDate
-      ? (task.dueDate instanceof Date
-          ? task.dueDate
-          : new Date(task.dueDate as unknown as string)
-        ).toISOString()
-      : undefined,
+    dueAt: task.dueDate ? new Date(task.dueDate).toISOString() : undefined,
     sortOrder: task.sortOrder ?? undefined,
-    createdAt:
-      task.createdAt instanceof Date
-        ? task.createdAt.toISOString().slice(0, 10)
-        : String(task.createdAt).slice(0, 10),
-    updatedAt:
-      task.updatedAt instanceof Date
-        ? task.updatedAt.toISOString()
-        : String(task.updatedAt),
+    createdAt: String(task.createdAt).slice(0, 10),
+    updatedAt: String(task.updatedAt),
     relations: relations.length ? relations : undefined,
     checklist: checklist.length ? checklist : undefined,
   };
@@ -256,6 +248,10 @@ export function groupCommentsByTask(
   for (const c of comments) {
     const list = out[c.taskId] ?? [];
     const authorName = c.author?.fullName ?? "Someone";
+    const createdAtIso =
+      c.createdAt instanceof Date
+        ? c.createdAt.toISOString()
+        : new Date(c.createdAt).toISOString();
     list.push({
       id: c.id,
       author: authorName,
@@ -263,6 +259,7 @@ export function groupCommentsByTask(
       authorInitials: initialsFromName(authorName),
       body: c.body,
       at: formatTimestamp(c.createdAt),
+      createdAt: createdAtIso,
       editedAt: c.editedAt
         ? (c.editedAt instanceof Date
             ? c.editedAt

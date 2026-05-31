@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -9,6 +10,7 @@ import {
   CircleDot,
   Eye,
   Filter,
+  Menu,
   Plus,
   Search,
   SlidersHorizontal
@@ -23,7 +25,6 @@ interface TopbarProps {
   query: string
   onQuery: (q: string) => void
   tab: 'board' | 'list' | 'timeline' | 'sprints'
-  onTab: (t: 'board' | 'list' | 'timeline' | 'sprints') => void
   totals: { open: number; due: number; review: number; done: number }
   onNewTask: () => void
   onToggleFilter: () => void
@@ -54,6 +55,10 @@ interface TopbarProps {
   // The parent (DashboardShell) owns the data, so the slot is a plain
   // ReactNode rather than a callback bag.
   copySlot?: React.ReactNode
+  // Mobile-only hamburger handler. When provided, renders a Menu button
+  // at the start of the topbar visible at <md that toggles the Sidebar
+  // sheet. Omit on desktop-only contexts.
+  onOpenMobileNav?: () => void
 }
 
 const FEED_VIEWS: {
@@ -87,7 +92,6 @@ export default function Topbar({
   query,
   onQuery,
   tab,
-  onTab,
   totals,
   onNewTask,
   onToggleFilter,
@@ -105,9 +109,14 @@ export default function Topbar({
   viewLabel,
   feedView,
   onFeedViewChange,
-  copySlot
+  copySlot,
+  onOpenMobileNav
 }: TopbarProps) {
   const { t } = useDashTheme()
+  const searchParams = useSearchParams()
+  const qs = searchParams.toString()
+  const hrefFor = (tabId: string) =>
+    qs ? `/dashboard/${tabId}?${qs}` : `/dashboard/${tabId}`
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
   const projectMenuRef = useRef<HTMLDivElement>(null)
   const [viewMenuOpen, setViewMenuOpen] = useState(false)
@@ -140,18 +149,30 @@ export default function Topbar({
 
   return (
     <header
-      className={`flex h-12 shrink-0 items-center justify-between gap-4 border-b px-4 ${t.topbar}`}
+      className={`flex h-12 shrink-0 items-center justify-between gap-2 border-b px-3 sm:gap-4 sm:px-4 ${t.topbar}`}
     >
-      <div className="flex min-w-0 items-center gap-4">
-        <div className={`flex items-center gap-1.5 text-xs ${t.textMuted}`}>
+      <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+        {onOpenMobileNav && (
+          <button
+            type="button"
+            onClick={onOpenMobileNav}
+            className={`-ml-1 flex size-7 items-center justify-center rounded-md md:hidden ${t.tab}`}
+            aria-label="Open navigation"
+          >
+            <Menu className="size-4" />
+          </button>
+        )}
+        <div
+          className={`flex min-w-0 items-center gap-1.5 text-xs ${t.textMuted}`}
+        >
           <Link
             href="/dashboard"
-            className={`${t.textSubtle} transition hover:opacity-80`}
+            className={`hidden sm:inline ${t.textSubtle} transition hover:opacity-80`}
           >
             Verbivore
           </Link>
-          <span className={t.textFaint}>/</span>
-          <div className="relative" ref={projectMenuRef}>
+          <span className={`hidden sm:inline ${t.textFaint}`}>/</span>
+          <div className="relative min-w-0" ref={projectMenuRef}>
             <button
               onClick={() => setProjectMenuOpen((o) => !o)}
               className={`flex items-center gap-1 ${t.text} transition hover:opacity-80`}
@@ -159,7 +180,7 @@ export default function Topbar({
               aria-haspopup="menu"
               aria-expanded={projectMenuOpen}
             >
-              <span className="max-w-[180px] truncate">
+              <span className="max-w-32 truncate sm:max-w-45">
                 {currentProject?.name ?? 'All Projects'}
               </span>
               <ChevronDown
@@ -182,7 +203,7 @@ export default function Topbar({
                     currentProjectId === null ? t.btnActive : t.tab
                   }`}
                 >
-                  All Tasks
+                  All Projects
                 </button>
                 <div className={`my-1 border-t ${t.borderSoft}`} />
                 {projects.map((p) => (
@@ -202,8 +223,8 @@ export default function Topbar({
               </div>
             )}
           </div>
-          <span className={t.textFaint}>/</span>
-          <div className="relative" ref={viewMenuRef}>
+          <span className={`hidden sm:inline ${t.textFaint}`}>/</span>
+          <div className="relative hidden sm:block" ref={viewMenuRef}>
             <button
               onClick={() => setViewMenuOpen((o) => !o)}
               className={`flex items-center gap-1 ${t.text} transition hover:opacity-80`}
@@ -211,7 +232,7 @@ export default function Topbar({
               aria-haspopup="menu"
               aria-expanded={viewMenuOpen}
             >
-              <span className="max-w-[160px] truncate">{viewLabel}</span>
+              <span className="max-w-40 truncate">{viewLabel}</span>
               <ChevronDown
                 className={`size-3 ${t.textSubtle} transition-transform ${
                   viewMenuOpen ? 'rotate-180' : ''
@@ -247,32 +268,37 @@ export default function Topbar({
         >
           {TABS.map((opt) => {
             const disabled = opt.requiresProject && currentProjectId === null
-            return (
-              <button
-                key={opt.id}
-                onClick={() => {
-                  if (disabled) return
-                  onTab(opt.id)
-                }}
-                disabled={disabled}
-                title={
+            const className = `rounded px-2.5 py-1 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${
+              tab === opt.id ? t.tabActive : t.tab
+            }`
+            if (disabled) {
+              return (
+                <button
+                  key={opt.id}
                   disabled
-                    ? 'Pick a project from the breadcrumb to plan sprints'
-                    : undefined
-                }
-                className={`rounded px-2.5 py-1 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                  tab === opt.id ? t.tabActive : t.tab
-                }`}
+                  title="Pick a project from the breadcrumb to plan sprints"
+                  className={className}
+                >
+                  {opt.label}
+                </button>
+              )
+            }
+            return (
+              <Link
+                key={opt.id}
+                href={hrefFor(opt.id)}
+                prefetch
+                className={className}
               >
                 {opt.label}
-              </button>
+              </Link>
             )
           })}
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="mr-1 flex items-center gap-1 md:mr-2">
+      <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="mr-1 hidden items-center gap-1 md:mr-2 md:flex">
           <StatButton
             kind="open"
             label="Open"
@@ -334,14 +360,14 @@ export default function Topbar({
           <span className="hidden 2xl:inline">Filter</span>
           {activeFilterCount > 0 && (
             <span
-              className={`ml-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-teal-500 px-1 text-[10px] font-semibold text-white`}
+              className={`ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-500 px-1 text-[10px] font-semibold text-white`}
             >
               {activeFilterCount}
             </span>
           )}
         </button>
 
-        <div className="relative">
+        <div className="relative hidden md:block">
           <button
             onClick={onToggleGroup}
             aria-label="Group tasks"

@@ -6,14 +6,13 @@ import {
   ArrowRight,
   ArrowUp,
   ArrowDown,
-  Bell,
   Code2,
   Search,
   ChevronRight,
-  Filter,
-  Settings as SettingsIcon,
-  List as ListIcon,
-  Columns3
+  ChevronDown,
+  Check,
+  X,
+  UserX
 } from 'lucide-react'
 import { BoardTask, Sprint } from './boardData'
 import { useTeam } from './TeamContext'
@@ -40,6 +39,8 @@ interface ArchivePanelProps {
   tasks: BoardTask[]
   comments: Record<string, TaskCommentLite[]>
   activity: Record<string, TaskActivityLite[]>
+  currentUserId: string
+  accessTier: 'admin' | 'lead' | 'member'
   onChangeStatus: (id: string, s: import('./status').TaskStatus) => void
   onChangePriority: (id: string, p: TaskPriority) => void
   onChangeAssignee: (id: string, assigneeId: string | null) => void
@@ -51,6 +52,8 @@ export default function ArchivePanel({
   tasks,
   comments,
   activity,
+  currentUserId,
+  accessTier,
   onChangeStatus,
   onChangePriority,
   onChangeAssignee,
@@ -227,6 +230,8 @@ export default function ArchivePanel({
               }
               comments={comments}
               activity={activity}
+              currentUserId={currentUserId}
+              accessTier={accessTier}
               onChangeStatus={onChangeStatus}
               onChangePriority={onChangePriority}
               onChangeAssignee={onChangeAssignee}
@@ -249,6 +254,8 @@ function SprintSection({
   onToggleTask,
   comments,
   activity,
+  currentUserId,
+  accessTier,
   onChangeStatus,
   onChangePriority,
   onChangeAssignee,
@@ -262,12 +269,34 @@ function SprintSection({
   onToggleTask: (id: string) => void
   comments: Record<string, TaskCommentLite[]>
   activity: Record<string, TaskActivityLite[]>
+  currentUserId: string
+  accessTier: 'admin' | 'lead' | 'member'
   onChangeStatus: (id: string, s: import('./status').TaskStatus) => void
   onChangePriority: (id: string, p: TaskPriority) => void
   onChangeAssignee: (id: string, assigneeId: string | null) => void
   onAddComment: (id: string, body: string, mentions?: string[]) => void
 }) {
   const { t, mode } = useDashTheme()
+
+  // Per-sprint filter state. Each section keeps its own selection so a
+  // member can scope one sprint without touching the others.
+  const [statusFilter, setStatusFilter] = useState<Set<TaskStatus>>(
+    () => new Set()
+  )
+  const [assigneeFilter, setAssigneeFilter] = useState<Set<string>>(
+    () => new Set()
+  )
+
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((task) => {
+      if (statusFilter.size > 0 && !statusFilter.has(task.status)) return false
+      if (assigneeFilter.size > 0) {
+        const key = task.assignee?.id ?? '__unassigned'
+        if (!assigneeFilter.has(key)) return false
+      }
+      return true
+    })
+  }, [tasks, statusFilter, assigneeFilter])
 
   const progressColor =
     sprint.status === 'completed'
@@ -376,13 +405,21 @@ function SprintSection({
       </header>
 
       <div className={`border-t ${t.border} flex flex-col gap-4 px-5 py-4`}>
-        <SprintToolbar />
-        <SprintTasks
+        <SprintToolbar
           tasks={tasks}
+          statusFilter={statusFilter}
+          setStatusFilter={setStatusFilter}
+          assigneeFilter={assigneeFilter}
+          setAssigneeFilter={setAssigneeFilter}
+        />
+        <SprintTasks
+          tasks={filteredTasks}
           expandedTaskId={expandedTaskId}
           onToggleTask={onToggleTask}
           comments={comments}
           activity={activity}
+          currentUserId={currentUserId}
+          accessTier={accessTier}
           onChangeStatus={onChangeStatus}
           onChangePriority={onChangePriority}
           onChangeAssignee={onChangeAssignee}
@@ -390,6 +427,270 @@ function SprintSection({
         />
       </div>
     </section>
+  )
+}
+
+function SprintToolbar({
+  tasks,
+  statusFilter,
+  setStatusFilter,
+  assigneeFilter,
+  setAssigneeFilter
+}: {
+  tasks: BoardTask[]
+  statusFilter: Set<TaskStatus>
+  setStatusFilter: React.Dispatch<React.SetStateAction<Set<TaskStatus>>>
+  assigneeFilter: Set<string>
+  setAssigneeFilter: React.Dispatch<React.SetStateAction<Set<string>>>
+}) {
+  const { t } = useDashTheme()
+  const team = useTeam()
+
+  // Counts shown in popover items reflect the unfiltered sprint scope so
+  // selecting a status doesn't make the OTHER status counts zero out.
+  const statusCounts = useMemo(() => {
+    const out = new Map<TaskStatus, number>()
+    for (const task of tasks) out.set(task.status, (out.get(task.status) ?? 0) + 1)
+    return out
+  }, [tasks])
+  const assigneeCounts = useMemo(() => {
+    const out = new Map<string, number>()
+    for (const task of tasks) {
+      const key = task.assignee?.id ?? '__unassigned'
+      out.set(key, (out.get(key) ?? 0) + 1)
+    }
+    return out
+  }, [tasks])
+
+  const totalActive = statusFilter.size + assigneeFilter.size
+
+  const toggleAssignee = (key: string) => {
+    setAssigneeFilter((cur) => {
+      const next = new Set(cur)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+  const clearAll = () => {
+    setStatusFilter(new Set())
+    setAssigneeFilter(new Set())
+  }
+
+  return (
+    <div
+      className="flex flex-wrap items-center justify-between gap-3"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center gap-2">
+        <div className="flex items-center -space-x-1">
+          {team.map((m) => {
+            const selected = assigneeFilter.has(m.id)
+            const dim = assigneeFilter.size > 0 && !selected
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => toggleAssignee(m.id)}
+                title={m.name}
+                aria-pressed={selected}
+                className={`transition ${dim ? 'opacity-40 hover:opacity-70' : 'opacity-100'}`}
+              >
+                <Avatar
+                  user={m}
+                  size={22}
+                  className={
+                    selected ? 'ring-2 ring-teal-500' : 'ring-2 ring-current/0'
+                  }
+                />
+              </button>
+            )
+          })}
+          {(assigneeCounts.get('__unassigned') ?? 0) > 0 && (
+            <button
+              type="button"
+              onClick={() => toggleAssignee('__unassigned')}
+              title="Unassigned"
+              aria-pressed={assigneeFilter.has('__unassigned')}
+              className={`inline-flex size-[22px] items-center justify-center rounded-full border ${t.border} ${
+                assigneeFilter.has('__unassigned')
+                  ? 'ring-2 ring-teal-500'
+                  : ''
+              } ${
+                assigneeFilter.size > 0 && !assigneeFilter.has('__unassigned')
+                  ? 'opacity-40 hover:opacity-70'
+                  : ''
+              }`}
+            >
+              <UserX className="size-3" />
+            </button>
+          )}
+        </div>
+        {totalActive > 0 && (
+          <button
+            type="button"
+            onClick={clearAll}
+            className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] ${t.btn}`}
+          >
+            Clear filters ({totalActive})
+            <X className="size-3" />
+          </button>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <FilterPopover
+          label="Status"
+          activeCount={statusFilter.size}
+          items={STATUSES.map((s) => ({
+            id: s.id,
+            label: s.label,
+            count: statusCounts.get(s.id) ?? 0,
+            selected: statusFilter.has(s.id)
+          }))}
+          onToggle={(id) =>
+            setStatusFilter((cur) => {
+              const next = new Set(cur)
+              const k = id as TaskStatus
+              if (next.has(k)) next.delete(k)
+              else next.add(k)
+              return next
+            })
+          }
+          onClear={() => setStatusFilter(new Set())}
+        />
+        <FilterPopover
+          label="Assignee"
+          activeCount={assigneeFilter.size}
+          items={[
+            ...team.map((m) => ({
+              id: m.id,
+              label: m.name,
+              count: assigneeCounts.get(m.id) ?? 0,
+              selected: assigneeFilter.has(m.id)
+            })),
+            ...((assigneeCounts.get('__unassigned') ?? 0) > 0
+              ? [
+                  {
+                    id: '__unassigned',
+                    label: 'Unassigned',
+                    count: assigneeCounts.get('__unassigned') ?? 0,
+                    selected: assigneeFilter.has('__unassigned')
+                  }
+                ]
+              : [])
+          ]}
+          onToggle={toggleAssignee}
+          onClear={() => setAssigneeFilter(new Set())}
+        />
+      </div>
+    </div>
+  )
+}
+
+function FilterPopover({
+  label,
+  activeCount,
+  items,
+  onToggle,
+  onClear
+}: {
+  label: string
+  activeCount: number
+  items: { id: string; label: string; count: number; selected: boolean }[]
+  onToggle: (id: string) => void
+  onClear: () => void
+}) {
+  const { t } = useDashTheme()
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [open])
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs ${
+          activeCount > 0 ? t.btnActive : t.btn
+        }`}
+      >
+        {label}
+        {activeCount > 0 && (
+          <span className="inline-flex size-4 items-center justify-center rounded-full bg-teal-500 text-[10px] font-medium text-white">
+            {activeCount}
+          </span>
+        )}
+        <ChevronDown className="size-3" />
+      </button>
+      {open && (
+        <div
+          className={`absolute right-0 top-9 z-30 w-56 overflow-hidden rounded-md border shadow-xl ${t.surface} ${t.border}`}
+        >
+          <ul className="max-h-72 overflow-y-auto py-1">
+            {items.length === 0 ? (
+              <li className={`px-3 py-2 text-xs ${t.textSubtle}`}>
+                Nothing to filter.
+              </li>
+            ) : (
+              items.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => onToggle(item.id)}
+                    className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-xs ${t.rowHover}`}
+                  >
+                    <span className="flex items-center gap-2 truncate">
+                      <span
+                        className={`flex size-3.5 shrink-0 items-center justify-center rounded border ${
+                          item.selected
+                            ? 'border-teal-500 bg-teal-500'
+                            : t.border
+                        }`}
+                      >
+                        {item.selected && (
+                          <Check className="size-2.5 text-white" />
+                        )}
+                      </span>
+                      <span className={`truncate ${t.text}`}>{item.label}</span>
+                    </span>
+                    <span className={`tabular-nums text-[10px] ${t.textSubtle}`}>
+                      {item.count}
+                    </span>
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
+          {activeCount > 0 && (
+            <div className={`border-t px-2 py-1 ${t.border}`}>
+              <button
+                type="button"
+                onClick={onClear}
+                className={`w-full rounded px-2 py-1 text-left text-[11px] ${t.tab}`}
+              >
+                Clear
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -405,83 +706,14 @@ function Stat({ label, value }: { label: string; value: string }) {
   )
 }
 
-function SprintToolbar() {
-  const { t } = useDashTheme()
-  const team = useTeam()
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-2">
-        <button
-          className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs ${t.btn}`}
-        >
-          <Filter className="size-3.5" />
-          Filter
-        </button>
-        <div className="flex items-center -space-x-1">
-          {team.map((m) => (
-            <Avatar
-              key={m.id}
-              user={m}
-              size={22}
-              className="ring-2 ring-current/0"
-            />
-          ))}
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <ToolbarPill label="Status" />
-        <ToolbarPill label="Assignee" />
-        <div
-          className={`inline-flex items-center rounded-md border p-0.5 ${t.border}`}
-        >
-          <button
-            className={`flex size-7 items-center justify-center rounded ${t.btnActive}`}
-            aria-label="List"
-          >
-            <ListIcon className="size-3.5" />
-          </button>
-          <button
-            className={`flex size-7 items-center justify-center rounded ${t.tab}`}
-            aria-label="Board"
-          >
-            <Columns3 className="size-3.5" />
-          </button>
-        </div>
-        <button
-          className={`flex size-7 items-center justify-center rounded-md border ${t.btn}`}
-          aria-label="Settings"
-        >
-          <SettingsIcon className="size-3.5" />
-        </button>
-        <button
-          className={`flex size-7 items-center justify-center rounded-md border ${t.btn}`}
-          aria-label="Notifications"
-        >
-          <Bell className="size-3.5" />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function ToolbarPill({ label }: { label: string }) {
-  const { t } = useDashTheme()
-  return (
-    <button
-      className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs ${t.btn}`}
-    >
-      {label}
-      <ChevronRight className="size-3 rotate-90" />
-    </button>
-  )
-}
-
 function SprintTasks({
   tasks,
   expandedTaskId,
   onToggleTask,
   comments,
   activity,
+  currentUserId,
+  accessTier,
   onChangeStatus,
   onChangePriority,
   onChangeAssignee,
@@ -492,6 +724,8 @@ function SprintTasks({
   onToggleTask: (id: string) => void
   comments: Record<string, TaskCommentLite[]>
   activity: Record<string, TaskActivityLite[]>
+  currentUserId: string
+  accessTier: 'admin' | 'lead' | 'member'
   onChangeStatus: (id: string, s: import('./status').TaskStatus) => void
   onChangePriority: (id: string, p: TaskPriority) => void
   onChangeAssignee: (id: string, assigneeId: string | null) => void
@@ -533,12 +767,6 @@ function SprintTasks({
                 {items.length}
               </span>
             </span>
-            <button
-              className={`flex size-5 items-center justify-center rounded text-base leading-none ${t.tab}`}
-              aria-label="Add"
-            >
-              +
-            </button>
           </header>
           <ul className="flex flex-col">
             {items.map((task) => (
@@ -549,6 +777,8 @@ function SprintTasks({
                 onToggle={() => onToggleTask(task.id)}
                 comments={comments[task.id] ?? []}
                 activity={activity[task.id] ?? []}
+                currentUserId={currentUserId}
+                accessTier={accessTier}
                 onChangeStatus={onChangeStatus}
                 onChangePriority={onChangePriority}
                 onChangeAssignee={onChangeAssignee}
@@ -568,6 +798,8 @@ function ArchiveRow({
   onToggle,
   comments,
   activity,
+  currentUserId,
+  accessTier,
   onChangeStatus,
   onChangePriority,
   onChangeAssignee,
@@ -578,6 +810,8 @@ function ArchiveRow({
   onToggle: () => void
   comments: TaskCommentLite[]
   activity: TaskActivityLite[]
+  currentUserId: string
+  accessTier: 'admin' | 'lead' | 'member'
   onChangeStatus: (id: string, s: import('./status').TaskStatus) => void
   onChangePriority: (id: string, p: TaskPriority) => void
   onChangeAssignee: (id: string, assigneeId: string | null) => void
@@ -706,6 +940,8 @@ function ArchiveRow({
             task={task}
             comments={comments}
             activity={activity}
+            currentUserId={currentUserId}
+            accessTier={accessTier}
             onChangeStatus={onChangeStatus}
             onChangePriority={onChangePriority}
             onChangeAssignee={onChangeAssignee}

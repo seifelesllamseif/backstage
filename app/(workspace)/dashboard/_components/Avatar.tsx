@@ -30,7 +30,7 @@ export default function Avatar({
   if (user.photo) {
     return (
       <span
-        className={`relative inline-block rounded-full overflow-hidden shrink-0 ${className}`}
+        className={`relative inline-flex rounded-full overflow-hidden shrink-0 align-middle ${className}`}
         style={{ width: size, height: size }}
         title={user.name}
       >
@@ -48,7 +48,7 @@ export default function Avatar({
   return (
     <span
       title={user.name}
-      className={`inline-flex items-center justify-center rounded-full font-semibold text-white shrink-0 ${user.color} ${textClass} ${className}`}
+      className={`inline-flex items-center justify-center rounded-full font-semibold text-white shrink-0 align-middle ${user.color} ${textClass} ${className}`}
       style={{ width: size, height: size }}
     >
       {user.initials}

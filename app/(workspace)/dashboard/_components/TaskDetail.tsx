@@ -22,11 +22,7 @@ import {
 import { defaultExternalRefLabel, parseExternalRef } from '@/lib/externalRef'
 import type { TaskExternalRef, TaskExternalRefKind } from './boardData'
 import { fetchTaskHandoff } from '../actions'
-import {
-  Sheet,
-  SheetContent,
-  SheetTitle
-} from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { VisuallyHidden } from 'radix-ui'
 import {
   HANDOFF_FIELDS,
@@ -45,6 +41,19 @@ import {
   AlertDialogTrigger
 } from '@/components/ui/alert-dialog'
 import MentionInput, { renderMentionedBody } from './MentionInput'
+import { useTaskActions } from './actions'
+import { Share2 } from 'lucide-react'
+import {
+  GithubIcon,
+  FigmaIcon,
+  SupabaseIcon,
+  VerbivoreIcon,
+  VercelIcon,
+  SentryIcon,
+  GoogleCloudIcon,
+  StripeIcon
+} from './BrandIcons'
+import { Rabbit } from 'lucide-react'
 import { BoardTask } from './boardData'
 import { useTeam } from './TeamContext'
 import {
@@ -56,11 +65,9 @@ import {
 } from './status'
 import StatusIcon from './StatusIcon'
 import PriorityIcon from './PriorityIcon'
-import RelationIcon from './RelationIcon'
 import RelationPicker from './RelationPicker'
 import type { TaskRelation } from './boardData'
 import Avatar from './Avatar'
-import { RELATION_LABEL } from './status'
 import { useDashTheme } from './theme'
 
 export interface TaskComment {
@@ -73,6 +80,11 @@ export interface TaskComment {
   authorInitials: string
   body: string
   at: string
+  // ISO timestamp when the comment was created. Used by the mentions
+  // feed to decide whether the current user has already replied: a task
+  // drops out of Mentions once the user posts a comment newer than the
+  // most recent comment mentioning them.
+  createdAt: string
   // ISO string when the comment was last edited; undefined if never.
   editedAt?: string
   mentions?: string[]
@@ -99,11 +111,16 @@ interface TaskDetailProps {
   externalRefs: TaskExternalRef[]
   currentUserId: string
   isAdmin: boolean
+  // Access tier of the current user. Planner fields (priority, assignee,
+  // lead, due, relations) are admin/lead only; owner fields (status,
+  // comments, links, handoff) are admin/lead OR the task assignee.
+  accessTier: 'admin' | 'lead' | 'member'
   onClose: () => void
   onChangeStatus: (id: string, s: TaskStatus) => void
   onChangePriority: (id: string, p: TaskPriority) => void
   onChangeAssignee: (id: string, assigneeId: string | null) => void
   onChangeLead: (id: string, leadId: string | null) => void
+  onChangeDueDate: (id: string, dueIso: string | null) => void
   onAddComment: (id: string, body: string, mentions?: string[]) => void
   onEditComment: (commentId: string, body: string) => void
   onDeleteComment: (commentId: string) => void
@@ -134,11 +151,13 @@ export default function TaskDetail({
   externalRefs,
   currentUserId,
   isAdmin,
+  accessTier,
   onClose,
   onChangeStatus,
   onChangePriority,
   onChangeAssignee,
   onChangeLead,
+  onChangeDueDate,
   onAddComment,
   onEditComment,
   onDeleteComment,
@@ -152,6 +171,13 @@ export default function TaskDetail({
 }: TaskDetailProps) {
   const { t } = useDashTheme()
   const team = useTeam()
+  const isPlanner = accessTier === 'admin' || accessTier === 'lead'
+  const isAssignee = task?.assignee?.id === currentUserId
+  // Planner fields: only admins / leads.
+  const canEditPlanner = isPlanner
+  // Owner fields: planners OR the task's own assignee. Mirrors the server
+  // gate in mutations.ts -> ensureTaskAccess(taskId, 'owner').
+  const canEditOwner = isPlanner || isAssignee
   const [statusOpen, setStatusOpen] = useState(false)
   const [prioOpen, setPrioOpen] = useState(false)
   const [assigneeOpen, setAssigneeOpen] = useState(false)
@@ -161,6 +187,19 @@ export default function TaskDetail({
   // comment edits at a time in the drawer.
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
+
+  // Share button: copies the absolute /dashboard/task/<ref> URL to
+  // clipboard via the shared task-actions context (also used by the
+  // card context menu's "Share link" entry). `shareCopied` flips the
+  // icon from Share2 -> Check for a moment after click as inline visual
+  // feedback (in addition to the toast).
+  const taskActions = useTaskActions()
+  const [shareCopied, setShareCopied] = useState(false)
+  useEffect(() => {
+    if (!shareCopied) return
+    const id = window.setTimeout(() => setShareCopied(false), 1500)
+    return () => window.clearTimeout(id)
+  }, [shareCopied])
 
   if (!task) return null
   const status = STATUS_BY_ID[task.status]
@@ -183,12 +222,34 @@ export default function TaskDetail({
             <X className="size-3.5" />
           </button>
           <span
-            className={`rounded border px-1.5 py-0.5 text-[10px] tracking-[0.22em] tabular-nums uppercase ${t.metaTag}`}
+            className={`rounded border px-1.5 py-0.5 text-[10px] tracking-[0.22em] uppercase tabular-nums ${t.metaTag}`}
           >
             {task.ref}
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-2">{copySlot}</div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              taskActions.copyShareLink(task.ref)
+              setShareCopied(true)
+            }}
+            aria-label="Copy share link"
+            title={shareCopied ? 'Copied!' : 'Copy share link'}
+            className={`flex size-7 items-center justify-center rounded-md border transition ${
+              shareCopied
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                : t.btn
+            }`}
+          >
+            {shareCopied ? (
+              <Check className="size-3.5" />
+            ) : (
+              <Share2 className="size-3.5" />
+            )}
+          </button>
+          {copySlot}
+        </div>
       </div>
 
       <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-5">
@@ -199,6 +260,7 @@ export default function TaskDetail({
         <div className="grid grid-cols-[88px_1fr] items-center gap-y-2.5 text-xs">
           <FieldLabel>Status</FieldLabel>
           <Popover
+            disabled={!canEditOwner}
             open={statusOpen}
             onOpenChange={setStatusOpen}
             trigger={
@@ -227,6 +289,7 @@ export default function TaskDetail({
 
           <FieldLabel>Priority</FieldLabel>
           <Popover
+            disabled={!canEditPlanner}
             open={prioOpen}
             onOpenChange={setPrioOpen}
             trigger={
@@ -255,6 +318,7 @@ export default function TaskDetail({
 
           <FieldLabel>Assignee</FieldLabel>
           <Popover
+            disabled={!canEditPlanner}
             open={assigneeOpen}
             onOpenChange={setAssigneeOpen}
             trigger={
@@ -302,6 +366,7 @@ export default function TaskDetail({
           <FieldLabel>Lead</FieldLabel>
           <div className="flex items-center gap-2">
             <Popover
+              disabled={!canEditPlanner}
               open={leadOpen}
               onOpenChange={setLeadOpen}
               trigger={
@@ -345,21 +410,27 @@ export default function TaskDetail({
                 </button>
               ))}
             </Popover>
-            {task.lead && task.lead.id !== currentUserId && (
-              <button
-                type="button"
-                onClick={() => setAskLeadOpen(true)}
-                className={`flex h-6 items-center gap-1 rounded-md border px-2 text-[10px] transition ${t.accent}`}
-                title={`Ask ${task.lead.name} for help`}
-              >
-                <MessageSquare className="size-3" />
-                Ask lead
-              </button>
-            )}
+            {task.lead &&
+              task.assignee?.id === currentUserId &&
+              task.lead.id !== currentUserId && (
+                <button
+                  type="button"
+                  onClick={() => setAskLeadOpen(true)}
+                  className={`flex h-6 items-center gap-1 rounded-md border px-2 text-[10px] transition ${t.accent}`}
+                  title={`Ask ${task.lead.name} for help`}
+                >
+                  <MessageSquare className="size-3" />
+                  Ask lead
+                </button>
+              )}
           </div>
 
           <FieldLabel>Due</FieldLabel>
-          <span className={t.text}>{task.due ?? '—'}</span>
+          <DueDateField
+            task={task}
+            readOnly={!canEditPlanner}
+            onChange={(iso) => onChangeDueDate(task.id, iso)}
+          />
 
           <FieldLabel>Tags</FieldLabel>
           <span className="flex flex-wrap gap-1">
@@ -378,6 +449,7 @@ export default function TaskDetail({
             relations={task.relations ?? []}
             candidates={candidateTasks}
             selfRef={task.ref}
+            disabled={!canEditPlanner}
             onAdd={(rel) => onAddRelation(task.id, rel)}
             onRemove={(rel) => onRemoveRelation(task.id, rel)}
             variant="compact"
@@ -387,12 +459,14 @@ export default function TaskDetail({
         <LinksSection
           task={task}
           refs={externalRefs}
+          canEdit={canEditOwner}
           onAdd={(url) => onAddExternalRef(task.id, url)}
           onRemove={(refId) => onRemoveExternalRef(task.id, refId)}
         />
 
         <HandoffReadView
           taskId={task.id}
+          canEdit={canEditOwner}
           onOpenEditor={() => onOpenHandoff(task)}
         />
 
@@ -575,11 +649,21 @@ export default function TaskDetail({
         </div>
       </div>
 
-      <div className={`border-t p-3 ${t.border}`}>
-        <MentionInput
-          onSubmit={(body, mentions) => onAddComment(task.id, body, mentions)}
-        />
-      </div>
+      {canEditOwner ? (
+        <div className={`border-t p-3 ${t.border}`}>
+          <MentionInput
+            onSubmit={(body, mentions) =>
+              onAddComment(task.id, body, mentions)
+            }
+          />
+        </div>
+      ) : (
+        <div
+          className={`border-t px-3 py-2 text-[11px] italic ${t.border} ${t.textSubtle}`}
+        >
+          Only the assignee can comment on this task.
+        </div>
+      )}
 
       <AskLeadSheet
         open={askLeadOpen}
@@ -616,9 +700,11 @@ function AskLeadSheet({
   const [body, setBody] = useState('')
 
   // Reset draft when the sheet closes so each open starts clean.
-  useEffect(() => {
+  const [prevOpen, setPrevOpen] = useState(open)
+  if (prevOpen !== open) {
+    setPrevOpen(open)
     if (!open) setBody('')
-  }, [open])
+  }
 
   const send = () => {
     if (!lead) return
@@ -638,7 +724,7 @@ function AskLeadSheet({
       <SheetContent
         side="right"
         showCloseButton={false}
-        className={`w-full p-0 sm:!max-w-[480px] ${t.detail}`}
+        className={`w-full p-0 sm:max-w-120! ${t.detail}`}
       >
         <VisuallyHidden.Root>
           <SheetTitle>
@@ -662,7 +748,7 @@ function AskLeadSheet({
                     {lead.name}
                   </span>
                   <span
-                    className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] tracking-[0.22em] tabular-nums uppercase ${t.metaTag}`}
+                    className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] tracking-[0.22em] uppercase tabular-nums ${t.metaTag}`}
                   >
                     {task.ref}
                   </span>
@@ -749,14 +835,25 @@ function Popover({
   trigger,
   children,
   open,
-  onOpenChange
+  onOpenChange,
+  disabled
 }: {
   trigger: React.ReactNode
   children: React.ReactNode
   open: boolean
   onOpenChange: (v: boolean) => void
+  disabled?: boolean
 }) {
   const { t } = useDashTheme()
+  if (disabled) {
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 px-2 py-1 text-xs ${t.text}`}
+      >
+        {trigger}
+      </span>
+    )
+  }
   return (
     <div className="relative">
       <button
@@ -792,10 +889,57 @@ function refIcon(kind: TaskExternalRefKind) {
       return GitCommit
     case 'doc':
       return FileText
+    case 'github':
+      return GithubIcon
+    case 'figma':
+      return FigmaIcon
+    case 'supabase':
+      return SupabaseIcon
+    case 'verbivore':
+      return VerbivoreIcon
+    case 'vercel':
+      return VercelIcon
+    case 'bunny':
+      return Rabbit
+    case 'sentry':
+      return SentryIcon
+    case 'gcloud':
+      return GoogleCloudIcon
+    case 'stripe':
+      return StripeIcon
     case 'link':
     default:
       return LinkIcon
   }
+}
+
+// Display ordering for ref chips - matches Panels.tsx. GitHub first since
+// it's the most-used surface (PRs, code, issues), then infra (Supabase,
+// Vercel, Bunny), then design (Figma), then brand-own (Verbivore), then
+// the lower-priority generic sub-kinds.
+const REF_KIND_ORDER: TaskExternalRefKind[] = [
+  'github',
+  'pr',
+  'issue',
+  'commit',
+  'supabase',
+  'vercel',
+  'gcloud',
+  'stripe',
+  'bunny',
+  'sentry',
+  'figma',
+  'verbivore',
+  'doc',
+  'link'
+]
+
+function sortRefsByImportance(refs: TaskExternalRef[]): TaskExternalRef[] {
+  const rank = (k: TaskExternalRefKind) => {
+    const i = REF_KIND_ORDER.indexOf(k)
+    return i === -1 ? REF_KIND_ORDER.length : i
+  }
+  return [...refs].sort((a, b) => rank(a.kind) - rank(b.kind))
 }
 
 const REF_KIND_LABEL: Record<TaskExternalRefKind, string> = {
@@ -803,15 +947,21 @@ const REF_KIND_LABEL: Record<TaskExternalRefKind, string> = {
   issue: 'Issue',
   commit: 'Commit',
   doc: 'Document',
-  link: 'Link'
+  link: 'Link',
+  supabase: 'Supabase',
+  github: 'GitHub repo',
+  figma: 'Figma',
+  verbivore: 'Verbivore',
+  vercel: 'Vercel',
+  bunny: 'Bunny CDN',
+  sentry: 'Sentry',
+  gcloud: 'Google Cloud',
+  stripe: 'Stripe'
 }
 
 // Tone classes per ref kind. Mirrors the Updates panel palette so PRs /
 // issues / docs read consistently across the dashboard.
-function refTone(
-  kind: TaskExternalRefKind,
-  mode: 'light' | 'dark'
-): string {
+function refTone(kind: TaskExternalRefKind, mode: 'light' | 'dark'): string {
   if (mode === 'light') {
     switch (kind) {
       case 'pr':
@@ -822,6 +972,24 @@ function refTone(
         return 'bg-sky-100 text-sky-700 border-sky-200'
       case 'doc':
         return 'bg-amber-100 text-amber-700 border-amber-200'
+      case 'github':
+        return 'bg-zinc-100 text-zinc-900 border-zinc-300'
+      case 'figma':
+        return 'bg-pink-50 text-pink-700 border-pink-200'
+      case 'supabase':
+        return 'bg-emerald-50 text-emerald-600 border-emerald-200'
+      case 'verbivore':
+        return 'bg-amber-50 text-amber-700 border-amber-200'
+      case 'vercel':
+        return 'bg-zinc-100 text-zinc-900 border-zinc-300'
+      case 'bunny':
+        return 'bg-orange-50 text-orange-700 border-orange-200'
+      case 'sentry':
+        return 'bg-purple-50 text-purple-700 border-purple-200'
+      case 'gcloud':
+        return 'bg-blue-50 text-blue-700 border-blue-200'
+      case 'stripe':
+        return 'bg-indigo-50 text-indigo-700 border-indigo-200'
       case 'link':
       default:
         return 'bg-zinc-100 text-zinc-700 border-zinc-200'
@@ -836,6 +1004,24 @@ function refTone(
       return 'bg-sky-400/10 text-sky-300 border-sky-400/30'
     case 'doc':
       return 'bg-amber-400/10 text-amber-300 border-amber-400/30'
+    case 'github':
+      return 'bg-zinc-700/40 text-zinc-100 border-zinc-500/40'
+    case 'figma':
+      return 'bg-pink-400/10 text-pink-300 border-pink-400/30'
+    case 'supabase':
+      return 'bg-emerald-400/10 text-emerald-300 border-emerald-400/30'
+    case 'verbivore':
+      return 'bg-amber-400/10 text-amber-300 border-amber-400/30'
+    case 'vercel':
+      return 'bg-zinc-700/40 text-zinc-100 border-zinc-500/40'
+    case 'bunny':
+      return 'bg-orange-400/10 text-orange-300 border-orange-400/30'
+    case 'sentry':
+      return 'bg-purple-400/10 text-purple-300 border-purple-400/30'
+    case 'gcloud':
+      return 'bg-blue-400/10 text-blue-300 border-blue-400/30'
+    case 'stripe':
+      return 'bg-indigo-400/10 text-indigo-300 border-indigo-400/30'
     case 'link':
     default:
       return 'bg-white/5 text-white/70 border-white/20'
@@ -850,14 +1036,102 @@ function hostOf(url: string): string | null {
   }
 }
 
-function LinksSection({
+// Inline editable due date. Click the current value to edit. Server-side
+// auto-tags the change as "postponed" or "early" when the task previously
+// had a due date - see updateDashboardTaskDueDate in mutations.ts.
+function DueDateField({
   task,
+  readOnly,
+  onChange
+}: {
+  task: BoardTask
+  readOnly?: boolean
+  onChange: (iso: string | null) => void
+}) {
+  const { t } = useDashTheme()
+  const [editing, setEditing] = useState(false)
+  // dueAt is a full ISO timestamp; the date input expects YYYY-MM-DD.
+  const initial = task.dueAt ? task.dueAt.slice(0, 10) : ''
+  const [value, setValue] = useState(initial)
+
+  // Keep the editor in sync when the task changes from elsewhere (drag,
+  // optimistic update, refetch).
+  const [prevInitial, setPrevInitial] = useState(initial)
+  if (prevInitial !== initial) {
+    setPrevInitial(initial)
+    setValue(initial)
+  }
+
+  if (readOnly) {
+    return <span className={t.text}>{task.due ?? '—'}</span>
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className={`text-left ${t.text} hover:opacity-80`}
+        title="Edit due date"
+      >
+        {task.due ?? '—'}
+      </button>
+    )
+  }
+
+  const commit = (next: string) => {
+    setEditing(false)
+    const iso = next || null
+    if (iso === (task.dueAt ? task.dueAt.slice(0, 10) : null)) return
+    onChange(iso)
+  }
+
+  return (
+    <span className="flex items-center gap-1.5">
+      <input
+        type="date"
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => commit(value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            commit(value)
+          }
+          if (e.key === 'Escape') {
+            setValue(initial)
+            setEditing(false)
+          }
+        }}
+        className={`h-6 rounded-md border px-1.5 text-xs ${t.input}`}
+      />
+      {task.dueAt && (
+        <button
+          type="button"
+          onClick={() => {
+            setValue('')
+            commit('')
+          }}
+          className={`text-[10px] underline ${t.textSubtle} hover:opacity-80`}
+          title="Clear due date"
+        >
+          clear
+        </button>
+      )}
+    </span>
+  )
+}
+
+function LinksSection({
   refs,
+  canEdit,
   onAdd,
   onRemove
 }: {
   task: BoardTask
   refs: TaskExternalRef[]
+  canEdit: boolean
   onAdd: (url: string) => void
   onRemove: (refId: string) => void
 }) {
@@ -890,7 +1164,7 @@ function LinksSection({
         >
           Links {refs.length > 0 && `(${refs.length})`}
         </div>
-        {!adding && refs.length > 0 && (
+        {canEdit && !adding && refs.length > 0 && (
           <button
             type="button"
             onClick={() => setAdding(true)}
@@ -909,19 +1183,21 @@ function LinksSection({
           <p className={`text-[11px] ${t.textMuted}`}>
             No PRs, issues, docs or links yet.
           </p>
-          <button
-            type="button"
-            onClick={() => setAdding(true)}
-            className={`mt-1 flex h-7 items-center gap-1 rounded-md px-2.5 text-[11px] transition ${t.accent}`}
-          >
-            <Plus className="size-3" /> Paste a URL
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className={`mt-1 flex h-7 items-center gap-1 rounded-md px-2.5 text-[11px] transition ${t.accent}`}
+            >
+              <Plus className="size-3" /> Paste a URL
+            </button>
+          )}
         </div>
       )}
 
       {refs.length > 0 && (
         <ul className="flex flex-col gap-2">
-          {refs.map((ref) => {
+          {sortRefsByImportance(refs).map((ref) => {
             const parsed = parseExternalRef(ref.url)
             const label =
               ref.label ?? (parsed ? defaultExternalRefLabel(parsed) : ref.url)
@@ -929,16 +1205,24 @@ function LinksSection({
             const tone = refTone(ref.kind, mode)
             const sub =
               parsed?.repo ?? hostOf(ref.url) ?? REF_KIND_LABEL[ref.kind]
+            // The Verbivore mark carries its own brand color in the SVG -
+            // the amber border-tile fights with it. Render it borderless
+            // and let the mark fill the tile.
+            const isOwnBrand = ref.kind === 'verbivore'
             return (
               <li
                 key={ref.id}
                 className={`group flex items-center gap-3 rounded-lg border px-3 py-2 transition ${t.column} ${t.rowHover}`}
               >
                 <span
-                  className={`flex size-8 shrink-0 items-center justify-center rounded-md border ${tone}`}
+                  className={
+                    isOwnBrand
+                      ? 'flex size-8 shrink-0 items-center justify-center'
+                      : `flex size-8 shrink-0 items-center justify-center rounded-md border ${tone}`
+                  }
                   aria-hidden="true"
                 >
-                  <Icon className="size-3.5" />
+                  <Icon className={isOwnBrand ? 'size-8' : 'size-3.5'} />
                 </span>
                 <a
                   href={ref.url}
@@ -947,7 +1231,7 @@ function LinksSection({
                   className="flex min-w-0 flex-1 flex-col gap-0.5"
                   title={ref.url}
                 >
-                  <span className="flex items-center gap-1.5 min-w-0">
+                  <span className="flex min-w-0 items-center gap-1.5">
                     <span className={`truncate text-xs font-medium ${t.text}`}>
                       {label}
                     </span>
@@ -966,21 +1250,23 @@ function LinksSection({
                     <span className="truncate">{sub}</span>
                   </span>
                 </a>
-                <button
-                  type="button"
-                  onClick={() => onRemove(ref.id)}
-                  className={`flex size-6 items-center justify-center rounded opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 ${t.btn}`}
-                  aria-label="Remove link"
-                >
-                  <X className="size-3" />
-                </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => onRemove(ref.id)}
+                    className={`flex size-6 items-center justify-center rounded opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 ${t.btn}`}
+                    aria-label="Remove link"
+                  >
+                    <X className="size-3" />
+                  </button>
+                )}
               </li>
             )
           })}
         </ul>
       )}
 
-      {adding && (
+      {canEdit && adding && (
         <form
           onSubmit={(e) => {
             e.preventDefault()
@@ -1029,8 +1315,8 @@ function LinksSection({
           </div>
           {err && <p className="text-[11px] text-red-500">{err}</p>}
           <p className={`px-1 text-[10px] ${t.textSubtle}`}>
-            Kind is auto-detected: GitHub PRs / issues / commits, Google
-            Docs, Notion, Figma, `.md` files, anything else as a link.
+            Kind is auto-detected: GitHub PRs / issues / commits, Google Docs,
+            Notion, Figma, `.md` files, anything else as a link.
           </p>
         </form>
       )}
@@ -1044,18 +1330,26 @@ function LinksSection({
 // and after a task is marked Done so the next person can read it inline.
 function HandoffReadView({
   taskId,
+  canEdit,
   onOpenEditor
 }: {
   taskId: string
+  canEdit: boolean
   onOpenEditor: () => void
 }) {
   const { t } = useDashTheme()
   const [loading, setLoading] = useState(true)
   const [handoff, setHandoff] = useState<HandoffFieldValues | null>(null)
 
+  // Reset loading on taskId change during render (avoids setState in effect).
+  const [prevTaskId, setPrevTaskId] = useState(taskId)
+  if (prevTaskId !== taskId) {
+    setPrevTaskId(taskId)
+    setLoading(true)
+  }
+
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
     fetchTaskHandoff(taskId)
       .then((res) => {
         if (cancelled) return
@@ -1074,9 +1368,7 @@ function HandoffReadView({
   }, [taskId])
 
   const filled = handoff
-    ? HANDOFF_FIELDS.filter(
-        (f) => (handoff[f] ?? '').trim().length > 0
-      ).length
+    ? HANDOFF_FIELDS.filter((f) => (handoff[f] ?? '').trim().length > 0).length
     : 0
   const hasAny = filled > 0
   const total = HANDOFF_FIELDS.length
@@ -1090,14 +1382,16 @@ function HandoffReadView({
           <Briefcase className="size-3" />
           Handoff {hasAny && `(${filled}/${total})`}
         </div>
-        <button
-          type="button"
-          onClick={onOpenEditor}
-          className={`flex h-6 items-center gap-1 rounded-md border px-1.5 text-[10px] transition ${t.btn}`}
-        >
-          <Pencil className="size-3" />
-          {hasAny ? 'Edit' : 'Start'}
-        </button>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={onOpenEditor}
+            className={`flex h-6 items-center gap-1 rounded-md border px-1.5 text-[10px] transition ${t.btn}`}
+          >
+            <Pencil className="size-3" />
+            {hasAny ? 'Edit' : 'Start'}
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -1111,8 +1405,8 @@ function HandoffReadView({
         <div
           className={`rounded-md border border-dashed px-3 py-2 text-[11px] italic ${t.border} ${t.textSubtle}`}
         >
-          No handoff written yet. Start one so the next person can pick
-          this task up cleanly.
+          No handoff written yet. Start one so the next person can pick this
+          task up cleanly.
         </div>
       ) : (
         <dl

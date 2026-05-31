@@ -10,6 +10,9 @@ export interface TaskActions {
   duplicate: (id: string) => void
   remove: (id: string) => void
   copyRef: (ref: string) => void
+  // Copy a shareable /dashboard/task/<ref> URL to clipboard. Used by the
+  // card context menu + the task drawer share button.
+  copyShareLink: (ref: string) => void
   openDetail: (id: string) => void
   addInColumn: (status?: TaskStatus) => void
   // Filter shortcuts wired up from card context menus. Toggle membership

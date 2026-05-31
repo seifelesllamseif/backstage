@@ -89,8 +89,6 @@ export default function RelationPicker({
     setAdding(false)
   }
 
-  const tightChip = variant === 'compact'
-
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -128,10 +126,10 @@ export default function RelationPicker({
           <button
             type="button"
             onClick={() => setAdding(true)}
-            className={`flex h-6 items-center gap-1 rounded-md border px-1.5 text-[10px] transition ${t.btn}`}
+            className={`ml-auto flex h-6 items-center gap-1 rounded-md border px-1.5 text-[10px] transition ${t.btn}`}
           >
             <Plus className="size-3" />
-            {tightChip ? 'Add' : 'Add relation'}
+            Add relation
           </button>
         )}
       </div>

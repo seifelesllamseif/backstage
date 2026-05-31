@@ -38,6 +38,8 @@ interface Props {
   task: BoardTask
   comments: TaskCommentLite[]
   activity: TaskActivityLite[]
+  currentUserId: string
+  accessTier: 'admin' | 'lead' | 'member'
   onChangeStatus: (id: string, s: TaskStatus) => void
   onChangePriority: (id: string, p: TaskPriority) => void
   onChangeAssignee: (id: string, assigneeId: string | null) => void
@@ -53,6 +55,8 @@ export default function TaskDetailContent({
   task,
   comments,
   activity,
+  currentUserId,
+  accessTier,
   onChangeStatus,
   onChangePriority,
   onChangeAssignee,
@@ -63,6 +67,10 @@ export default function TaskDetailContent({
 }: Props) {
   const { t } = useDashTheme()
   const team = useTeam()
+  const isPlanner = accessTier === 'admin' || accessTier === 'lead'
+  const isAssignee = task.assignee?.id === currentUserId
+  const canEditPlanner = isPlanner
+  const canEditOwner = isPlanner || isAssignee
   const [statusOpen, setStatusOpen] = useState(false)
   const [prioOpen, setPrioOpen] = useState(false)
   const [assigneeOpen, setAssigneeOpen] = useState(false)
@@ -104,6 +112,7 @@ export default function TaskDetailContent({
       <div className="grid grid-cols-[88px_1fr] gap-y-2.5 text-xs items-center">
         <FieldLabel>Status</FieldLabel>
         <Popover
+          disabled={!canEditOwner}
           open={statusOpen}
           onOpenChange={setStatusOpen}
           trigger={
@@ -133,6 +142,7 @@ export default function TaskDetailContent({
 
         <FieldLabel>Priority</FieldLabel>
         <Popover
+          disabled={!canEditPlanner}
           open={prioOpen}
           onOpenChange={setPrioOpen}
           trigger={
@@ -162,6 +172,7 @@ export default function TaskDetailContent({
 
         <FieldLabel>Assignee</FieldLabel>
         <Popover
+          disabled={!canEditPlanner}
           open={assigneeOpen}
           onOpenChange={setAssigneeOpen}
           trigger={
@@ -310,11 +321,19 @@ export default function TaskDetailContent({
             </div>
           ))}
         </div>
-        <div className="mt-3" onClick={(e) => e.stopPropagation()}>
-          <MentionInput
-            onSubmit={(body, mentions) => onAddComment(task.id, body, mentions)}
-          />
-        </div>
+        {canEditOwner ? (
+          <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+            <MentionInput
+              onSubmit={(body, mentions) =>
+                onAddComment(task.id, body, mentions)
+              }
+            />
+          </div>
+        ) : (
+          <p className={`mt-3 text-[11px] italic ${t.textSubtle}`}>
+            Only the assignee can comment on this task.
+          </p>
+        )}
       </div>
 
       <div className="flex flex-col gap-2 text-xs">
@@ -365,14 +384,25 @@ function Popover({
   trigger,
   children,
   open,
-  onOpenChange
+  onOpenChange,
+  disabled
 }: {
   trigger: React.ReactNode
   children: React.ReactNode
   open: boolean
   onOpenChange: (v: boolean) => void
+  disabled?: boolean
 }) {
   const { t } = useDashTheme()
+  if (disabled) {
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 px-2 py-1 text-xs ${t.text}`}
+      >
+        {trigger}
+      </span>
+    )
+  }
   return (
     <div className="relative" onClick={(e) => e.stopPropagation()}>
       <button

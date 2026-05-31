@@ -1,14 +1,14 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import {
   ArrowLeft,
   ChevronDown,
   LogOut,
-  Plus,
   RotateCcw,
   Sun,
   Moon,
@@ -30,6 +30,7 @@ import {
 import {
   addComment as addCommentAction,
   addProjectExternalRef as addProjectExternalRefAction,
+  updateProjectExternalRefLabel as updateProjectExternalRefLabelAction,
   addTaskExternalRef as addTaskExternalRefAction,
   createBulkDashboardTasks,
   createDashboardTask,
@@ -41,6 +42,7 @@ import {
   removeProjectExternalRef as removeProjectExternalRefAction,
   removeTaskExternalRef as removeTaskExternalRefAction,
   updateDashboardTaskAssignee,
+  updateDashboardTaskDueDate,
   updateDashboardTaskLead,
   updateDashboardTaskPriority,
   updateDashboardTaskStatus,
@@ -85,6 +87,7 @@ import { DashboardThemeProvider, useDashTheme } from './theme'
 import { ContextMenuProvider, useContextMenu } from './ContextMenu'
 import { TaskActionsProvider } from './actions'
 import { TeamProvider } from './TeamContext'
+import { useDashboardSearchParams } from './useDashboardSearchParams'
 
 export type GroupBy = 'status' | 'assignee' | 'priority'
 export type View =
@@ -136,10 +139,62 @@ function nowLabel() {
   })
 }
 
+type Greeting = { text: string; emoji: string }
+
+function greetingForNow(): Greeting {
+  const h = new Date().getHours()
+  if (h < 5) return { text: 'Up late', emoji: '🌙' }
+  if (h < 12) return { text: 'Good morning', emoji: '☀️' }
+  if (h < 17) return { text: 'Good afternoon', emoji: '🌤' }
+  if (h < 21) return { text: 'Good evening', emoji: '✨' }
+  return { text: 'Good night', emoji: '🌙' }
+}
+
+// Re-evaluates the time-banded greeting once a minute. The setState only
+// fires when the text actually changes, so React skips re-renders unless we
+// cross an hour boundary - the transition is naturally "slow".
+function useGreeting(): Greeting {
+  const [g, setG] = useState<Greeting>(() => greetingForNow())
+  useEffect(() => {
+    const id = setInterval(() => {
+      const next = greetingForNow()
+      setG((cur) => (cur.text === next.text ? cur : next))
+    }, 60_000)
+    return () => clearInterval(id)
+  }, [])
+  return g
+}
+
 let idCounter = 0
 function nextId(prefix: string) {
   idCounter += 1
   return `${prefix}-${Date.now()}-${idCounter}`
+}
+
+type ActiveTab = 'board' | 'list' | 'timeline' | 'sprints'
+
+const PANEL_VIEWS = [
+  'projects',
+  'updates',
+  'settings',
+  'symbols',
+  'archive'
+] as const
+type PanelView = (typeof PANEL_VIEWS)[number]
+
+function pathTabFor(pathname: string | null): ActiveTab {
+  if (pathname === '/dashboard/list') return 'list'
+  if (pathname === '/dashboard/timeline') return 'timeline'
+  if (pathname === '/dashboard/sprints') return 'sprints'
+  return 'board'
+}
+
+function pathPanelFor(pathname: string | null): PanelView | null {
+  if (!pathname) return null
+  const seg = pathname.replace(/^\/dashboard\//, '')
+  return (PANEL_VIEWS as readonly string[]).includes(seg)
+    ? (seg as PanelView)
+    : null
 }
 
 // ─── Copy-view helpers ────────────────────────────────────────────────────
@@ -328,6 +383,15 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   const { t, toggle, mode } = useDashTheme()
   const { open: openMenu } = useContextMenu()
   const router = useRouter()
+  const currentSearchParams = useSearchParams()
+  const queryClient = useQueryClient()
+  // Invalidates the React Query cache that DashboardChrome reads from.
+  // Pair with router.refresh() in flows that previously assumed server-fetched
+  // data (bulk insert, hard resets) - the per-task optimistic plumbing
+  // doesn't go through here.
+  const invalidateDashboard = () => {
+    queryClient.invalidateQueries({ queryKey: ['dashboardInitial'] })
+  }
   const mainScrollRef = useRef<HTMLElement | null>(null)
   const [isPending, startTransition] = useTransition()
 
@@ -347,6 +411,17 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     color: 'bg-zinc-500/80',
     role: initial.currentMember.accessTier
   }
+  const greeting = useGreeting()
+  const firstName = currentUser.name.split(/\s+/)[0]
+  // Alternates the centered wordmark between the time-banded greeting and
+  // the static "Verbivore · Task Handoff" mark. Slow cadence so the swap
+  // feels ambient, not animated; bump this constant to taste.
+  const [wordmarkPhase, setWordmarkPhase] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setWordmarkPhase((i) => i + 1), 180_000)
+    return () => clearInterval(id)
+  }, [])
+  const showGreetingPhase = wordmarkPhase % 2 === 0
 
   const [tasks, setTasks] = useState<BoardTask[]>(initial.tasks)
   const [comments, setComments] = useState<Record<string, TaskComment[]>>(
@@ -392,66 +467,86 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     setProjectExternalRefs(initial.externalRefsByProject)
   }, [initial.externalRefsByProject])
 
-  const [view, setView] = useState<View>('all')
-  const [tab, setTab] = useState<'board' | 'list' | 'timeline' | 'sprints'>(
-    'board'
-  )
-  // The Sprints tab is project-scoped. If the user navigates back to "All
-  // projects" while on it, drop them on Board so they don't see a blank
-  // panel.
-  useEffect(() => {
-    if (tab === 'sprints' && !initial.currentProjectId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setTab('board')
-    }
-  }, [tab, initial.currentProjectId])
-  const [query, setQuery] = useState('')
-  const [groupBy, setGroupBy] = useState<GroupBy>('status')
+  // The active tab + view + feed are all derived from the URL (pathname for
+  // the route, search params for feed) so that browser back/forward, refresh,
+  // and link-sharing all reproduce the same surface. Sidebar panels live at
+  // their own routes (/dashboard/projects etc.); feeds (all/mine/inbox/
+  // mentions) overlay the tab routes via ?feed=.
+  const pathname = usePathname()
+  const tab = pathTabFor(pathname)
+  const panel = pathPanelFor(pathname)
+  const setTab = (next: 'board' | 'list' | 'timeline' | 'sprints') => {
+    const qs = currentSearchParams.toString()
+    router.push(qs ? `/dashboard/${next}?${qs}` : `/dashboard/${next}`)
+  }
+
   const [groupOpen, setGroupOpen] = useState(false)
-
   const [filterOpen, setFilterOpen] = useState(false)
-  // Multi-select filters. Empty array = no filter on that axis. Tasks
-  // must match at least one value per active axis (intersection across
-  // axes, union within an axis), e.g. (status in {todo, in_review}) AND
-  // (priority in {urgent}) AND ... .
-  const [statusFilter, setStatusFilter] = useState<TaskStatus[]>([])
-  const [priorityFilter, setPriorityFilter] = useState<TaskPriority[]>([])
-  const [assigneeFilter, setAssigneeFilter] = useState<string[]>([])
-  const [tagFilter, setTagFilter] = useState<string[]>([])
-  // Sprint filter holds sprint ids. A task matches the filter if it belongs
-  // to any selected sprint (via sprint.taskIds). Works for both admin and
-  // members; member view stays scoped by their project visibility.
-  const [sprintFilter, setSprintFilter] = useState<string[]>([])
 
-  // Toggle helpers — flip a value's membership in a filter array. Used by
-  // every surface (Sidebar, FilterPanel, SymbolsPanel) so the rule for
-  // "click again to remove" lives in one place.
-  const toggleStatus = (s: TaskStatus) => {
-    setStatusFilter((cur) =>
-      cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]
-    )
-  }
-  const togglePriority = (p: TaskPriority) => {
-    setPriorityFilter((cur) =>
-      cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p]
-    )
-  }
-  const toggleAssignee = (id: string) => {
-    setAssigneeFilter((cur) =>
-      cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]
-    )
-  }
-  const toggleTag = (tag: string) => {
-    setTagFilter((cur) =>
-      cur.includes(tag) ? cur.filter((x) => x !== tag) : [...cur, tag]
-    )
-  }
-  const toggleSprint = (sprintId: string) => {
-    setSprintFilter((cur) =>
-      cur.includes(sprintId)
-        ? cur.filter((x) => x !== sprintId)
-        : [...cur, sprintId]
-    )
+  // Multi-select filters, search query, and group-by all live in the URL
+  // so reloads, browser back/forward, and link-sharing all reproduce the
+  // same view. Tasks must match at least one value per active axis
+  // (intersection across axes, union within an axis), e.g. (status in
+  // {todo, in_review}) AND (priority in {urgent}) AND ... .
+  // Pass team so the hook can translate ?assignee=<uuid> <-> ?assignee=<slug>
+  // for readable share URLs.
+  const urlParams = useDashboardSearchParams({ members: team })
+  const {
+    statusFilter,
+    priorityFilter,
+    assigneeFilter,
+    tagFilter,
+    sprintFilter,
+    query,
+    groupBy,
+    setStatusFilter,
+    toggleStatus,
+    setPriorityFilter,
+    togglePriority,
+    setAssigneeFilter,
+    toggleAssignee,
+    setTagFilter,
+    toggleTag,
+    setSprintFilter,
+    toggleSprint,
+    setQuery,
+    setGroupBy,
+    feed,
+    resetFilters,
+    applyFilters
+  } = urlParams
+
+  // The shell historically had a single `view` state covering both feeds
+  // (all/mine/inbox/mentions) and sidebar panels (projects/updates/...).
+  // Today those live in different URL surfaces: panel = route segment,
+  // feed = search param. We rebuild the union here so the rest of the
+  // shell can keep treating `view` as a single value.
+  const view: View = panel ?? feed
+  const setView = (next: View) => {
+    if ((PANEL_VIEWS as readonly string[]).includes(next)) {
+      // Panels live at their own routes. Search params for filter state
+      // carry across, but `feed` is dropped because panels ignore it.
+      const params = new URLSearchParams(currentSearchParams.toString())
+      params.delete('feed')
+      const qs = params.toString()
+      router.push(qs ? `/dashboard/${next}?${qs}` : `/dashboard/${next}`)
+      return
+    }
+    // Feed change. If we're on a panel route, jump back to the Board with
+    // the new feed pinned. Otherwise stay on the current tab and just
+    // update ?feed=. Use router.push (not the hook's replace) so the back
+    // button restores the previous feed - feed changes feel like
+    // navigation, unlike filter toggles.
+    const params = new URLSearchParams(currentSearchParams.toString())
+    if (next === 'all') params.delete('feed')
+    else params.set('feed', next)
+    const qs = params.toString()
+    const route = panel
+      ? '/dashboard/board'
+      : pathname && pathname.startsWith('/dashboard/')
+        ? pathname
+        : '/dashboard/board'
+    router.push(qs ? `${route}?${qs}` : route)
   }
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -465,6 +560,15 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [newTaskColumn, setNewTaskColumn] = useState<TaskStatus>('todo')
+  // Prefill carried into the New Task modal when the user clicks "Add"
+  // inside a non-status board column (Group: Assignee / Group: Priority).
+  // undefined = no prefill; the modal falls back to its own defaults.
+  const [newTaskAssigneeId, setNewTaskAssigneeId] = useState<
+    string | null | undefined
+  >(undefined)
+  const [newTaskPriority, setNewTaskPriority] = useState<
+    TaskPriority | undefined
+  >(undefined)
 
   // Require 6px of movement before drag activates — single clicks on
   // cards keep opening the drawer (no accidental drags).
@@ -474,7 +578,9 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
 
   const [density, setDensity] = useState<'compact' | 'cozy'>('cozy')
   const [wipLimit, setWipLimit] = useState(0)
-  const [notifyOnAssign, setNotifyOnAssign] = useState(true)
+  // Mobile-only: controls the Sheet that wraps the Sidebar on small
+  // screens. Always false on desktop because the static sidebar covers it.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   // Help hints in the sidebar. Persisted to localStorage so members who
   // turn them off don't see them again on refresh. Defaults to on so the
   // first thing a new member sees explains the navigation.
@@ -483,14 +589,29 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     // Lazy initializer + suppressHydrationWarning would avoid this
     // setState, but only at the cost of a hydration mismatch (the
     // server can't read localStorage). One mount-time re-render is the
-    // lesser evil here — `showHints` only flips a tiny ⓘ icon.
-    const stored = window.localStorage.getItem('dashboard.showHints')
+    // lesser evil here — these three flips are visual-only.
+    const storedHints = window.localStorage.getItem('dashboard.showHints')
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (stored === '0') setShowHints(false)
+    if (storedHints === '0') setShowHints(false)
+    const storedDensity = window.localStorage.getItem('dashboard.density')
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (storedDensity === 'compact' || storedDensity === 'cozy') setDensity(storedDensity)
+    const storedWip = window.localStorage.getItem('dashboard.wipLimit')
+    if (storedWip !== null) {
+      const n = Number(storedWip)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (Number.isFinite(n) && n >= 0) setWipLimit(n)
+    }
   }, [])
   useEffect(() => {
     window.localStorage.setItem('dashboard.showHints', showHints ? '1' : '0')
   }, [showHints])
+  useEffect(() => {
+    window.localStorage.setItem('dashboard.density', density)
+  }, [density])
+  useEffect(() => {
+    window.localStorage.setItem('dashboard.wipLimit', String(wipLimit))
+  }, [wipLimit])
 
   const labelIdByName = useMemo(
     () => new Map(initial.labels.map((l) => [l.name, l.id])),
@@ -508,15 +629,35 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   // view further narrows to just my-assignee tasks below.
   const visibleTasks = tasks
 
-  // Task IDs where the current user is @mentioned in at least one comment.
-  // Derived from local comment state so optimistic mentions show up
-  // immediately in the count.
+  // Task IDs where the current user is @mentioned AND hasn't replied yet.
+  // The rule: a task stays in the Mentions feed until the user posts a
+  // comment newer than the most recent comment that mentioned them.
+  // Replying acknowledges + closes the loop; the task drops out
+  // automatically. No read-tracking table needed.
+  //
+  // Derived from local comment state so optimistic mentions + replies show
+  // up immediately.
   const mentionedTaskIds = useMemo(() => {
     const set = new Set<string>()
     for (const [taskId, list] of Object.entries(comments)) {
-      if (list.some((c) => c.mentions?.includes(currentUserId))) {
-        set.add(taskId)
+      let latestMentionAt: string | null = null
+      let latestMineAt: string | null = null
+      for (const c of list) {
+        if (c.mentions?.includes(currentUserId)) {
+          if (!latestMentionAt || c.createdAt > latestMentionAt) {
+            latestMentionAt = c.createdAt
+          }
+        }
+        if (c.authorId === currentUserId) {
+          if (!latestMineAt || c.createdAt > latestMineAt) {
+            latestMineAt = c.createdAt
+          }
+        }
       }
+      if (!latestMentionAt) continue
+      // Self-mentions don't count (no one nags themselves).
+      if (latestMineAt && latestMineAt >= latestMentionAt) continue
+      set.add(taskId)
     }
     return set
   }, [comments, currentUserId])
@@ -785,6 +926,34 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     })
   }
 
+  const updateDueDate = (id: string, dueIso: string | null) => {
+    // Optimistic update on the task row. The server action also handles
+    // the "postponed" / "early" auto-tag swap on a non-null previous date,
+    // so we invalidateDashboard once the action returns to pull the new
+    // tag set back through React Query.
+    const newDisplay = dueIso
+      ? new Date(dueIso).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric'
+        })
+      : undefined
+    const newAt = dueIso ? new Date(dueIso).toISOString() : undefined
+    setTasks((cur) =>
+      cur.map((task) =>
+        task.id === id ? { ...task, due: newDisplay, dueAt: newAt } : task
+      )
+    )
+    startTransition(async () => {
+      const res = await updateDashboardTaskDueDate(id, dueIso)
+      if ('error' in res) {
+        console.error('updateDueDate:', res.error)
+        toast.error(res.error)
+        return
+      }
+      invalidateDashboard()
+    })
+  }
+
   const updateLead = (id: string, leadId: string | null) => {
     const member = leadId ? team.find((m) => m.id === leadId) : undefined
     setTasks((cur) =>
@@ -803,6 +972,12 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   }
 
   const addComment = (id: string, body: string, mentions?: string[]) => {
+    // Track the temp id so we can swap it for the server-assigned UUID
+    // once the insert returns. Without the swap, deleting / editing a
+    // just-posted comment hits the server with a synthetic id and errors
+    // out with "Comment not found".
+    const tempId = nextId('cm')
+    const nowIso = new Date().toISOString()
     setComments((cur) => {
       const list = cur[id] ?? []
       return {
@@ -810,12 +985,13 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         [id]: [
           ...list,
           {
-            id: nextId('cm'),
+            id: tempId,
             author: currentUser.name,
             authorId: currentUserId,
             authorInitials: currentUser.initials,
             body,
             at: nowLabel(),
+            createdAt: nowIso,
             mentions
           }
         ]
@@ -842,23 +1018,58 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       if ('error' in res) {
         console.error('addComment:', res.error)
         toast.error("Couldn't post comment.")
+        // Roll the temp row back so a retry doesn't double-post.
+        setComments((cur) => ({
+          ...cur,
+          [id]: (cur[id] ?? []).filter((c) => c.id !== tempId)
+        }))
+        return
       }
+      // Swap the temp id for the real server-assigned UUID so subsequent
+      // edits/deletes reference the persisted row.
+      const realId = res.comment.id
+      setComments((cur) => ({
+        ...cur,
+        [id]: (cur[id] ?? []).map((c) =>
+          c.id === tempId ? { ...c, id: realId } : c
+        )
+      }))
     })
   }
 
   const editComment = (commentId: string, body: string) => {
     // Optimistic: update body + mark editedAt locally so the "(edited)"
-    // tag flips immediately.
+    // tag flips immediately. Also push an Updates row to mirror what the
+    // server logs as comment.edited.
     const nowIso = new Date().toISOString()
+    let taskIdForActivity: string | null = null
     setComments((cur) => {
       const next: typeof cur = {}
       for (const [taskId, list] of Object.entries(cur)) {
+        const has = list.some((c) => c.id === commentId)
+        if (has) taskIdForActivity = taskId
         next[taskId] = list.map((c) =>
           c.id === commentId ? { ...c, body, editedAt: nowIso } : c
         )
       }
       return next
     })
+    if (taskIdForActivity) {
+      const taskId = taskIdForActivity
+      setActivity((cur) => ({
+        ...cur,
+        [taskId]: [
+          ...(cur[taskId] ?? []),
+          {
+            id: nextId('act'),
+            kind: 'comment',
+            text: 'You edited a comment',
+            at: nowLabel(),
+            atRaw: nowIso
+          }
+        ]
+      }))
+    }
     startTransition(async () => {
       const res = await editCommentAction(commentId, body)
       if ('error' in res) {
@@ -870,15 +1081,35 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
 
   const deleteComment = (commentId: string) => {
     // Optimistic: remove from local state. On server failure, restore.
+    // Also push an Updates row to mirror comment.deleted on the server.
+    const nowIso = new Date().toISOString()
     let snapshot: typeof comments | null = null
+    let taskIdForActivity: string | null = null
     setComments((cur) => {
       snapshot = cur
       const next: typeof cur = {}
       for (const [taskId, list] of Object.entries(cur)) {
+        if (list.some((c) => c.id === commentId)) taskIdForActivity = taskId
         next[taskId] = list.filter((c) => c.id !== commentId)
       }
       return next
     })
+    if (taskIdForActivity) {
+      const taskId = taskIdForActivity
+      setActivity((cur) => ({
+        ...cur,
+        [taskId]: [
+          ...(cur[taskId] ?? []),
+          {
+            id: nextId('act'),
+            kind: 'comment',
+            text: 'You deleted a comment',
+            at: nowLabel(),
+            atRaw: nowIso
+          }
+        ]
+      }))
+    }
     startTransition(async () => {
       const res = await deleteCommentAction(commentId)
       if ('error' in res) {
@@ -928,10 +1159,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 kind: saved.kind,
                 url: saved.url,
                 label: saved.label,
-                createdAt:
-                  saved.createdAt instanceof Date
-                    ? saved.createdAt.toISOString()
-                    : String(saved.createdAt)
+                createdAt: String(saved.createdAt)
               }
             : r
         )
@@ -995,14 +1223,43 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 kind: saved.kind,
                 url: saved.url,
                 label: saved.label,
-                createdAt:
-                  saved.createdAt instanceof Date
-                    ? saved.createdAt.toISOString()
-                    : String(saved.createdAt)
+                createdAt: String(saved.createdAt)
               }
             : r
         )
       }))
+    })
+  }
+
+  const renameProjectExternalRef = (
+    projectId: string,
+    refId: string,
+    nextLabel: string | null
+  ) => {
+    let snapshot: ProjectExternalRef[] | null = null
+    setProjectExternalRefs((cur) => {
+      snapshot = cur[projectId] ?? []
+      return {
+        ...cur,
+        [projectId]: (cur[projectId] ?? []).map((r) =>
+          r.id === refId ? { ...r, label: nextLabel } : r
+        )
+      }
+    })
+    startTransition(async () => {
+      const res = await updateProjectExternalRefLabelAction({
+        refId,
+        label: nextLabel
+      })
+      if ('error' in res) {
+        toast.error(res.error)
+        if (snapshot) {
+          setProjectExternalRefs((cur) => ({
+            ...cur,
+            [projectId]: snapshot!
+          }))
+        }
+      }
     })
   }
 
@@ -1097,8 +1354,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 ...t,
                 id: serverTask.id,
                 ref: serverTask.ref ?? t.ref,
-                createdAt: serverTask.createdAt.toISOString().slice(0, 10),
-                updatedAt: serverTask.updatedAt.toISOString()
+                createdAt: String(serverTask.createdAt).slice(0, 10),
+                updatedAt: String(serverTask.updatedAt)
               }
             : t
         )
@@ -1243,6 +1500,23 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
 
   const openNewTask = (status?: TaskStatus) => {
     setNewTaskColumn(status ?? 'todo')
+    setNewTaskAssigneeId(undefined)
+    setNewTaskPriority(undefined)
+    setNewTaskOpen(true)
+  }
+
+  // Open the New Task modal with a column-aware prefill. Used by the
+  // empty-state "Click to add a task" button on board columns when the
+  // board is grouped by Assignee or Priority (status grouping uses
+  // openNewTask directly with the column's status).
+  const openNewTaskWith = (opts: {
+    status?: TaskStatus
+    assigneeId?: string | null
+    priority?: TaskPriority
+  }) => {
+    setNewTaskColumn(opts.status ?? 'todo')
+    setNewTaskAssigneeId(opts.assigneeId)
+    setNewTaskPriority(opts.priority)
     setNewTaskOpen(true)
   }
 
@@ -1275,8 +1549,10 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         ? ` + ${res.createdLabels.length} new label${res.createdLabels.length === 1 ? '' : 's'}`
         : ''
     toast.success(taskMsg + labelMsg)
-    // Server data refresh — bulk insert doesn't reuse the per-task
-    // optimistic plumbing.
+    // Bulk insert doesn't reuse the per-task optimistic plumbing, so we
+    // refetch via React Query (DashboardChrome) and refresh server
+    // segments for any consumers still on the SSR path.
+    invalidateDashboard()
     router.refresh()
   }
 
@@ -1350,8 +1626,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 ...t,
                 id: serverTask.id,
                 ref: serverTask.ref ?? t.ref,
-                createdAt: serverTask.createdAt.toISOString().slice(0, 10),
-                updatedAt: serverTask.updatedAt.toISOString()
+                createdAt: String(serverTask.createdAt).slice(0, 10),
+                updatedAt: String(serverTask.updatedAt)
               }
             : t
         )
@@ -1365,20 +1641,19 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     }
   }
 
-  const resetFilters = () => {
-    setStatusFilter([])
-    setPriorityFilter([])
-    setAssigneeFilter([])
-    setTagFilter([])
-    setSprintFilter([])
-    setQuery('')
-  }
-
-  const refreshFromServer = () => {
-    router.refresh()
-    setComments({})
-    setActivity({})
-    setSelectedId(null)
+  // Build the absolute share URL for a task and copy it to clipboard.
+  // Used by the Share button in the task drawer and the context-menu
+  // entry on board cards. Uses window.location.origin so it works on
+  // any deploy without an env baseUrl.
+  const copyShareLink = (taskRef: string) => {
+    if (typeof window === 'undefined') return
+    const url = `${window.location.origin}/dashboard/task/${taskRef}`
+    if (navigator.clipboard) {
+      navigator.clipboard
+        .writeText(url)
+        .then(() => toast.success('Share link copied'))
+        .catch(() => toast.error("Couldn't copy link"))
+    }
   }
 
   const selected = selectedId
@@ -1480,6 +1755,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     duplicate: duplicateTask,
     remove: deleteTask,
     copyRef,
+    copyShareLink,
     openDetail: setSelectedId,
     addInColumn: openNewTask,
     toggleStatusFilter: toggleStatus,
@@ -1489,19 +1765,32 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   }
 
   const onProjectChange = (projectId: string | null) => {
-    const params = new URLSearchParams()
+    const params = new URLSearchParams(currentSearchParams.toString())
     if (projectId) params.set('project', projectId)
+    else params.delete('project')
     const qs = params.toString()
-    router.push(qs ? `/dashboard?${qs}` : '/dashboard')
+    // Stay on the current route. If the user is on /dashboard/sprints with
+    // no project after the change, the server-side guard in sprints/page.tsx
+    // will redirect to /dashboard/board.
+    const route =
+      pathname && pathname.startsWith('/dashboard/')
+        ? pathname
+        : '/dashboard/board'
+    router.push(qs ? `${route}?${qs}` : route)
   }
 
   // Clicking a project card on the in-dashboard Projects panel should
   // both pin the project filter and surface the board (the card is the
   // "open this project" action — staying on the meta-panel afterward
-  // would be confusing).
+  // would be confusing). Combined into a single router.push so the panel
+  // change and the project change land in one navigation, not two racing
+  // ones reading stale pathname.
   const onOpenProject = (projectId: string) => {
-    setView('all')
-    onProjectChange(projectId)
+    const params = new URLSearchParams(currentSearchParams.toString())
+    params.set('project', projectId)
+    params.delete('feed')
+    const qs = params.toString()
+    router.push(qs ? `/dashboard/board?${qs}` : '/dashboard/board')
   }
 
   // Quick filters are presets that map to specific combinations of the
@@ -1542,23 +1831,29 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       return
     }
     if (kind === 'due') {
-      setStatusFilter([])
-      setPriorityFilter(onlyPriority('urgent') ? [] : ['urgent'])
-      setAssigneeFilter([])
-      setTagFilter([])
+      applyFilters({
+        status: [],
+        priority: onlyPriority('urgent') ? [] : ['urgent'],
+        assignee: [],
+        tag: []
+      })
       return
     }
     if (kind === 'review') {
-      setPriorityFilter([])
-      setStatusFilter(onlyStatus('in_review') ? [] : ['in_review'])
-      setAssigneeFilter([])
-      setTagFilter([])
+      applyFilters({
+        priority: [],
+        status: onlyStatus('in_review') ? [] : ['in_review'],
+        assignee: [],
+        tag: []
+      })
       return
     }
-    setPriorityFilter([])
-    setStatusFilter(onlyStatus('done') ? [] : ['done'])
-    setAssigneeFilter([])
-    setTagFilter([])
+    applyFilters({
+      priority: [],
+      status: onlyStatus('done') ? [] : ['done'],
+      assignee: [],
+      tag: []
+    })
   }
 
   // Plain-language label for whichever view is currently active. Surfaces
@@ -1591,7 +1886,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   return (
     <TaskActionsProvider value={actions}>
       <div
-        className={`fixed inset-0 flex flex-col overflow-hidden font-[var(--font-favorit)] ${t.page}`}
+        className={`fixed inset-0 flex flex-col overflow-hidden font-(--font-favorit) ${t.page}`}
       >
         <div
           onWheel={(e) => {
@@ -1601,19 +1896,37 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
             )
             if (scroller) scroller.scrollBy({ top: e.deltaY, behavior: 'auto' })
           }}
-          className={`relative flex h-11 shrink-0 items-center justify-between border-b px-4 text-xs ${t.topbar}`}
+          className={`relative flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3 text-xs sm:px-4 ${t.topbar}`}
         >
           <Link
             href="/portfolio"
+            aria-label="Back to overview"
             className={`flex items-center gap-1.5 transition ${t.backLink}`}
           >
             <ArrowLeft className="size-3" />
-            Back to overview
+            <span className="hidden sm:inline">Back to overview</span>
           </Link>
           <span
-            className={`pointer-events-none absolute left-1/2 -translate-x-1/2 text-[10px] tracking-[0.25em] uppercase ${t.textMuted}`}
+            aria-live="polite"
+            className={`pointer-events-none absolute left-1/2 hidden -translate-x-1/2 truncate text-[11px] tracking-[0.05em] sm:inline ${t.textMuted}`}
           >
-            Verbivore · Task Handoff
+            <span
+              key={wordmarkPhase}
+              className="animate-in fade-in duration-700"
+            >
+              {showGreetingPhase ? (
+                <>
+                  <span aria-hidden className="mr-1">
+                    {greeting.emoji}
+                  </span>
+                  {greeting.text}, {firstName}
+                </>
+              ) : (
+                <span className="tracking-[0.25em] uppercase">
+                  Verbivore · Task Handoff
+                </span>
+              )}
+            </span>
           </span>
           <div className="flex items-center gap-3">
             {assigneeFilter.length > 0 && (
@@ -1631,7 +1944,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 className={`flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-1.5 text-[11px] transition ${t.btn}`}
               >
                 <span
-                  className={`text-[9px] tracking-[0.22em] uppercase ${t.textSubtle}`}
+                  className={`hidden text-[9px] tracking-[0.22em] uppercase sm:inline ${t.textSubtle}`}
                 >
                   Inspecting
                 </span>
@@ -1650,14 +1963,16 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   })}
                   {assigneeFilter.length > 3 && (
                     <span
-                      className={`ring-background flex size-[18px] items-center justify-center rounded-full text-[9px] font-semibold ring-1 ${t.surfaceMuted} ${t.text}`}
+                      className={`ring-background flex size-4.5 items-center justify-center rounded-full text-[9px] font-semibold ring-1 ${t.surfaceMuted} ${t.text}`}
                     >
                       +{assigneeFilter.length - 3}
                     </span>
                   )}
                 </div>
                 {assigneeFilter.length === 1 && (
-                  <span className={`max-w-[120px] truncate ${t.text}`}>
+                  <span
+                    className={`hidden max-w-30 truncate sm:inline ${t.text}`}
+                  >
                     {team.find((m) => m.id === assigneeFilter[0])?.name ??
                       'unknown'}
                   </span>
@@ -1665,12 +1980,12 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 <X className={`size-3 ${t.textSubtle}`} />
               </button>
             )}
-            <CurrentUserMenu user={currentUser} isAdmin={isAdmin} />
+            <CurrentUserMenu user={currentUser} />
           </div>
         </div>
 
         <div className="flex min-h-0 flex-1">
-          <div className="min-h-0 w-56 shrink-0">
+          <div className="hidden min-h-0 w-56 shrink-0 md:block">
             <Sidebar
               activeView={
                 view === 'projects' ||
@@ -1696,6 +2011,44 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
             />
           </div>
 
+          <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+            <SheetContent
+              side="left"
+              className="w-64 max-w-[80vw] gap-0 p-0 md:hidden"
+            >
+              <SheetTitle className="sr-only">Navigation</SheetTitle>
+              <Sidebar
+                activeView={
+                  view === 'projects' ||
+                  view === 'updates' ||
+                  view === 'settings' ||
+                  view === 'symbols' ||
+                  view === 'archive'
+                    ? 'all'
+                    : view
+                }
+                onView={(v) => {
+                  setView(v)
+                  setMobileNavOpen(false)
+                }}
+                statusFilter={statusFilter}
+                onToggleStatus={toggleStatus}
+                onClearStatus={() => setStatusFilter([])}
+                assigneeFilter={assigneeFilter}
+                onToggleAssignee={toggleAssignee}
+                onClearAssignee={() => setAssigneeFilter([])}
+                counts={counts}
+                secondary={view}
+                onSecondary={(v) => {
+                  setView(v)
+                  setMobileNavOpen(false)
+                }}
+                showHints={showHints}
+                currentUserId={currentUserId}
+              />
+            </SheetContent>
+          </Sheet>
+
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             {isPending && (
               <div
@@ -1709,7 +2062,6 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               query={query}
               onQuery={setQuery}
               tab={tab}
-              onTab={setTab}
               totals={totals}
               onNewTask={() => openNewTask()}
               onToggleFilter={() => setFilterOpen((v) => !v)}
@@ -1718,6 +2070,12 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               onGroupBy={(g) => {
                 setGroupBy(g)
                 setGroupOpen(false)
+                // Group only changes anything on the Board. Bounce the
+                // user there so the choice is immediately visible.
+                if (tab !== 'board') {
+                  const qs = currentSearchParams.toString()
+                  router.push(qs ? `/dashboard/board?${qs}` : '/dashboard/board')
+                }
               }}
               groupOpen={groupOpen}
               onToggleGroup={() => setGroupOpen((v) => !v)}
@@ -1770,6 +2128,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   })}
                 />
               }
+              onOpenMobileNav={() => setMobileNavOpen(true)}
             />
 
             <FilterPanel
@@ -1971,7 +2330,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                       >
                         {/* Scrollbars hidden (chrome + firefox + ie) but scroll
                             still works via wheel/trackpad. No gradient hint. */}
-                        <div className="flex min-h-0 flex-1 [scrollbar-width:none] gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                        <div className="flex min-h-0 flex-1 scrollbar-none gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                           {groups.map((g) => {
                             const status =
                               groupBy === 'status'
@@ -1986,11 +2345,20 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                                 tasks={g.items}
                                 selectedTaskId={selectedId}
                                 onSelect={setSelectedId}
-                                onAdd={
-                                  groupBy === 'status'
-                                    ? () => openNewTask(g.key as TaskStatus)
-                                    : undefined
-                                }
+                                onAdd={() => {
+                                  if (groupBy === 'status') {
+                                    openNewTask(g.key as TaskStatus)
+                                  } else if (groupBy === 'priority') {
+                                    openNewTaskWith({
+                                      priority: g.key as TaskPriority
+                                    })
+                                  } else {
+                                    openNewTaskWith({
+                                      assigneeId:
+                                        g.key === 'unassigned' ? null : g.key
+                                    })
+                                  }
+                                }}
                                 density={density}
                                 wipLimit={wipLimit}
                                 droppableId={`col:${status?.id ?? g.key}`}
@@ -2006,7 +2374,11 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                                 )
                                 return t ? (
                                   <div className="rotate-1 opacity-95 shadow-2xl">
-                                    <TaskCard task={t} draggable={false} />
+                                    <TaskCard
+                                      task={t}
+                                      draggable={false}
+                                      density={density}
+                                    />
                                   </div>
                                 ) : null
                               })()
@@ -2062,6 +2434,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   refsByProject={projectExternalRefs}
                   onAddProjectRef={addProjectExternalRef}
                   onRemoveProjectRef={removeProjectExternalRef}
+                  onRenameProjectRef={renameProjectExternalRef}
                   renderCopySlot={(projectId) => {
                     const project = initial.projects.find(
                       (p) => p.id === projectId
@@ -2069,7 +2442,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                     if (!project) return null
                     return (
                       <CopyButton
-                        primaryLabel="Copy project"
+                        primaryLabel=""
+                        iconOnly
                         primaryToastLabel={`${project.name} as Markdown`}
                         primaryGetContent={() =>
                           projectToMarkdown(project, exportCtx)
@@ -2127,16 +2501,28 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   refsByTask={externalRefs}
                   refsByProject={projectExternalRefs}
                   onFilterByStatus={(status) => {
-                    setStatusFilter([status])
-                    setPriorityFilter([])
-                    setView('all')
-                    setTab('board')
+                    const params = new URLSearchParams(
+                      currentSearchParams.toString()
+                    )
+                    params.set('status', status)
+                    params.delete('priority')
+                    params.delete('feed')
+                    const qs = params.toString()
+                    router.push(
+                      qs ? `/dashboard/board?${qs}` : '/dashboard/board'
+                    )
                   }}
                   onFilterByPriority={(priority) => {
-                    setPriorityFilter([priority])
-                    setStatusFilter([])
-                    setView('all')
-                    setTab('board')
+                    const params = new URLSearchParams(
+                      currentSearchParams.toString()
+                    )
+                    params.set('priority', priority)
+                    params.delete('status')
+                    params.delete('feed')
+                    const qs = params.toString()
+                    router.push(
+                      qs ? `/dashboard/board?${qs}` : '/dashboard/board'
+                    )
                   }}
                 />
               )}
@@ -2146,6 +2532,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   tasks={visibleTasks}
                   comments={comments}
                   activity={activity}
+                  currentUserId={currentUserId}
+                  accessTier={initial.currentMember.accessTier}
                   onChangeStatus={updateStatus}
                   onChangePriority={updatePriority}
                   onChangeAssignee={updateAssignee}
@@ -2158,11 +2546,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   setDensity={setDensity}
                   wipLimit={wipLimit}
                   setWipLimit={setWipLimit}
-                  notifyOnAssign={notifyOnAssign}
-                  setNotifyOnAssign={setNotifyOnAssign}
                   showHints={showHints}
                   setShowHints={setShowHints}
-                  onClearTasks={refreshFromServer}
                 />
               )}
             </main>
@@ -2176,7 +2561,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               <SheetContent
                 side="right"
                 showCloseButton={false}
-                className={`w-full p-0 sm:!max-w-[640px] ${t.detail}`}
+                className={`w-full p-0 sm:max-w-160! ${t.detail}`}
               >
                 <VisuallyHidden.Root>
                   <SheetTitle>
@@ -2191,11 +2576,13 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                     externalRefs={externalRefs[selected.id] ?? []}
                     currentUserId={currentUserId}
                     isAdmin={isAdmin}
+                    accessTier={initial.currentMember.accessTier}
                     onClose={() => setSelectedId(null)}
                     onChangeStatus={updateStatus}
                     onChangePriority={updatePriority}
                     onChangeAssignee={updateAssignee}
                     onChangeLead={updateLead}
+                    onChangeDueDate={updateDueDate}
                     onAddComment={addComment}
                     onEditComment={editComment}
                     onDeleteComment={deleteComment}
@@ -2298,12 +2685,33 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         <NewTaskModal
           open={newTaskOpen}
           defaultStatus={newTaskColumn}
+          defaultAssigneeId={newTaskAssigneeId}
+          defaultPriority={newTaskPriority}
           members={team}
           labels={initial.labels}
           projects={initial.allActiveProjects}
           defaultProjectId={
             initial.currentProjectId ?? initial.defaultProjectId
           }
+          // Pre-fill due date with the active sprint's end so tasks created
+          // inside a running sprint inherit its deadline. Prefer the
+          // 'current' sprint; fall back to the soonest 'upcoming' one;
+          // otherwise no default. Scoped to the project the modal will
+          // create into.
+          defaultDueDate={(() => {
+            const targetProjectId =
+              initial.currentProjectId ?? initial.defaultProjectId
+            if (!targetProjectId) return null
+            const projectSprints = sprints.filter(
+              (s) => s.projectId === targetProjectId
+            )
+            const current = projectSprints.find((s) => s.status === 'current')
+            if (current) return current.toIso
+            const upcoming = projectSprints
+              .filter((s) => s.status === 'upcoming')
+              .sort((a, b) => a.fromIso.localeCompare(b.fromIso))[0]
+            return upcoming?.toIso ?? null
+          })()}
           candidateTasks={tasks.map((task) => ({
             id: task.id,
             ref: task.ref,
@@ -2319,13 +2727,9 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   )
 }
 
-function CurrentUserMenu({
-  user,
-  isAdmin
-}: {
-  user: BoardAssignee
-  isAdmin: boolean
-}) {
+function CurrentUserMenu({ user }: { user: BoardAssignee }) {
+  const isAdmin = user.role === 'admin'
+  const isLead = user.role === 'lead'
   const { t } = useDashTheme()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -2339,7 +2743,7 @@ function CurrentUserMenu({
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [open])
 
-  const roleLabel = isAdmin ? 'Admin' : 'Member'
+  const roleLabel = isAdmin ? 'Admin' : isLead ? 'Lead' : 'Member'
 
   return (
     <div className="relative" ref={ref}>
@@ -2361,7 +2765,9 @@ function CurrentUserMenu({
           className={`rounded px-1.5 py-0.5 text-[9px] tracking-wider uppercase ${
             isAdmin
               ? 'bg-teal-500/15 text-teal-500'
-              : `${t.surfaceMuted} ${t.textMuted}`
+              : isLead
+                ? 'bg-amber-500/15 text-amber-500'
+                : `${t.surfaceMuted} ${t.textMuted}`
           }`}
         >
           {roleLabel}

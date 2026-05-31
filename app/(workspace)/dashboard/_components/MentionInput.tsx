@@ -28,16 +28,59 @@ function buildMentionTargets(team: BoardAssignee[]): MentionTarget[] {
   ]
 }
 
-// Color palette assigned deterministically by target id, so the same
-// person reads in the same color every time they're mentioned in the
-// same task and two different people mentioned next to each other are
-// visually distinct.
+// Explicit per-name mention colors. Matched on the LOWERCASED FIRST WORD
+// of the target's label so "Maryam Baig" and "maryam" both resolve. Add
+// new entries here when teammates onboard; anyone not listed falls back
+// to the hash palette below so colors stay deterministic + distinct.
+const NAMED_MENTION_COLORS: Record<string, { bg: string; text: string }> = {
+  team: {
+    // The "everyone" mention - kept visually distinct from any single
+    // person so it doesn't blur into one teammate's chip.
+    bg: 'bg-teal-500/15',
+    text: 'text-teal-700 dark:text-teal-300'
+  },
+  iona: {
+    bg: 'bg-emerald-500/15',
+    text: 'text-emerald-700 dark:text-emerald-300'
+  },
+  maryam: {
+    bg: 'bg-violet-500/15',
+    text: 'text-violet-700 dark:text-violet-300'
+  },
+  seif: {
+    // "Black" requested - use zinc so it reads on both light + dark
+    // backgrounds (true black would vanish in dark mode).
+    bg: 'bg-zinc-500/20',
+    text: 'text-zinc-900 dark:text-zinc-100'
+  },
+  seifelesllam: {
+    bg: 'bg-zinc-500/20',
+    text: 'text-zinc-900 dark:text-zinc-100'
+  },
+  asim: {
+    bg: 'bg-red-500/15',
+    text: 'text-red-700 dark:text-red-300'
+  },
+  corentin: {
+    bg: 'bg-sky-500/15',
+    text: 'text-sky-700 dark:text-sky-300'
+  },
+  oheneba: {
+    bg: 'bg-amber-500/20',
+    text: 'text-amber-700 dark:text-amber-300'
+  },
+  radmila: {
+    bg: 'bg-pink-500/15',
+    text: 'text-pink-700 dark:text-pink-300'
+  }
+}
+
+// Fallback palette - assigned deterministically by id so unlisted
+// teammates still get a stable, distinct color.
 const MENTION_PALETTE: { bg: string; text: string }[] = [
-  { bg: 'bg-teal-500/15', text: 'text-teal-700 dark:text-teal-300' },
   { bg: 'bg-violet-500/15', text: 'text-violet-700 dark:text-violet-300' },
   { bg: 'bg-amber-500/20', text: 'text-amber-700 dark:text-amber-300' },
   { bg: 'bg-sky-500/15', text: 'text-sky-700 dark:text-sky-300' },
-  { bg: 'bg-emerald-500/15', text: 'text-emerald-700 dark:text-emerald-300' },
   { bg: 'bg-rose-500/15', text: 'text-rose-700 dark:text-rose-300' },
   { bg: 'bg-fuchsia-500/15', text: 'text-fuchsia-700 dark:text-fuchsia-300' }
 ]
@@ -48,7 +91,15 @@ function hashString(s: string): number {
   return Math.abs(h)
 }
 
-function mentionColor(id: string): { bg: string; text: string } {
+function mentionColor(
+  id: string,
+  label?: string
+): { bg: string; text: string } {
+  if (label) {
+    const firstName = label.trim().split(/\s+/)[0]?.toLowerCase() ?? ''
+    const override = NAMED_MENTION_COLORS[firstName]
+    if (override) return override
+  }
   return MENTION_PALETTE[hashString(id) % MENTION_PALETTE.length]
 }
 
@@ -120,11 +171,15 @@ export default function MentionInput({
     const before = value.slice(0, trigger.start)
     const after = value.slice(trigger.start + 1 + trigger.query.length)
     const inserted = `@${target.label}`
-    const next = `${before}${inserted} ${after}`
+    // Drop the trailing ", " unless the next thing is already punctuation
+    // or whitespace, so picking a mention twice in a row doesn't produce
+    // "@Maryam Baig, , @Asim Selim, ".
+    const trailing = /^[\s,.;:!?]/.test(after) ? '' : ', '
+    const next = `${before}${inserted}${trailing}${after}`
     setValue(next)
     setTrigger({ active: false, query: '', start: -1 })
     requestAnimationFrame(() => {
-      const pos = (before + inserted + ' ').length
+      const pos = (before + inserted + trailing).length
       inputRef.current?.setSelectionRange(pos, pos)
       inputRef.current?.focus()
     })
@@ -217,7 +272,8 @@ export default function MentionInput({
               if (!tok.targetId) {
                 return <span key={i}>{tok.text}</span>
               }
-              const c = mentionColor(tok.targetId)
+              const target = targets.find((tt) => tt.id === tok.targetId)
+              const c = mentionColor(tok.targetId, target?.label)
               return (
                 <span key={i} className={`rounded-sm ${c.bg} ${c.text}`}>
                   {tok.text}
@@ -328,31 +384,56 @@ export default function MentionInput({
 }
 
 export function renderMentionedBody(body: string, team: BoardAssignee[]) {
-  const pattern = /(@[A-Za-z][A-Za-zÇŞĞıİİöÖüÜğçşı.\s]*[A-Za-zÇŞĞıİİöÖüÜğçş])/g
+  // Walk the body the same way the input overlay does: at each '@', try
+  // to match the longest known target label by EXACT slice. Only that
+  // slice is colored - anything after stays plain text.
+  //
+  // The earlier regex-based approach matched whitespace inside the
+  // mention bracket, so a comment like "@Maryam Baig thanks for the
+  // review" colored the entire tail (target name was a startsWith
+  // prefix of the over-greedy match).
   const targets = buildMentionTargets(team)
-  const byLabel = new Map(
-    targets.map((target) => [target.label.toLowerCase(), target])
+  // Longest label first so "@Karim Saleh" wins over "@Karim".
+  const sortedTargets = [...targets].sort(
+    (a, b) => b.label.length - a.label.length
   )
-  return body.split(pattern).map((chunk, i) => {
-    if (!chunk.startsWith('@')) return <span key={i}>{chunk}</span>
-    const label = chunk.slice(1).trim()
-    // Match longest prefix so "@Karim Saleh extra words" still highlights
-    // the name. Try exact first, then prefix.
-    let matched = byLabel.get(label.toLowerCase()) ?? null
-    if (!matched) {
-      matched =
-        targets
-          .filter((target) =>
-            label.toLowerCase().startsWith(target.label.toLowerCase())
-          )
-          .sort((a, b) => b.label.length - a.label.length)[0] ?? null
+
+  const nodes: React.ReactNode[] = []
+  let buffer = ''
+  let i = 0
+  let key = 0
+  const flushBuffer = () => {
+    if (buffer) {
+      nodes.push(<span key={key++}>{buffer}</span>)
+      buffer = ''
     }
-    if (!matched) return <span key={i}>{chunk}</span>
-    const c = mentionColor(matched.id)
-    return (
-      <span key={i} className={`rounded-sm ${c.bg} ${c.text}`}>
-        {chunk}
-      </span>
-    )
-  })
+  }
+  while (i < body.length) {
+    if (body[i] === '@') {
+      let matched: MentionTarget | null = null
+      for (const target of sortedTargets) {
+        const candidate = body.slice(i + 1, i + 1 + target.label.length)
+        if (candidate.toLowerCase() === target.label.toLowerCase()) {
+          matched = target
+          break
+        }
+      }
+      if (matched) {
+        flushBuffer()
+        const text = `@${body.slice(i + 1, i + 1 + matched.label.length)}`
+        const c = mentionColor(matched.id, matched.label)
+        nodes.push(
+          <span key={key++} className={`rounded-sm ${c.bg} ${c.text}`}>
+            {text}
+          </span>
+        )
+        i += 1 + matched.label.length
+        continue
+      }
+    }
+    buffer += body[i]
+    i++
+  }
+  flushBuffer()
+  return nodes
 }

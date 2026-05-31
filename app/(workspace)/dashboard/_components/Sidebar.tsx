@@ -39,9 +39,9 @@ const HINTS = {
   inbox: 'Tasks ready to start (Todo) or waiting for review.',
   mentions: 'Tasks where someone @-mentioned you in a comment.',
   archive: 'Completed sprints and old tasks.',
-  projects: 'Switch projects and manage members.',
+  projects: 'Discover and switch to another project',
   updates:
-    'Recent activity on your projects — status changes, comments, mentions.',
+    'Recent activity on your projects. Status changes, comments, mentions.',
   symbols: 'Reference for the status and priority icons used on cards.',
   settings: 'Card density, WIP limits, notifications, and help hints.'
 } as const
@@ -76,7 +76,6 @@ interface SidebarProps {
 }
 
 export default function Sidebar({
-  activeView,
   onView,
   statusFilter,
   onToggleStatus,
@@ -148,7 +147,7 @@ export default function Sidebar({
   return (
     <TooltipProvider delayDuration={150}>
       <aside
-        className={`flex h-full min-w-0 [scrollbar-width:none] flex-col gap-5 overflow-y-auto border-r px-3 py-4 [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden ${t.sidebar}`}
+        className={`flex h-full min-w-0 scrollbar-none flex-col gap-5 overflow-y-auto border-r px-3 py-4 [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden ${t.sidebar}`}
       >
         <Link
           href="/dashboard"
@@ -156,7 +155,7 @@ export default function Sidebar({
           title="Back to all Tasks"
         >
           <Image
-            src="/logo-icon.png"
+            src="/logos/logo-icon.png"
             alt="Verbivore"
             width={24}
             height={24}

@@ -1,6 +1,13 @@
 'use client'
 
-import { Copy, Trash2, ExternalLink, Files, Filter } from 'lucide-react'
+import {
+  Copy,
+  Trash2,
+  ExternalLink,
+  Files,
+  Filter,
+  Share2
+} from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { BoardTask } from './boardData'
@@ -27,6 +34,7 @@ interface TaskCardProps {
   // When false, the card is rendered as a plain element (no sortable
   // hooks). Used for the DragOverlay rendering and the list view.
   draggable?: boolean
+  density?: 'compact' | 'cozy'
   onClick?: () => void
 }
 
@@ -60,8 +68,10 @@ export default function TaskCard({
   task,
   selected,
   draggable = true,
+  density = 'cozy',
   onClick
 }: TaskCardProps) {
+  const compact = density === 'compact'
   const { t } = useDashTheme()
   const { open } = useContextMenu()
   const a = useTaskActions()
@@ -157,6 +167,12 @@ export default function TaskCard({
         onSelect: () => a.copyRef(task.ref)
       },
       {
+        id: 'share',
+        label: 'Share link',
+        icon: <Share2 className="size-3.5" />,
+        onSelect: () => a.copyShareLink(task.ref)
+      },
+      {
         id: 'filter-status',
         label: `Filter by ${status.label}`,
         icon: <Filter className="size-3.5" />,
@@ -183,7 +199,9 @@ export default function TaskCard({
       onContextMenu={handleContext}
       data-card
       data-selected={selected ? 'true' : undefined}
-      className={`group w-full text-left rounded-lg border transition px-3 py-2.5 flex flex-col gap-2 ${t.card} ${
+      className={`group w-full text-left rounded-lg border transition flex flex-col ${
+        compact ? 'px-2 py-1.5 gap-1' : 'px-3 py-2.5 gap-2'
+      } ${t.card} ${
         selected
           ? 'ring-2 ring-teal-500/40 border-teal-400 dark:border-teal-400/60 shadow-sm'
           : ''
@@ -202,7 +220,9 @@ export default function TaskCard({
         </span>
       </div>
 
-      <p className={`text-[13px] leading-snug ${t.text} line-clamp-2`}>
+      <p
+        className={`${compact ? 'text-[12px]' : 'text-[13px]'} leading-snug ${t.text} line-clamp-2`}
+      >
         {task.title}
       </p>
 
@@ -221,7 +241,7 @@ export default function TaskCard({
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-2 mt-1">
+      <div className={`flex items-center justify-between gap-2 ${compact ? '' : 'mt-1'}`}>
         <div className="flex items-center gap-2">
           <span
             title={PRIORITY_LABEL[task.priority]}

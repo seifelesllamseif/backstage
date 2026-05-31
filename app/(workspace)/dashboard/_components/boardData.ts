@@ -12,6 +12,9 @@ export interface BoardAssignee {
   color: string
   photo?: string
   role?: string
+  // URL-safe handle from team_members.slug. Used to render readable
+  // /dashboard URLs (e.g. ?assignee=asim-selim) instead of UUIDs.
+  slug?: string | null
 }
 
 export interface TaskRelation {
@@ -72,7 +75,21 @@ export interface Sprint {
   taskIds: string[]
 }
 
-export type TaskExternalRefKind = 'issue' | 'pr' | 'commit' | 'doc' | 'link'
+export type TaskExternalRefKind =
+  | 'issue'
+  | 'pr'
+  | 'commit'
+  | 'doc'
+  | 'link'
+  | 'supabase'
+  | 'github'
+  | 'figma'
+  | 'verbivore'
+  | 'vercel'
+  | 'bunny'
+  | 'sentry'
+  | 'gcloud'
+  | 'stripe'
 
 export interface TaskExternalRef {
   id: string

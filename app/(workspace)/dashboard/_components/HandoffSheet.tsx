@@ -15,11 +15,7 @@ import {
   Plus,
   X
 } from 'lucide-react'
-import {
-  Sheet,
-  SheetContent,
-  SheetTitle
-} from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { VisuallyHidden } from 'radix-ui'
 import {
   HANDOFF_FIELDS,
@@ -28,14 +24,8 @@ import {
   type HandoffField,
   type HandoffFieldValues
 } from '@/lib/handoff'
-import {
-  defaultExternalRefLabel,
-  parseExternalRef
-} from '@/lib/externalRef'
-import {
-  fetchTaskHandoff,
-  submitHandoffAndMoveDone
-} from '../actions'
+import { defaultExternalRefLabel, parseExternalRef } from '@/lib/externalRef'
+import { fetchTaskHandoff, submitHandoffForReview } from '../actions'
 import { useDashTheme } from './theme'
 import type {
   BoardAssignee,
@@ -76,6 +66,68 @@ const EMPTY_FIELDS: FieldsState = HANDOFF_FIELDS.reduce((acc, f) => {
   acc[f] = ''
   return acc
 }, {} as FieldsState)
+
+// Quick-pick suggestions for the "Current status" field. Picked from the
+// answers a handoff usually needs: where the work physically lives + a
+// few common stuck states. The user can still write anything; these just
+// seed the textarea with a recognised label.
+const STATUS_SUGGESTIONS = [
+  'Production',
+  'Staging',
+  'Development',
+  'Local',
+  'In review',
+  'Paused',
+  'Blocked'
+]
+
+// localStorage-backed draft so a stray click-outside / Escape / browser
+// refresh doesn't wipe whatever the user just typed. Keyed per task so
+// drafts don't bleed across handoffs. Cleared on successful submit only.
+const DRAFT_KEY_PREFIX = 'handoff-draft:'
+
+function readDraft(taskId: string): Partial<FieldsState> | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(DRAFT_KEY_PREFIX + taskId)
+    if (!raw) return null
+    return JSON.parse(raw) as Partial<FieldsState>
+  } catch {
+    return null
+  }
+}
+
+function writeDraft(taskId: string, fields: FieldsState) {
+  if (typeof window === 'undefined') return
+  try {
+    // Only persist non-empty fields. Avoids overwriting a future reopen
+    // with all-empty values just because the user briefly cleared the
+    // sheet, and keeps the stored payload small.
+    const trimmed: Partial<FieldsState> = {}
+    for (const f of HANDOFF_FIELDS) {
+      if (fields[f].trim().length > 0) trimmed[f] = fields[f]
+    }
+    const key = DRAFT_KEY_PREFIX + taskId
+    if (Object.keys(trimmed).length === 0) {
+      window.localStorage.removeItem(key)
+    } else {
+      window.localStorage.setItem(key, JSON.stringify(trimmed))
+    }
+  } catch {
+    // localStorage disabled / quota exceeded - silently ignore. Worst
+    // case the user loses typing on close, which is the previous status
+    // quo and not a regression.
+  }
+}
+
+function clearDraft(taskId: string) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(DRAFT_KEY_PREFIX + taskId)
+  } catch {
+    // ignore
+  }
+}
 
 function refIcon(kind: TaskExternalRefKind) {
   switch (kind) {
@@ -150,15 +202,28 @@ export default function HandoffSheet({
   const [linkUrl, setLinkUrl] = useState('')
   const [linkErr, setLinkErr] = useState<string | null>(null)
 
-  // Load the existing handoff row when the sheet opens, so we don't make
-  // the user retype anything they already filled in via the task edit page.
-  useEffect(() => {
+  // Reset state during render when the task prop changes (React-recommended
+  // pattern to avoid synchronous setState inside an effect).
+  const [prevTask, setPrevTask] = useState(task)
+  if (prevTask !== task) {
+    setPrevTask(task)
     if (!task) {
       setFields(EMPTY_FIELDS)
       setMissing(new Set())
+    } else {
+      setLoading(true)
+    }
+  }
+
+  // Load the existing handoff row when the sheet opens, so we don't make
+  // the user retype anything they already filled in via the task edit page.
+  // Any in-progress localStorage draft from a prior aborted edit is layered
+  // on top - drafted fields win over the server value so the user resumes
+  // exactly where they left off.
+  useEffect(() => {
+    if (!task) {
       return
     }
-    setLoading(true)
     let cancelled = false
     fetchTaskHandoff(task.id)
       .then((res) => {
@@ -173,6 +238,15 @@ export default function HandoffSheet({
             next[f] = (res.handoff as HandoffFieldValues)[f] ?? ''
           }
         }
+        const draft = readDraft(task.id)
+        if (draft) {
+          for (const f of HANDOFF_FIELDS) {
+            const d = draft[f]
+            if (typeof d === 'string' && d.trim().length > 0) {
+              next[f] = d
+            }
+          }
+        }
         setFields(next)
       })
       .finally(() => {
@@ -183,8 +257,17 @@ export default function HandoffSheet({
     }
   }, [task])
 
-  const filledCount = HANDOFF_FIELDS.filter((f) => fields[f].trim().length > 0)
-    .length
+  // Persist the current field state as a draft on every change. Cheap
+  // synchronous write; runs after the seeding effect so we never overwrite
+  // a freshly-loaded server state with EMPTY_FIELDS.
+  useEffect(() => {
+    if (!task || loading) return
+    writeDraft(task.id, fields)
+  }, [task, fields, loading])
+
+  const filledCount = HANDOFF_FIELDS.filter(
+    (f) => fields[f].trim().length > 0
+  ).length
   const totalCount = HANDOFF_FIELDS.length
   const allFilled = filledCount === totalCount
 
@@ -208,7 +291,7 @@ export default function HandoffSheet({
     startSubmit(async () => {
       const payload: Partial<Record<HandoffField, string>> = {}
       for (const f of HANDOFF_FIELDS) payload[f] = fields[f].trim()
-      const res = await submitHandoffAndMoveDone({
+      const res = await submitHandoffForReview({
         taskId: task.id,
         fields: payload
       })
@@ -223,7 +306,8 @@ export default function HandoffSheet({
         toast.error(res.statusResult.message)
         return
       }
-      toast.success(`${task.ref} marked Done with handoff.`)
+      toast.success(`${task.ref} sent to review.`)
+      clearDraft(task.id)
       onDone(task.id)
       onClose()
     })
@@ -239,7 +323,7 @@ export default function HandoffSheet({
       <SheetContent
         side="right"
         showCloseButton={false}
-        className={`w-full p-0 sm:!max-w-[640px] ${t.detail}`}
+        className={`w-full p-0 sm:max-w-160! ${t.detail}`}
       >
         <VisuallyHidden.Root>
           <SheetTitle>
@@ -258,7 +342,7 @@ export default function HandoffSheet({
               <div className="flex min-w-0 flex-col gap-0.5">
                 <div className="flex items-center gap-2">
                   <span
-                    className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] tracking-[0.22em] tabular-nums uppercase ${t.metaTag}`}
+                    className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] tracking-[0.22em] uppercase tabular-nums ${t.metaTag}`}
                   >
                     {task.ref}
                   </span>
@@ -293,9 +377,9 @@ export default function HandoffSheet({
             <div className="flex-1 overflow-y-auto px-5 py-4">
               <p className={`mb-4 text-xs leading-relaxed ${t.textMuted}`}>
                 Done isn&apos;t just a column move. The next person needs
-                context to keep going. Fill the seven prompts below, then
-                submit to ship the task. Anything you saved earlier from the
-                task edit page is pre-filled.
+                context to keep going. Fill the seven prompts below, then submit
+                to ship the task. Anything you saved earlier from the task edit
+                page is pre-filled.
               </p>
 
               {loading ? (
@@ -339,9 +423,7 @@ export default function HandoffSheet({
                           const parsed = parseExternalRef(ref.url)
                           const label =
                             ref.label ??
-                            (parsed
-                              ? defaultExternalRefLabel(parsed)
-                              : ref.url)
+                            (parsed ? defaultExternalRefLabel(parsed) : ref.url)
                           const Icon = refIcon(ref.kind)
                           return (
                             <li
@@ -435,17 +517,13 @@ export default function HandoffSheet({
                           </button>
                         </div>
                         {linkErr && (
-                          <p className="text-[11px] text-red-500">
-                            {linkErr}
-                          </p>
+                          <p className="text-[11px] text-red-500">{linkErr}</p>
                         )}
                       </div>
                     )}
                   </div>
 
-                  <div
-                    className={`-mx-5 border-t px-5 pt-3 ${t.border}`}
-                  ></div>
+                  <div className={`-mx-5 border-t px-5 pt-3 ${t.border}`}></div>
                   {HANDOFF_FIELDS.map((field) => {
                     const isMissing = missing.has(field)
                     const labelHeader = (
@@ -468,6 +546,63 @@ export default function HandoffSheet({
                       </span>
                     )
 
+                    // "Current status" renders the default textarea with a
+                    // row of quick-pick environment chips on top. Click a
+                    // chip to seed the textarea with that label (e.g.
+                    // "Production", "Local"); free-text after that is up to
+                    // the user. Active chip is detected by case-insensitive
+                    // prefix match so "Production - deployed" still shows
+                    // the Production chip lit.
+                    if (field === 'currentStatus') {
+                      const value = fields[field]
+                      const setValue = (next: string) => {
+                        setFields((cur) => ({ ...cur, [field]: next }))
+                        if (isMissing && next.trim().length > 0) {
+                          setMissing((cur) => {
+                            const set = new Set(cur)
+                            set.delete(field)
+                            return set
+                          })
+                        }
+                      }
+                      return (
+                        <div key={field} className="flex flex-col gap-1.5">
+                          {labelHeader}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {STATUS_SUGGESTIONS.map((s) => {
+                              const active = value
+                                .trim()
+                                .toLowerCase()
+                                .startsWith(s.toLowerCase())
+                              return (
+                                <button
+                                  key={s}
+                                  type="button"
+                                  onClick={() => setValue(s)}
+                                  className={`flex h-6 items-center rounded-full border px-2 text-[11px] transition ${
+                                    active ? t.chipActive : t.chip
+                                  }`}
+                                >
+                                  {s}
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <textarea
+                            value={value}
+                            onChange={(e) => setValue(e.target.value)}
+                            rows={2}
+                            className={`resize-y rounded-md border px-3 py-2 text-xs leading-relaxed ${t.input} ${
+                              isMissing
+                                ? 'border-red-400 dark:border-red-400/60'
+                                : ''
+                            }`}
+                            placeholder={HANDOFF_FIELD_HINTS[field]}
+                          />
+                        </div>
+                      )
+                    }
+
                     // The "Who to ask" field renders as a team-member chip
                     // picker on top + an optional free-text input below for
                     // non-team contacts. The persisted value is a comma-
@@ -478,7 +613,10 @@ export default function HandoffSheet({
                         fields[field],
                         members
                       )
-                      const update = (nextPicked: Set<string>, nextExtra: string) => {
+                      const update = (
+                        nextPicked: Set<string>,
+                        nextExtra: string
+                      ) => {
                         const joined = joinWhoToAsk(
                           nextPicked,
                           nextExtra,
@@ -528,7 +666,7 @@ export default function HandoffSheet({
                                       }`}
                                     >
                                       <Avatar user={m} size={16} />
-                                      <span className="max-w-[120px] truncate">
+                                      <span className="max-w-30 truncate">
                                         {m.name}
                                       </span>
                                     </button>
@@ -539,9 +677,7 @@ export default function HandoffSheet({
                             <input
                               type="text"
                               value={extra}
-                              onChange={(e) =>
-                                update(picked, e.target.value)
-                              }
+                              onChange={(e) => update(picked, e.target.value)}
                               placeholder="Add anyone else (off-team contact, role, etc.)"
                               className={`h-7 rounded-sm border-none bg-transparent px-1 text-[11px] outline-none ${t.textMuted} placeholder:${t.textFaint}`}
                             />
@@ -592,10 +728,10 @@ export default function HandoffSheet({
             >
               <span className={`text-[11px] ${t.textMuted}`}>
                 {allFilled
-                  ? 'All seven prompts filled. Ready to mark Done.'
+                  ? 'All seven prompts filled. Ready to send to review.'
                   : `${totalCount - filledCount} field${
                       totalCount - filledCount === 1 ? '' : 's'
-                    } to go before this can be marked Done.`}
+                    } to go before this can be sent to review.`}
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -618,7 +754,7 @@ export default function HandoffSheet({
                   ) : (
                     <>
                       <CheckCircle2 className="size-3.5" />
-                      Save & mark Done
+                      Save & send to review
                     </>
                   )}
                 </button>
