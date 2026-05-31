@@ -1,1845 +1,274 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
-import { z } from 'zod'
-import { prisma } from '@/lib/prisma'
-import { getCurrentTeamMember, requireAccessTier } from '@/lib/dal'
-import { parseExternalRef } from '@/lib/externalRef'
-import { countMissingFields, isHandoffComplete } from '@/lib/handoff'
-import type { TaskStatus, TaskPriority, RelationKind } from '@prisma/client'
+// Server-action surface for the dashboard. Implementations live in
+// supabase/dashboard/* (Supabase JS). This file wraps each one in a
+// `'use server'` async export so client components can call them.
+//
+// Next.js rule: 'use server' files may only export async functions, no
+// type exports and no `export { … } from …` re-exports. Types live in
+// ./types.
 
-// ─── Bulk-add input validation (decision 0025) ────────────────────────────
-// Shared between client-side parser and this server action so a paste
-// that passes parseBulkTaskJson also passes here. The schema is the
-// contract; if it changes, both surfaces update together.
-const TaskStatusEnum = z.enum([
-  'backlog',
-  'unscoped',
-  'todo',
-  'in_progress',
-  'in_review',
-  'done',
-  'canceled',
-  'duplicate'
-])
-const TaskPriorityEnum = z.enum(['urgent', 'high', 'medium', 'low', 'none'])
-const IsoDate = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD')
+import { fetchDashboardData as fetchDashboardDataImpl } from '@/supabase/dashboard/fetch'
+import { fetchInitial as fetchInitialImpl } from './_components/fetchInitial'
+import {
+  addChecklistItem as addChecklistItemImpl,
+  addComment as addCommentImpl,
+  addProjectExternalRef as addProjectExternalRefImpl,
+  addTaskDependency as addTaskDependencyImpl,
+  addTaskExternalRef as addTaskExternalRefImpl,
+  addTaskToSprint as addTaskToSprintImpl,
+  archiveProjectInPlace as archiveProjectInPlaceImpl,
+  createBulkDashboardTasks as createBulkDashboardTasksImpl,
+  createDashboardTask as createDashboardTaskImpl,
+  createProjectInPlace as createProjectInPlaceImpl,
+  createSprint as createSprintImpl,
+  deleteComment as deleteCommentImpl,
+  deleteDashboardTask as deleteDashboardTaskImpl,
+  deleteSprint as deleteSprintImpl,
+  duplicateDashboardTask as duplicateDashboardTaskImpl,
+  editComment as editCommentImpl,
+  fetchTaskHandoff as fetchTaskHandoffImpl,
+  moveDashboardTask as moveDashboardTaskImpl,
+  removeProjectExternalRef as removeProjectExternalRefImpl,
+  removeTaskDependency as removeTaskDependencyImpl,
+  removeTaskExternalRef as removeTaskExternalRefImpl,
+  removeTaskFromSprint as removeTaskFromSprintImpl,
+  renameProject as renameProjectImpl,
+  setProjectGithubRepo as setProjectGithubRepoImpl,
+  submitHandoffForReview as submitHandoffForReviewImpl,
+  toggleChecklistItem as toggleChecklistItemImpl,
+  unarchiveProject as unarchiveProjectImpl,
+  updateDashboardTaskAssignee as updateDashboardTaskAssigneeImpl,
+  updateDashboardTaskLead as updateDashboardTaskLeadImpl,
+  updateDashboardTaskPriority as updateDashboardTaskPriorityImpl,
+  updateDashboardTaskDueDate as updateDashboardTaskDueDateImpl,
+  updateDashboardTaskStatus as updateDashboardTaskStatusImpl,
+  updateProjectExternalRefLabel as updateProjectExternalRefLabelImpl,
+  updateSprint as updateSprintImpl,
+  updateTaskExternalRefLabel as updateTaskExternalRefLabelImpl,
+} from '@/supabase/dashboard/mutations'
 
-const RelationKindEnum = z.enum([
-  'blocked_by',
-  'blocks',
-  'parent',
-  'sub_issue',
-  'triage'
-])
-
-const BulkDraftSchema = z.object({
-  title: z.string().trim().min(1, 'title is required').max(500),
-  description: z.string().nullish(),
-  status: TaskStatusEnum.optional(),
-  priority: TaskPriorityEnum.optional(),
-  assigneeId: z.string().uuid().nullish(),
-  dueDate: IsoDate.nullish(),
-  labelIds: z.array(z.string().uuid()).optional(),
-  newLabelNames: z.array(z.string().trim().min(1).max(64)).optional(),
-  // Optional relations to existing tasks (by ref). Each entry creates
-  // a TaskDependency row after the source task is created in the same
-  // transaction. Unknown refs are silently skipped server-side.
-  relations: z
-    .array(z.object({ kind: RelationKindEnum, ref: z.string().trim().min(1) }))
-    .optional()
-})
-
-const CreateBulkInputSchema = z.object({
-  projectId: z.string().uuid('projectId must be a valid UUID'),
-  drafts: z
-    .array(BulkDraftSchema)
-    .min(1, 'at least one task is required')
-    .max(50, 'too many tasks in one batch — split into smaller groups')
-})
-
-// Shared shape for any status mutation that runs through the slice-2
-// handoff gate (decision 0015, 0022). Keep this in sync with the
-// slice-1 board's StatusChangeResult in projects/[id]/actions.ts —
-// when 3b lands drag-and-drop, both surfaces consume this contract.
-export type StatusChangeResult =
-  | { ok: true }
-  | {
-      ok: false
-      reason: 'handoff-incomplete' | 'generic'
-      message: string
-      missingCount?: number
-      taskUrl?: string
-    }
-
-// ─── Types ────────────────────────────────────────────────────────────────
-
-export type DashboardTask = Awaited<
-  ReturnType<typeof fetchDashboardData>
->['tasks'][number]
-export type DashboardMember = Awaited<
-  ReturnType<typeof fetchDashboardData>
->['members'][number]
-export type DashboardProject = Awaited<
-  ReturnType<typeof fetchDashboardData>
->['projects'][number]
-
-// ─── Read ─────────────────────────────────────────────────────────────────
-
-export async function fetchDashboardData(projectId?: string) {
-  const member = await getCurrentTeamMember()
-  if (!member) throw new Error('Not signed in.')
-
-  const isAdmin = member.accessTier === 'admin'
-
-  // Non-admins see only "their projects" — projects where they have ≥1
-  // assigned task. There's no ProjectMember table yet, so project
-  // membership is derived from task assignments. Admins see everything.
-  let myProjectIds: string[] | null = null
-  if (!isAdmin) {
-    const rows = await prisma.task.findMany({
-      where: { companyId: member.companyId, assigneeId: member.id },
-      select: { projectId: true },
-      distinct: ['projectId']
-    })
-    myProjectIds = rows.map((r) => r.projectId)
-    // If the URL asks for a project the member isn't on, lock the scope
-    // to an empty set so they see nothing for it (no information leak).
-    if (projectId && !myProjectIds.includes(projectId)) {
-      myProjectIds = []
-    }
-  }
-
-  // Effective project filter for the tasks query: URL projectId narrows
-  // further within the scope; for non-admins, scope is myProjectIds.
-  const projectFilter: { projectId?: string | { in: string[] } } = projectId
-    ? { projectId }
-    : myProjectIds !== null
-      ? { projectId: { in: myProjectIds } }
-      : {}
-
-  const taskWhere = {
-    companyId: member.companyId,
-    ...projectFilter
-  }
-
-  // Tasks first — we use their assigneeIds to derive the "project team"
-  // and their ids to scope activity/comments. At current scale this serial
-  // step costs a few ms; we get correctness in exchange.
-  const tasks = await prisma.task.findMany({
-    where: taskWhere,
-    include: {
-      assignee: {
-        select: {
-          id: true,
-          fullName: true,
-          avatarUrl: true,
-          accessTier: true
-        }
-      },
-      lead: {
-        select: {
-          id: true,
-          fullName: true,
-          avatarUrl: true,
-          accessTier: true
-        }
-      },
-      project: { select: { id: true, name: true } },
-      labels: { include: { label: true } },
-      checklist: { orderBy: { sortOrder: 'asc' } },
-      depsOut: {
-        include: {
-          dependsOn: { select: { id: true, ref: true, title: true } }
-        }
-      },
-      depsIn: {
-        include: {
-          task: { select: { id: true, ref: true, title: true } }
-        }
-      },
-      sprintTasks: {
-        include: { sprint: { select: { id: true, name: true } } }
-      }
-    },
-    // Within-column ordering: explicit sortOrder first (3b drag/drop),
-    // createdAt as fallback for rows that pre-date the migration.
-    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }]
-  })
-
-  const taskIds = tasks.map((t) => t.id)
-
-  // "Project team" for non-admins: distinct assignees on the visible
-  // tasks, always including the current member so they can see themselves
-  // in pickers even before they're assigned anything.
-  const teamMemberIds = new Set<string>([member.id])
-  for (const t of tasks) if (t.assigneeId) teamMemberIds.add(t.assigneeId)
-
-  const [
-    members,
-    projects,
-    allActiveProjects,
-    labels,
-    sprints,
-    comments,
-    activity,
-    externalRefs,
-    projectExternalRefs
-  ] = await Promise.all([
-      prisma.teamMember.findMany({
-        where: {
-          companyId: member.companyId,
-          ...(myProjectIds !== null ? { id: { in: [...teamMemberIds] } } : {})
-        },
-        select: {
-          id: true,
-          fullName: true,
-          avatarUrl: true,
-          accessTier: true
-        },
-        orderBy: { fullName: 'asc' }
-      }),
-      prisma.project.findMany({
-        where: {
-          companyId: member.companyId,
-          ...(myProjectIds !== null ? { id: { in: myProjectIds } } : {})
-        },
-        select: {
-          id: true,
-          name: true,
-          kind: true,
-          isArchived: true,
-          githubRepo: true
-        },
-        orderBy: [{ isArchived: 'asc' }, { name: 'asc' }]
-      }),
-      // Full active-project list, ignoring the per-member task scoping. Used
-      // by the bulk-add picker so a member with no tasks yet can still pick
-      // a target project to create *into*. The scoped `projects` above still
-      // drives breadcrumb / panels / view filters — this list is write-only.
-      prisma.project.findMany({
-        where: { companyId: member.companyId, isArchived: false },
-        select: { id: true, name: true },
-        orderBy: { name: 'asc' }
-      }),
-      prisma.label.findMany({
-        where: { companyId: member.companyId },
-        orderBy: { name: 'asc' }
-      }),
-      prisma.sprint.findMany({
-        where: {
-          companyId: member.companyId,
-          ...(projectId
-            ? { projectId }
-            : myProjectIds !== null
-              ? { projectId: { in: myProjectIds } }
-              : {})
-        },
-        include: { tasks: { select: { taskId: true } } },
-        orderBy: [{ status: 'asc' }, { number: 'desc' }]
-      }),
-      // Comments + activity scoped to the visible task set, so non-admins
-      // never load rows for tasks outside their projects.
-      prisma.taskComment.findMany({
-        where: {
-          companyId: member.companyId,
-          taskId: { in: taskIds }
-        },
-        include: {
-          author: {
-            select: { id: true, fullName: true }
-          }
-        },
-        orderBy: { createdAt: 'asc' }
-      }),
-      // activity_log.entity_id isn't a true FK (generic string), but the
-      // (entityType, entityId) index makes the IN lookup efficient.
-      prisma.activityLog.findMany({
-        where: {
-          companyId: member.companyId,
-          entityType: 'task',
-          entityId: { in: taskIds }
-        },
-        include: {
-          actor: {
-            select: { id: true, fullName: true }
-          }
-        },
-        orderBy: { createdAt: 'asc' }
-      }),
-      // External refs (PR / issue / commit / doc / link) scoped to the
-      // visible task set. Like comments + activity, they ride along with
-      // their parent task — no separate fetch on detail open.
-      prisma.taskExternalRef.findMany({
-        where: {
-          companyId: member.companyId,
-          taskId: { in: taskIds }
-        },
-        orderBy: { createdAt: 'asc' }
-      }),
-      // Project-level external refs (audit trackers, brief docs, etc).
-      // Scoped to the same project visibility window as `projects` above.
-      prisma.projectExternalRef.findMany({
-        where: {
-          companyId: member.companyId,
-          ...(myProjectIds !== null
-            ? { projectId: { in: myProjectIds } }
-            : {})
-        },
-        orderBy: { createdAt: 'asc' }
-      })
-    ])
-
-  return {
-    tasks,
-    members,
-    projects,
-    allActiveProjects,
-    labels,
-    sprints,
-    comments,
-    activity,
-    externalRefs,
-    projectExternalRefs,
-    currentMember: member
-  }
+export async function fetchDashboardData(
+  ...args: Parameters<typeof fetchDashboardDataImpl>
+) {
+  return fetchDashboardDataImpl(...args)
 }
 
-// ─── Task Mutations ───────────────────────────────────────────────────────
-
-export async function createDashboardTask(data: {
-  title: string
-  status?: TaskStatus
-  priority?: TaskPriority
-  projectId: string
-  assigneeId?: string | null
-  leadId?: string | null
-  dueDate?: string | null
-  labelIds?: string[]
-  // Optional dependency rows to create alongside the task. Each entry
-  // points at an existing task by ref; unknown refs are skipped quietly
-  // so a single bad input doesn't abort the create. Same shape as the
-  // bulk action.
-  relations?: { kind: RelationKind; ref: string }[]
-}) {
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  // Generate sequential ref
-  const lastTask = await prisma.task.findFirst({
-    where: { projectId: data.projectId },
-    orderBy: { seqNumber: 'desc' },
-    select: { seqNumber: true }
-  })
-  const nextSeq = (lastTask?.seqNumber ?? 0) + 1
-
-  const project = await prisma.project.findFirst({
-    where: { id: data.projectId, companyId: member.companyId },
-    select: { name: true }
-  })
-  if (!project) return { error: 'Project not found.' }
-
-  // Generate ref prefix from project name (first word, uppercase, max 4 chars)
-  const prefix = project.name.split(/\s+/)[0].toUpperCase().slice(0, 4)
-  const ref = `${prefix}-${nextSeq}`
-
-  const task = await prisma.task.create({
-    data: {
-      companyId: member.companyId,
-      projectId: data.projectId,
-      title: data.title,
-      status: data.status ?? 'backlog',
-      priority: data.priority ?? 'none',
-      ref,
-      seqNumber: nextSeq,
-      assigneeId: data.assigneeId ?? null,
-      leadId: data.leadId ?? null,
-      dueDate: data.dueDate ? new Date(data.dueDate) : null,
-      createdBy: member.id,
-      labels: data.labelIds?.length
-        ? { create: data.labelIds.map((labelId) => ({ labelId })) }
-        : undefined
-    }
-  })
-
-  // Attach dependency rows by looking up the target ref within the
-  // current company. Unknown refs are silently skipped — the task
-  // itself is already created and one bad ref shouldn't poison the
-  // whole flow.
-  if (data.relations && data.relations.length > 0) {
-    const refs = [...new Set(data.relations.map((r) => r.ref))]
-    const targets = await prisma.task.findMany({
-      where: { companyId: member.companyId, ref: { in: refs } },
-      select: { id: true, ref: true }
-    })
-    const idByRef = new Map(targets.map((t) => [t.ref ?? '', t.id]))
-    const rows = data.relations
-      .map((r) => {
-        const target = idByRef.get(r.ref)
-        if (!target || target === task.id) return null
-        return {
-          companyId: member.companyId,
-          taskId: task.id,
-          dependsOnTaskId: target,
-          kind: r.kind
-        }
-      })
-      .filter((row): row is NonNullable<typeof row> => row !== null)
-    if (rows.length > 0) {
-      await prisma.taskDependency.createMany({
-        data: rows,
-        skipDuplicates: true
-      })
-    }
-  }
-
-  await logActivity(
-    member.companyId,
-    member.id,
-    'task.created',
-    'task',
-    task.id
-  )
-  revalidatePath('/dashboard')
-  return { task }
+// Client-callable wrapper around fetchInitial. The shell mounts client-side
+// and uses React Query to fetch + cache this, so tab navigation hits the
+// cache (no skeleton flash) and only project switches refetch.
+export async function fetchInitial(
+  ...args: Parameters<typeof fetchInitialImpl>
+) {
+  return fetchInitialImpl(...args)
 }
 
-// Add a single dependency row between two existing tasks. Used by the
-// inline picker on the task detail panel. Idempotent via the (taskId,
-// dependsOnTaskId) unique index.
-const AddDepInput = z.object({
-  taskId: z.string().uuid(),
-  dependsOnRef: z.string().trim().min(1).max(64),
-  kind: z.enum(['blocked_by', 'blocks', 'parent', 'sub_issue', 'triage'])
-})
+export async function createDashboardTask(
+  ...args: Parameters<typeof createDashboardTaskImpl>
+) {
+  return createDashboardTaskImpl(...args)
+}
 
 export async function addTaskDependency(
-  input: z.input<typeof AddDepInput>
-): Promise<
-  | { error: string }
-  | {
-      ok: true
-      dep: { id: string; kind: RelationKind; dependsOnRef: string }
-    }
-> {
-  const parsed = AddDepInput.safeParse(input)
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
-  }
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const [source, target] = await Promise.all([
-    prisma.task.findFirst({
-      where: { id: parsed.data.taskId, companyId: member.companyId },
-      select: { id: true }
-    }),
-    prisma.task.findFirst({
-      where: { ref: parsed.data.dependsOnRef, companyId: member.companyId },
-      select: { id: true, ref: true }
-    })
-  ])
-  if (!source) return { error: 'Task not found.' }
-  if (!target) return { error: `No task with ref ${parsed.data.dependsOnRef}.` }
-  if (target.id === source.id) {
-    return { error: "Can't relate a task to itself." }
-  }
-
-  // Upsert via the unique index so re-adding the same edge no-ops.
-  const dep = await prisma.taskDependency.upsert({
-    where: {
-      taskId_dependsOnTaskId: {
-        taskId: source.id,
-        dependsOnTaskId: target.id
-      }
-    },
-    create: {
-      companyId: member.companyId,
-      taskId: source.id,
-      dependsOnTaskId: target.id,
-      kind: parsed.data.kind
-    },
-    update: { kind: parsed.data.kind }
-  })
-
-  revalidatePath('/dashboard')
-  return {
-    ok: true,
-    dep: {
-      id: dep.id,
-      kind: dep.kind as RelationKind,
-      dependsOnRef: target.ref ?? parsed.data.dependsOnRef
-    }
-  }
+  ...args: Parameters<typeof addTaskDependencyImpl>
+) {
+  return addTaskDependencyImpl(...args)
 }
-
-const RemoveDepInput = z.object({
-  taskId: z.string().uuid(),
-  dependsOnRef: z.string().trim().min(1).max(64),
-  kind: z.enum(['blocked_by', 'blocks', 'parent', 'sub_issue', 'triage'])
-})
 
 export async function removeTaskDependency(
-  input: z.input<typeof RemoveDepInput>
+  ...args: Parameters<typeof removeTaskDependencyImpl>
 ) {
-  const parsed = RemoveDepInput.safeParse(input)
-  if (!parsed.success) return { error: 'Invalid input.' }
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const target = await prisma.task.findFirst({
-    where: { ref: parsed.data.dependsOnRef, companyId: member.companyId },
-    select: { id: true }
-  })
-  if (!target) return { error: 'Ref not found.' }
-
-  await prisma.taskDependency.deleteMany({
-    where: {
-      companyId: member.companyId,
-      taskId: parsed.data.taskId,
-      dependsOnTaskId: target.id,
-      kind: parsed.data.kind
-    }
-  })
-  revalidatePath('/dashboard')
-  return { ok: true as const }
+  return removeTaskDependencyImpl(...args)
 }
 
-// Bulk-create N tasks in one shot. Used by the "From AI" tab in the New
-// Task modal: the user pastes structured JSON parsed on the client, and
-// this action persists each row. Sequential ref generation per project
-// (same prefix logic as createDashboardTask), labels attached via
-// nested create. Wrapped in a transaction so a partial failure rolls
-// back the whole batch — easier mental model than half-created tasks.
-// See decision 0025.
 export async function createBulkDashboardTasks(
-  projectId: string,
-  drafts: z.input<typeof BulkDraftSchema>[]
+  ...args: Parameters<typeof createBulkDashboardTasksImpl>
 ) {
-  const validated = CreateBulkInputSchema.safeParse({ projectId, drafts })
-  if (!validated.success) {
-    const first = validated.error.issues[0]
-    const path = first.path
-      .map((seg) => (typeof seg === 'number' ? `[${seg}]` : `.${String(seg)}`))
-      .join('')
-      .replace(/^\./, '')
-    return {
-      error: path ? `${path}: ${first.message}` : first.message
-    }
-  }
-  const { drafts: validDrafts } = validated.data
-
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const project = await prisma.project.findFirst({
-    where: { id: projectId, companyId: member.companyId },
-    select: { name: true }
-  })
-  if (!project) return { error: 'Project not found.' }
-
-  const prefix = project.name.split(/\s+/)[0].toUpperCase().slice(0, 4)
-
-  const lastTask = await prisma.task.findFirst({
-    where: { projectId },
-    orderBy: { seqNumber: 'desc' },
-    select: { seqNumber: true }
-  })
-  let nextSeq = (lastTask?.seqNumber ?? 0) + 1
-
-  // Collect every distinct new label name across drafts. Preserve the
-  // first-seen casing for display, key on lowercase for dedupe.
-  const newLabelDisplayByLower = new Map<string, string>()
-  for (const d of validDrafts) {
-    for (const raw of d.newLabelNames ?? []) {
-      const trimmed = raw.trim()
-      if (!trimmed) continue
-      const key = trimmed.toLowerCase()
-      if (!newLabelDisplayByLower.has(key)) {
-        newLabelDisplayByLower.set(key, trimmed)
-      }
-    }
-  }
-
-  const created = await prisma.$transaction(async (tx) => {
-    // Upsert each new label first so we can attach by id. (`@@unique(
-    // companyId, name)` makes this safe even under concurrent paste-
-    // submits, and `findFirst` lets us match case-insensitively before
-    // creating to avoid "design" + "Design" duplicates.)
-    const newLabelIdByLower = new Map<string, string>()
-    for (const [key, display] of newLabelDisplayByLower) {
-      const existing = await tx.label.findFirst({
-        where: {
-          companyId: member.companyId,
-          name: { equals: display, mode: 'insensitive' }
-        },
-        select: { id: true }
-      })
-      if (existing) {
-        newLabelIdByLower.set(key, existing.id)
-      } else {
-        const fresh = await tx.label.create({
-          data: { companyId: member.companyId, name: display },
-          select: { id: true }
-        })
-        newLabelIdByLower.set(key, fresh.id)
-      }
-    }
-
-    const out: { id: string; ref: string }[] = []
-    // Track pending dependency edges. We resolve them after all tasks are
-    // created so a draft can reference another draft in the same batch
-    // (by its computed ref) or any pre-existing task in the company.
-    const pendingDeps: { sourceId: string; ref: string; kind: RelationKind }[]
-      = []
-
-    for (const d of validDrafts) {
-      const seq = nextSeq++
-      const ref = `${prefix}-${seq}`
-      // Merge resolved label IDs with newly-created label IDs, dedup'd.
-      const labelIds = new Set<string>(d.labelIds ?? [])
-      for (const raw of d.newLabelNames ?? []) {
-        const id = newLabelIdByLower.get(raw.trim().toLowerCase())
-        if (id) labelIds.add(id)
-      }
-      const task = await tx.task.create({
-        data: {
-          companyId: member.companyId,
-          projectId,
-          title: d.title,
-          description: d.description ?? undefined,
-          status: d.status ?? 'backlog',
-          priority: d.priority ?? 'none',
-          ref,
-          seqNumber: seq,
-          assigneeId: d.assigneeId ?? null,
-          dueDate: d.dueDate ? new Date(d.dueDate) : null,
-          createdBy: member.id,
-          labels:
-            labelIds.size > 0
-              ? { create: [...labelIds].map((labelId) => ({ labelId })) }
-              : undefined
-        },
-        select: { id: true, ref: true }
-      })
-      await tx.activityLog.create({
-        data: {
-          companyId: member.companyId,
-          actorId: member.id,
-          action: 'task.created',
-          entityType: 'task',
-          entityId: task.id
-        }
-      })
-      out.push({ id: task.id, ref: task.ref ?? ref })
-
-      for (const rel of d.relations ?? []) {
-        pendingDeps.push({ sourceId: task.id, ref: rel.ref, kind: rel.kind })
-      }
-    }
-
-    if (pendingDeps.length > 0) {
-      const refs = [...new Set(pendingDeps.map((p) => p.ref))]
-      const targets = await tx.task.findMany({
-        where: { companyId: member.companyId, ref: { in: refs } },
-        select: { id: true, ref: true }
-      })
-      const idByRef = new Map(targets.map((t) => [t.ref ?? '', t.id]))
-      const depRows = pendingDeps
-        .map((p) => {
-          const targetId = idByRef.get(p.ref)
-          if (!targetId || targetId === p.sourceId) return null
-          return {
-            companyId: member.companyId,
-            taskId: p.sourceId,
-            dependsOnTaskId: targetId,
-            kind: p.kind as RelationKind
-          }
-        })
-        .filter((row): row is NonNullable<typeof row> => row !== null)
-      if (depRows.length > 0) {
-        await tx.taskDependency.createMany({
-          data: depRows,
-          skipDuplicates: true
-        })
-      }
-    }
-
-    return {
-      tasks: out,
-      createdLabels: [...newLabelDisplayByLower.values()]
-    }
-  })
-
-  revalidatePath('/dashboard')
-  return created
+  return createBulkDashboardTasksImpl(...args)
 }
 
 export async function updateDashboardTaskStatus(
-  taskId: string,
-  status: TaskStatus
-): Promise<StatusChangeResult> {
-  const member = await getCurrentTeamMember()
-  if (!member) {
-    return { ok: false, reason: 'generic', message: 'Not signed in.' }
-  }
-
-  const task = await prisma.task.findFirst({
-    where: { id: taskId, companyId: member.companyId },
-    select: {
-      id: true,
-      projectId: true,
-      status: true,
-      handoff: {
-        select: {
-          whatItIs: true,
-          currentStatus: true,
-          doneSoFar: true,
-          stillLeft: true,
-          fileLinks: true,
-          gotchas: true,
-          whoToAsk: true
-        }
-      }
-    }
-  })
-  if (!task) {
-    return { ok: false, reason: 'generic', message: 'Task not found.' }
-  }
-
-  // Done gate (slice-2 invariant, decision 0015).
-  if (status === 'done' && task.status !== 'done') {
-    if (!isHandoffComplete(task.handoff)) {
-      const missing = countMissingFields(task.handoff)
-      return {
-        ok: false,
-        reason: 'handoff-incomplete',
-        message: task.handoff
-          ? `Fill ${missing} more handoff field${missing === 1 ? '' : 's'} before moving to Done.`
-          : 'Start a handoff and fill all 7 fields before moving to Done.',
-        missingCount: missing,
-        taskUrl: `/projects/${task.projectId}/tasks/${task.id}`
-      }
-    }
-  }
-
-  const prevStatus = task.status
-  await prisma.task.update({
-    where: { id: task.id },
-    data: { status }
-  })
-
-  // No-op when prev === next so we don't log a meaningless "from X to X".
-  if (prevStatus !== status) {
-    await logActivity(
-      member.companyId,
-      member.id,
-      'task.status_changed',
-      'task',
-      task.id,
-      { from: prevStatus, to: status }
-    )
-  }
-  revalidatePath('/dashboard')
-  revalidatePath(`/projects/${task.projectId}`)
-  return { ok: true }
+  ...args: Parameters<typeof updateDashboardTaskStatusImpl>
+) {
+  return updateDashboardTaskStatusImpl(...args)
 }
 
 export async function updateDashboardTaskPriority(
-  taskId: string,
-  priority: TaskPriority
+  ...args: Parameters<typeof updateDashboardTaskPriorityImpl>
 ) {
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const prev = await prisma.task.findFirst({
-    where: { id: taskId, companyId: member.companyId },
-    select: { priority: true }
-  })
-  if (!prev) return { error: 'Task not found.' }
-
-  await prisma.task.update({
-    where: { id: taskId },
-    data: { priority }
-  })
-
-  if (prev.priority !== priority) {
-    await logActivity(
-      member.companyId,
-      member.id,
-      'task.priority_changed',
-      'task',
-      taskId,
-      { from: prev.priority, to: priority }
-    )
-  }
-  revalidatePath('/dashboard')
-  return { ok: true }
+  return updateDashboardTaskPriorityImpl(...args)
 }
 
 export async function updateDashboardTaskAssignee(
-  taskId: string,
-  assigneeId: string | null
+  ...args: Parameters<typeof updateDashboardTaskAssigneeImpl>
 ) {
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const prev = await prisma.task.findFirst({
-    where: { id: taskId, companyId: member.companyId },
-    select: {
-      assigneeId: true,
-      assignee: { select: { fullName: true } }
-    }
-  })
-  if (!prev) return { error: 'Task not found.' }
-
-  await prisma.task.update({
-    where: { id: taskId },
-    data: { assigneeId }
-  })
-
-  if (prev.assigneeId !== assigneeId) {
-    const toName = assigneeId
-      ? ((
-          await prisma.teamMember.findUnique({
-            where: { id: assigneeId },
-            select: { fullName: true }
-          })
-        )?.fullName ?? null)
-      : null
-    await logActivity(
-      member.companyId,
-      member.id,
-      'task.assignee_changed',
-      'task',
-      taskId,
-      {
-        from: prev.assigneeId,
-        fromName: prev.assignee?.fullName ?? null,
-        to: assigneeId,
-        toName
-      }
-    )
-  }
-  revalidatePath('/dashboard')
-  return { ok: true }
+  return updateDashboardTaskAssigneeImpl(...args)
 }
 
-// Lead member for a task. Lead is who members ask for help — distinct
-// from assignee. Same activity-log pattern as assignee_changed so the
-// Updates panel surfaces lead changes alongside everything else.
 export async function updateDashboardTaskLead(
-  taskId: string,
-  leadId: string | null
+  ...args: Parameters<typeof updateDashboardTaskLeadImpl>
 ) {
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const prev = await prisma.task.findFirst({
-    where: { id: taskId, companyId: member.companyId },
-    select: {
-      leadId: true,
-      lead: { select: { fullName: true } }
-    }
-  })
-  if (!prev) return { error: 'Task not found.' }
-
-  await prisma.task.update({
-    where: { id: taskId },
-    data: { leadId }
-  })
-
-  if (prev.leadId !== leadId) {
-    const toName = leadId
-      ? ((
-          await prisma.teamMember.findUnique({
-            where: { id: leadId },
-            select: { fullName: true }
-          })
-        )?.fullName ?? null)
-      : null
-    await logActivity(
-      member.companyId,
-      member.id,
-      'task.lead_changed',
-      'task',
-      taskId,
-      {
-        from: prev.leadId,
-        fromName: prev.lead?.fullName ?? null,
-        to: leadId,
-        toName
-      }
-    )
-  }
-  revalidatePath('/dashboard')
-  return { ok: true }
+  return updateDashboardTaskLeadImpl(...args)
 }
 
-// Drag-and-drop endpoint. Handles both within-column reorder (toStatus
-// equals the current status) and cross-column move (toStatus differs).
-// Routes through the same slice-2 handoff gate as updateDashboardTaskStatus
-// when toStatus === 'done' — decision 0015, 0022.
-//
-// sort_order strategy: integer-renumber the destination column to
-// [0, STEP, 2*STEP, …] on every move. O(n) writes per drop where n is
-// destination column size. Trivial at Verbivorescale (≤10 cards/column).
-// If columns grow large this becomes a float-midpoint problem; defer
-// until measured.
-const SORT_STEP = 1024
+export async function updateDashboardTaskDueDate(
+  ...args: Parameters<typeof updateDashboardTaskDueDateImpl>
+) {
+  return updateDashboardTaskDueDateImpl(...args)
+}
 
 export async function moveDashboardTask(
-  taskId: string,
-  toStatus: TaskStatus,
-  toIndex: number
-): Promise<StatusChangeResult> {
-  const member = await getCurrentTeamMember()
-  if (!member) {
-    return { ok: false, reason: 'generic', message: 'Not signed in.' }
-  }
-
-  const task = await prisma.task.findFirst({
-    where: { id: taskId, companyId: member.companyId },
-    select: {
-      id: true,
-      projectId: true,
-      status: true,
-      handoff: {
-        select: {
-          whatItIs: true,
-          currentStatus: true,
-          doneSoFar: true,
-          stillLeft: true,
-          fileLinks: true,
-          gotchas: true,
-          whoToAsk: true
-        }
-      }
-    }
-  })
-  if (!task) {
-    return { ok: false, reason: 'generic', message: 'Task not found.' }
-  }
-
-  // Done gate — slice-2 invariant (decision 0015).
-  if (toStatus === 'done' && task.status !== 'done') {
-    if (!isHandoffComplete(task.handoff)) {
-      const missing = countMissingFields(task.handoff)
-      return {
-        ok: false,
-        reason: 'handoff-incomplete',
-        message: task.handoff
-          ? `Fill ${missing} more handoff field${missing === 1 ? '' : 's'} before moving to Done.`
-          : 'Start a handoff and fill all 7 fields before moving to Done.',
-        missingCount: missing,
-        taskUrl: `/projects/${task.projectId}/tasks/${task.id}`
-      }
-    }
-  }
-
-  // Load the destination column's current order. If the task is moving
-  // within its own column we still pull it (it's in the snapshot below).
-  // Scope by companyId only — the dashboard is multi-project; reordering
-  // doesn't change which project a task belongs to.
-  const columnTasks = await prisma.task.findMany({
-    where: {
-      companyId: member.companyId,
-      status: toStatus,
-      id: { not: task.id }
-    },
-    select: { id: true },
-    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }]
-  })
-
-  // Insert taskId at toIndex (clamped) in the destination order, then
-  // renumber the whole column at SORT_STEP intervals.
-  const clampedIndex = Math.max(0, Math.min(toIndex, columnTasks.length))
-  const newOrder = [
-    ...columnTasks.slice(0, clampedIndex).map((t) => t.id),
-    task.id,
-    ...columnTasks.slice(clampedIndex).map((t) => t.id)
-  ]
-
-  await prisma.$transaction([
-    // Status change goes on the moved row only.
-    prisma.task.update({
-      where: { id: task.id },
-      data: { status: toStatus }
-    }),
-    // Renumber the destination column.
-    ...newOrder.map((id, i) =>
-      prisma.task.update({
-        where: { id },
-        data: { sortOrder: i * SORT_STEP }
-      })
-    )
-  ])
-
-  // Only log status_changed if status actually moved (avoid log spam on
-  // within-column reorders).
-  if (toStatus !== task.status) {
-    await logActivity(
-      member.companyId,
-      member.id,
-      'task.status_changed',
-      'task',
-      task.id,
-      { from: task.status, to: toStatus }
-    )
-  }
-  revalidatePath('/dashboard')
-  revalidatePath(`/projects/${task.projectId}`)
-  return { ok: true }
+  ...args: Parameters<typeof moveDashboardTaskImpl>
+) {
+  return moveDashboardTaskImpl(...args)
 }
 
-export async function deleteDashboardTask(taskId: string) {
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  await prisma.task.delete({ where: { id: taskId } })
-
-  await logActivity(member.companyId, member.id, 'task.deleted', 'task', taskId)
-  revalidatePath('/dashboard')
-  return { ok: true }
+export async function deleteDashboardTask(
+  ...args: Parameters<typeof deleteDashboardTaskImpl>
+) {
+  return deleteDashboardTaskImpl(...args)
 }
 
-export async function duplicateDashboardTask(taskId: string) {
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const src = await prisma.task.findFirst({
-    where: { id: taskId, companyId: member.companyId },
-    include: { labels: true, checklist: true }
-  })
-  if (!src) return { error: 'Task not found.' }
-
-  const lastTask = await prisma.task.findFirst({
-    where: { projectId: src.projectId },
-    orderBy: { seqNumber: 'desc' },
-    select: { seqNumber: true }
-  })
-  const nextSeq = (lastTask?.seqNumber ?? 0) + 1
-
-  const project = await prisma.project.findFirst({
-    where: { id: src.projectId },
-    select: { name: true }
-  })
-  const prefix = (project?.name ?? 'TASK')
-    .split(/\s+/)[0]
-    .toUpperCase()
-    .slice(0, 4)
-  const ref = `${prefix}-${nextSeq}`
-
-  const clone = await prisma.task.create({
-    data: {
-      companyId: member.companyId,
-      projectId: src.projectId,
-      title: `${src.title} (copy)`,
-      status: src.status,
-      // Slot the clone immediately after the source in its column.
-      // Board order is [sortOrder asc, createdAt desc] — +1 lands the
-      // clone between source and the next card in the SORT_STEP gap.
-      // Null source.sortOrder (pre-migration rows) leaves clone null;
-      // the createdAt tiebreaker keeps it adjacent.
-      sortOrder: src.sortOrder != null ? src.sortOrder + 1 : undefined,
-      priority: src.priority,
-      ref,
-      seqNumber: nextSeq,
-      assigneeId: src.assigneeId,
-      dueDate: src.dueDate,
-      createdBy: member.id,
-      labels: src.labels.length
-        ? { create: src.labels.map((l) => ({ labelId: l.labelId })) }
-        : undefined,
-      checklist: src.checklist.length
-        ? {
-            create: src.checklist.map((c) => ({
-              text: c.text,
-              isDone: false,
-              sortOrder: c.sortOrder
-            }))
-          }
-        : undefined,
-      depsOut: {
-        create: [
-          {
-            companyId: member.companyId,
-            dependsOnTaskId: src.id,
-            kind: 'parent' as RelationKind
-          }
-        ]
-      }
-    }
-  })
-
-  await logActivity(
-    member.companyId,
-    member.id,
-    'task.duplicated',
-    'task',
-    clone.id,
-    { sourceId: taskId }
-  )
-  revalidatePath('/dashboard')
-  return { task: clone }
+export async function duplicateDashboardTask(
+  ...args: Parameters<typeof duplicateDashboardTaskImpl>
+) {
+  return duplicateDashboardTaskImpl(...args)
 }
-
-// ─── Comments ─────────────────────────────────────────────────────────────
 
 export async function addComment(
-  taskId: string,
-  body: string,
-  mentions?: string[]
+  ...args: Parameters<typeof addCommentImpl>
 ) {
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const comment = await prisma.taskComment.create({
-    data: {
-      companyId: member.companyId,
-      taskId,
-      authorId: member.id,
-      body,
-      mentions: mentions ?? []
-    }
-  })
-
-  await logActivity(
-    member.companyId,
-    member.id,
-    'comment.added',
-    'task',
-    taskId
-  )
-  revalidatePath('/dashboard')
-  return { comment }
+  return addCommentImpl(...args)
 }
 
-export async function editComment(commentId: string, body: string) {
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const trimmed = body.trim()
-  if (!trimmed) return { error: 'Comment cannot be empty.' }
-
-  const existing = await prisma.taskComment.findFirst({
-    where: { id: commentId, companyId: member.companyId },
-    select: { authorId: true, taskId: true }
-  })
-  if (!existing) return { error: 'Comment not found.' }
-
-  // Authz: author OR admin.
-  const isAuthor = existing.authorId === member.id
-  const isAdmin = member.accessTier === 'admin'
-  if (!isAuthor && !isAdmin) return { error: 'Not allowed.' }
-
-  await prisma.taskComment.update({
-    where: { id: commentId },
-    data: { body: trimmed, editedAt: new Date() }
-  })
-
-  await logActivity(
-    member.companyId,
-    member.id,
-    'comment.edited',
-    'task',
-    existing.taskId
-  )
-  revalidatePath('/dashboard')
-  return { ok: true as const }
+export async function editComment(
+  ...args: Parameters<typeof editCommentImpl>
+) {
+  return editCommentImpl(...args)
 }
 
-export async function deleteComment(commentId: string) {
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const existing = await prisma.taskComment.findFirst({
-    where: { id: commentId, companyId: member.companyId },
-    select: { authorId: true, taskId: true }
-  })
-  if (!existing) return { error: 'Comment not found.' }
-
-  const isAuthor = existing.authorId === member.id
-  const isAdmin = member.accessTier === 'admin'
-  if (!isAuthor && !isAdmin) return { error: 'Not allowed.' }
-
-  await prisma.taskComment.delete({ where: { id: commentId } })
-
-  await logActivity(
-    member.companyId,
-    member.id,
-    'comment.deleted',
-    'task',
-    existing.taskId
-  )
-  revalidatePath('/dashboard')
-  return { ok: true as const }
+export async function deleteComment(
+  ...args: Parameters<typeof deleteCommentImpl>
+) {
+  return deleteCommentImpl(...args)
 }
 
-// ─── Checklist ────────────────────────────────────────────────────────────
-
-export async function toggleChecklistItem(itemId: string, isDone: boolean) {
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  await prisma.taskChecklistItem.update({
-    where: { id: itemId },
-    data: { isDone }
-  })
-
-  revalidatePath('/dashboard')
-  return { ok: true }
+export async function toggleChecklistItem(
+  ...args: Parameters<typeof toggleChecklistItemImpl>
+) {
+  return toggleChecklistItemImpl(...args)
 }
 
-export async function addChecklistItem(taskId: string, text: string) {
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const last = await prisma.taskChecklistItem.findFirst({
-    where: { taskId },
-    orderBy: { sortOrder: 'desc' },
-    select: { sortOrder: true }
-  })
-
-  await prisma.taskChecklistItem.create({
-    data: {
-      taskId,
-      text,
-      sortOrder: (last?.sortOrder ?? 0) + 1
-    }
-  })
-
-  revalidatePath('/dashboard')
-  return { ok: true }
+export async function addChecklistItem(
+  ...args: Parameters<typeof addChecklistItemImpl>
+) {
+  return addChecklistItemImpl(...args)
 }
 
-// ─── Sprint CRUD ───────────────────────────────────────────────────────────
-
-const IsoDateStr = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD')
-
-const SprintStatusEnum = z.enum(['upcoming', 'current', 'completed'])
-
-const CreateSprintInput = z
-  .object({
-    projectId: z.string().uuid(),
-    name: z.string().trim().min(2).max(80),
-    description: z.string().trim().max(1000).optional().nullable(),
-    docUrl: z.string().trim().url().max(500).optional().nullable(),
-    fromDate: IsoDateStr,
-    toDate: IsoDateStr,
-    status: SprintStatusEnum.optional()
-  })
-  .refine((v) => v.fromDate <= v.toDate, {
-    message: 'fromDate must be on or before toDate',
-    path: ['toDate']
-  })
-
-const UpdateSprintInput = z
-  .object({
-    sprintId: z.string().uuid(),
-    name: z.string().trim().min(2).max(80).optional(),
-    description: z.string().trim().max(1000).nullable().optional(),
-    docUrl: z.string().trim().url().max(500).nullable().optional(),
-    fromDate: IsoDateStr.optional(),
-    toDate: IsoDateStr.optional(),
-    status: SprintStatusEnum.optional()
-  })
-  .refine(
-    (v) => !v.fromDate || !v.toDate || v.fromDate <= v.toDate,
-    { message: 'fromDate must be on or before toDate', path: ['toDate'] }
-  )
-
-export async function createSprint(input: z.input<typeof CreateSprintInput>) {
-  const parsed = CreateSprintInput.safeParse(input)
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
-  }
-  const member = await requireAccessTier(['admin', 'lead'])
-
-  const project = await prisma.project.findFirst({
-    where: { id: parsed.data.projectId, companyId: member.companyId },
-    select: { id: true }
-  })
-  if (!project) return { error: 'Project not found.' }
-
-  // Per-project sequential number, matches the @@unique(projectId, number).
-  const last = await prisma.sprint.findFirst({
-    where: { projectId: project.id },
-    orderBy: { number: 'desc' },
-    select: { number: true }
-  })
-  const nextNumber = (last?.number ?? 0) + 1
-
-  const sprint = await prisma.sprint.create({
-    data: {
-      companyId: member.companyId,
-      projectId: project.id,
-      number: nextNumber,
-      name: parsed.data.name,
-      description: parsed.data.description ?? null,
-      docUrl: parsed.data.docUrl ?? null,
-      status: parsed.data.status ?? 'upcoming',
-      fromDate: new Date(parsed.data.fromDate),
-      toDate: new Date(parsed.data.toDate)
-    }
-  })
-
-  revalidatePath('/dashboard')
-  return { sprint }
+export async function createSprint(
+  ...args: Parameters<typeof createSprintImpl>
+) {
+  return createSprintImpl(...args)
 }
 
-export async function updateSprint(input: z.input<typeof UpdateSprintInput>) {
-  const parsed = UpdateSprintInput.safeParse(input)
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
-  }
-  const member = await requireAccessTier(['admin', 'lead'])
-
-  const existing = await prisma.sprint.findFirst({
-    where: { id: parsed.data.sprintId, companyId: member.companyId },
-    select: { id: true }
-  })
-  if (!existing) return { error: 'Sprint not found.' }
-
-  const patch: {
-    name?: string
-    description?: string | null
-    docUrl?: string | null
-    fromDate?: Date
-    toDate?: Date
-    status?: 'upcoming' | 'current' | 'completed'
-  } = {}
-  if (parsed.data.name !== undefined) patch.name = parsed.data.name
-  if (parsed.data.description !== undefined) {
-    patch.description = parsed.data.description
-  }
-  if (parsed.data.docUrl !== undefined) patch.docUrl = parsed.data.docUrl
-  if (parsed.data.fromDate) patch.fromDate = new Date(parsed.data.fromDate)
-  if (parsed.data.toDate) patch.toDate = new Date(parsed.data.toDate)
-  if (parsed.data.status) patch.status = parsed.data.status
-
-  await prisma.sprint.update({
-    where: { id: existing.id },
-    data: patch
-  })
-
-  revalidatePath('/dashboard')
-  return { ok: true as const }
+export async function updateSprint(
+  ...args: Parameters<typeof updateSprintImpl>
+) {
+  return updateSprintImpl(...args)
 }
 
-export async function deleteSprint(sprintId: string) {
-  const parsed = z.string().uuid().safeParse(sprintId)
-  if (!parsed.success) return { error: 'Invalid sprint id.' }
-  const member = await requireAccessTier(['admin', 'lead'])
-
-  // updateMany scoping covers both ownership check and the rare race where
-  // someone else just deleted it — no row updated, no throw.
-  const res = await prisma.sprint.deleteMany({
-    where: { id: parsed.data, companyId: member.companyId }
-  })
-  if (res.count === 0) return { error: 'Sprint not found.' }
-
-  revalidatePath('/dashboard')
-  return { ok: true as const }
+export async function deleteSprint(
+  ...args: Parameters<typeof deleteSprintImpl>
+) {
+  return deleteSprintImpl(...args)
 }
-
-const SprintTaskInput = z.object({
-  sprintId: z.string().uuid(),
-  taskId: z.string().uuid()
-})
 
 export async function addTaskToSprint(
-  input: z.input<typeof SprintTaskInput>
+  ...args: Parameters<typeof addTaskToSprintImpl>
 ) {
-  const parsed = SprintTaskInput.safeParse(input)
-  if (!parsed.success) return { error: 'Invalid input.' }
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  // Verify both rows belong to the caller's company before linking — same
-  // pattern as task mutations: cross-company writes are silently dropped.
-  const [sprint, task] = await Promise.all([
-    prisma.sprint.findFirst({
-      where: { id: parsed.data.sprintId, companyId: member.companyId },
-      select: { id: true }
-    }),
-    prisma.task.findFirst({
-      where: { id: parsed.data.taskId, companyId: member.companyId },
-      select: { id: true }
-    })
-  ])
-  if (!sprint || !task) return { error: 'Sprint or task not found.' }
-
-  await prisma.sprintTask.upsert({
-    where: { sprintId_taskId: { sprintId: sprint.id, taskId: task.id } },
-    create: { sprintId: sprint.id, taskId: task.id },
-    update: {}
-  })
-
-  revalidatePath('/dashboard')
-  return { ok: true as const }
+  return addTaskToSprintImpl(...args)
 }
 
 export async function removeTaskFromSprint(
-  input: z.input<typeof SprintTaskInput>
+  ...args: Parameters<typeof removeTaskFromSprintImpl>
 ) {
-  const parsed = SprintTaskInput.safeParse(input)
-  if (!parsed.success) return { error: 'Invalid input.' }
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  await prisma.sprintTask.deleteMany({
-    where: {
-      sprintId: parsed.data.sprintId,
-      taskId: parsed.data.taskId,
-      sprint: { companyId: member.companyId }
-    }
-  })
-
-  revalidatePath('/dashboard')
-  return { ok: true as const }
+  return removeTaskFromSprintImpl(...args)
 }
-
-// ─── External refs (project repo + task PR/issue/doc links) ──────────────
-
-const GithubRepoStr = z
-  .string()
-  .trim()
-  .regex(
-    /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/,
-    'expected "owner/repo" (e.g. verbivore/web)'
-  )
-  .max(120)
-
-const SetProjectRepoInput = z.object({
-  projectId: z.string().uuid(),
-  // Empty string clears the repo. Anything else must match owner/repo.
-  githubRepo: z.union([z.literal(''), GithubRepoStr])
-})
 
 export async function setProjectGithubRepo(
-  input: z.input<typeof SetProjectRepoInput>
+  ...args: Parameters<typeof setProjectGithubRepoImpl>
 ) {
-  const parsed = SetProjectRepoInput.safeParse(input)
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
-  }
-  const member = await requireAccessTier(['admin', 'lead'])
-
-  const res = await prisma.project.updateMany({
-    where: { id: parsed.data.projectId, companyId: member.companyId },
-    data: { githubRepo: parsed.data.githubRepo || null }
-  })
-  if (res.count === 0) return { error: 'Project not found.' }
-
-  revalidatePath('/dashboard')
-  return { ok: true as const }
+  return setProjectGithubRepoImpl(...args)
 }
-
-const AddTaskExternalRefInput = z.object({
-  taskId: z.string().uuid(),
-  url: z.string().trim().url().max(2048),
-  label: z.string().trim().min(1).max(120).optional().nullable()
-})
 
 export async function addTaskExternalRef(
-  input: z.input<typeof AddTaskExternalRefInput>
+  ...args: Parameters<typeof addTaskExternalRefImpl>
 ) {
-  const parsed = AddTaskExternalRefInput.safeParse(input)
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
-  }
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const parsedUrl = parseExternalRef(parsed.data.url)
-  if (!parsedUrl) return { error: 'Invalid URL.' }
-
-  const task = await prisma.task.findFirst({
-    where: { id: parsed.data.taskId, companyId: member.companyId },
-    select: { id: true }
-  })
-  if (!task) return { error: 'Task not found.' }
-
-  const ref = await prisma.taskExternalRef.create({
-    data: {
-      companyId: member.companyId,
-      taskId: task.id,
-      kind: parsedUrl.kind,
-      url: parsedUrl.url,
-      label: parsed.data.label?.trim() || null,
-      createdBy: member.id
-    }
-  })
-
-  await logActivity(
-    member.companyId,
-    member.id,
-    'task.ref_added',
-    'task',
-    task.id,
-    { kind: parsedUrl.kind, url: parsedUrl.url }
-  )
-
-  revalidatePath('/dashboard')
-  return { ref }
+  return addTaskExternalRefImpl(...args)
 }
 
-export async function removeTaskExternalRef(refId: string) {
-  const parsed = z.string().uuid().safeParse(refId)
-  if (!parsed.success) return { error: 'Invalid ref id.' }
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const existing = await prisma.taskExternalRef.findFirst({
-    where: { id: parsed.data, companyId: member.companyId },
-    select: { id: true, taskId: true, kind: true, url: true }
-  })
-  if (!existing) return { error: 'Ref not found.' }
-
-  await prisma.taskExternalRef.delete({ where: { id: existing.id } })
-
-  await logActivity(
-    member.companyId,
-    member.id,
-    'task.ref_removed',
-    'task',
-    existing.taskId,
-    { kind: existing.kind, url: existing.url }
-  )
-
-  revalidatePath('/dashboard')
-  return { ok: true as const }
+export async function removeTaskExternalRef(
+  ...args: Parameters<typeof removeTaskExternalRefImpl>
+) {
+  return removeTaskExternalRefImpl(...args)
 }
-
-const AddProjectExternalRefInput = z.object({
-  projectId: z.string().uuid(),
-  url: z.string().trim().url().max(2048),
-  label: z.string().trim().min(1).max(120).optional().nullable()
-})
 
 export async function addProjectExternalRef(
-  input: z.input<typeof AddProjectExternalRefInput>
+  ...args: Parameters<typeof addProjectExternalRefImpl>
 ) {
-  const parsed = AddProjectExternalRefInput.safeParse(input)
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
-  }
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const parsedUrl = parseExternalRef(parsed.data.url)
-  if (!parsedUrl) return { error: 'Invalid URL.' }
-
-  const project = await prisma.project.findFirst({
-    where: { id: parsed.data.projectId, companyId: member.companyId },
-    select: { id: true }
-  })
-  if (!project) return { error: 'Project not found.' }
-
-  const ref = await prisma.projectExternalRef.create({
-    data: {
-      companyId: member.companyId,
-      projectId: project.id,
-      kind: parsedUrl.kind,
-      url: parsedUrl.url,
-      label: parsed.data.label?.trim() || null,
-      createdBy: member.id
-    }
-  })
-
-  revalidatePath('/dashboard')
-  return { ref }
+  return addProjectExternalRefImpl(...args)
 }
 
-export async function removeProjectExternalRef(refId: string) {
-  const parsed = z.string().uuid().safeParse(refId)
-  if (!parsed.success) return { error: 'Invalid ref id.' }
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const res = await prisma.projectExternalRef.deleteMany({
-    where: { id: parsed.data, companyId: member.companyId }
-  })
-  if (res.count === 0) return { error: 'Ref not found.' }
-
-  revalidatePath('/dashboard')
-  return { ok: true as const }
-}
-
-// ─── Handoff (drag-to-Done inline form) ──────────────────────────────────
-//
-// Pre-3a, attempting to move a task to Done with an incomplete handoff
-// would bounce the user to the task edit page with a toast. That broke
-// the in-dashboard flow. These two actions let the dashboard render the
-// handoff form inline in a Sheet, then commit + move to Done in one
-// round-trip on submit.
-
-import { HANDOFF_FIELDS } from '@/lib/handoff'
-
-const HandoffFieldsInput = z
-  .object({
-    whatItIs: z.string().trim().max(2000).optional().nullable(),
-    currentStatus: z.string().trim().max(2000).optional().nullable(),
-    doneSoFar: z.string().trim().max(2000).optional().nullable(),
-    stillLeft: z.string().trim().max(2000).optional().nullable(),
-    fileLinks: z.string().trim().max(2000).optional().nullable(),
-    gotchas: z.string().trim().max(2000).optional().nullable(),
-    whoToAsk: z.string().trim().max(2000).optional().nullable()
-  })
-  .partial()
-
-const SubmitHandoffInput = z.object({
-  taskId: z.string().uuid(),
-  fields: HandoffFieldsInput
-})
-
-export async function fetchTaskHandoff(taskId: string) {
-  const parsed = z.string().uuid().safeParse(taskId)
-  if (!parsed.success) return { error: 'Invalid task id.' }
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const handoff = await prisma.handoff.findFirst({
-    where: { taskId: parsed.data, companyId: member.companyId },
-    select: {
-      whatItIs: true,
-      currentStatus: true,
-      doneSoFar: true,
-      stillLeft: true,
-      fileLinks: true,
-      gotchas: true,
-      whoToAsk: true
-    }
-  })
-
-  // null means no handoff row yet; the sheet renders empty fields.
-  return { handoff }
-}
-
-export async function submitHandoffAndMoveDone(
-  input: z.input<typeof SubmitHandoffInput>
-): Promise<
-  | { error: string; missing?: string[] }
-  | { ok: true; statusResult: StatusChangeResult }
-> {
-  const parsed = SubmitHandoffInput.safeParse(input)
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
-  }
-  const member = await getCurrentTeamMember()
-  if (!member) return { error: 'Not signed in.' }
-
-  const task = await prisma.task.findFirst({
-    where: { id: parsed.data.taskId, companyId: member.companyId },
-    select: { id: true }
-  })
-  if (!task) return { error: 'Task not found.' }
-
-  // Server-side completeness check. If a field is missing we don't even
-  // hit the DB — the sheet renders the missing list inline.
-  const missing: string[] = []
-  for (const field of HANDOFF_FIELDS) {
-    const v = parsed.data.fields[field]
-    if (!v || v.trim().length === 0) missing.push(field)
-  }
-  if (missing.length > 0) {
-    return {
-      error: `${missing.length} field${missing.length === 1 ? '' : 's'} still missing.`,
-      missing
-    }
-  }
-
-  // Upsert the handoff row. If it doesn't exist yet, create with
-  // fromMemberId = current member and status ready_for_review (the row
-  // moving to Done implies the handoff is being shipped).
-  await prisma.handoff.upsert({
-    where: { taskId: task.id },
-    create: {
-      companyId: member.companyId,
-      taskId: task.id,
-      fromMemberId: member.id,
-      status: 'ready_for_review',
-      whatItIs: parsed.data.fields.whatItIs ?? null,
-      currentStatus: parsed.data.fields.currentStatus ?? null,
-      doneSoFar: parsed.data.fields.doneSoFar ?? null,
-      stillLeft: parsed.data.fields.stillLeft ?? null,
-      fileLinks: parsed.data.fields.fileLinks ?? null,
-      gotchas: parsed.data.fields.gotchas ?? null,
-      whoToAsk: parsed.data.fields.whoToAsk ?? null
-    },
-    update: {
-      whatItIs: parsed.data.fields.whatItIs ?? null,
-      currentStatus: parsed.data.fields.currentStatus ?? null,
-      doneSoFar: parsed.data.fields.doneSoFar ?? null,
-      stillLeft: parsed.data.fields.stillLeft ?? null,
-      fileLinks: parsed.data.fields.fileLinks ?? null,
-      gotchas: parsed.data.fields.gotchas ?? null,
-      whoToAsk: parsed.data.fields.whoToAsk ?? null
-    }
-  })
-
-  // Now run the same gate logic as a regular Done move. The gate should
-  // pass since we just wrote complete fields, but we route through the
-  // shared path for activity logging + consistency.
-  const statusResult = await updateDashboardTaskStatus(task.id, 'done')
-  return { ok: true, statusResult }
-}
-
-// ─── Activity Log (internal) ──────────────────────────────────────────────
-
-async function logActivity(
-  companyId: string,
-  actorId: string,
-  action: string,
-  entityType: string,
-  entityId?: string,
-  metadata?: Record<string, unknown>
+export async function removeProjectExternalRef(
+  ...args: Parameters<typeof removeProjectExternalRefImpl>
 ) {
-  await prisma.activityLog.create({
-    data: {
-      companyId,
-      actorId,
-      action,
-      entityType,
-      entityId: entityId ?? null,
-      metadata: metadata ? (metadata as object) : undefined
-    }
-  })
+  return removeProjectExternalRefImpl(...args)
 }
 
-// ─── Project CRUD (used by Panels.tsx) ────────────────────────────────────
+export async function updateProjectExternalRefLabel(
+  ...args: Parameters<typeof updateProjectExternalRefLabelImpl>
+) {
+  return updateProjectExternalRefLabelImpl(...args)
+}
 
-const CreateProjectSchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .min(2, { error: 'Name must be at least 2 characters.' })
-    .max(80, { error: 'Name must be at most 80 characters.' }),
-  kind: z.enum(['standard', 'operations'])
-})
+export async function updateTaskExternalRefLabel(
+  ...args: Parameters<typeof updateTaskExternalRefLabelImpl>
+) {
+  return updateTaskExternalRefLabelImpl(...args)
+}
 
-const ArchiveProjectSchema = z.object({ projectId: z.uuid() })
+export async function fetchTaskHandoff(
+  ...args: Parameters<typeof fetchTaskHandoffImpl>
+) {
+  return fetchTaskHandoffImpl(...args)
+}
 
-export type RenameProjectState =
-  | { error: string; fieldErrors?: Record<string, string[]> }
-  | undefined
-
-const RenameProjectSchema = z.object({
-  projectId: z.uuid(),
-  name: z
-    .string()
-    .trim()
-    .min(2, { error: 'Name must be at least 2 characters.' })
-    .max(80, { error: 'Name must be at most 80 characters.' })
-})
+export async function submitHandoffForReview(
+  ...args: Parameters<typeof submitHandoffForReviewImpl>
+) {
+  return submitHandoffForReviewImpl(...args)
+}
 
 export async function createProjectInPlace(
-  formData: FormData
-): Promise<{ error?: string } | undefined> {
-  const member = await requireAccessTier(['admin', 'lead'])
-
-  const parsed = CreateProjectSchema.safeParse({
-    name: formData.get('name'),
-    kind: formData.get('kind') ?? 'standard'
-  })
-  if (!parsed.success) {
-    return { error: 'Please enter a valid name (2 to 80 chars).' }
-  }
-
-  try {
-    await prisma.project.create({
-      data: {
-        companyId: member.companyId,
-        name: parsed.data.name,
-        kind: parsed.data.kind
-      }
-    })
-  } catch (e) {
-    const message =
-      e instanceof Error && 'code' in e && e.code === 'P2002'
-        ? 'A project with that name already exists.'
-        : "Couldn't create the project. Try again."
-    return { error: message }
-  }
-
-  revalidatePath('/dashboard')
-  return undefined
+  ...args: Parameters<typeof createProjectInPlaceImpl>
+) {
+  return createProjectInPlaceImpl(...args)
 }
 
 export async function archiveProjectInPlace(
-  formData: FormData
-): Promise<{ error?: string } | undefined> {
-  const member = await requireAccessTier(['admin', 'lead'])
-
-  const parsed = ArchiveProjectSchema.safeParse({
-    projectId: formData.get('projectId')
-  })
-  if (!parsed.success) return { error: 'Invalid project id.' }
-
-  // updateMany scoped by companyId so a wrong id doesn't leak the existence
-  // of cross-company rows via a 404 vs 200 distinction.
-  await prisma.project.updateMany({
-    where: { id: parsed.data.projectId, companyId: member.companyId },
-    data: { isArchived: true }
-  })
-
-  revalidatePath('/dashboard')
-  return undefined
+  ...args: Parameters<typeof archiveProjectInPlaceImpl>
+) {
+  return archiveProjectInPlaceImpl(...args)
 }
 
 export async function unarchiveProject(
-  formData: FormData
-): Promise<{ error?: string } | undefined> {
-  const member = await requireAccessTier(['admin', 'lead'])
-
-  const parsed = ArchiveProjectSchema.safeParse({
-    projectId: formData.get('projectId')
-  })
-  if (!parsed.success) return { error: 'Invalid project id.' }
-
-  await prisma.project.updateMany({
-    where: { id: parsed.data.projectId, companyId: member.companyId },
-    data: { isArchived: false }
-  })
-
-  revalidatePath('/dashboard')
-  return undefined
+  ...args: Parameters<typeof unarchiveProjectImpl>
+) {
+  return unarchiveProjectImpl(...args)
 }
 
 export async function renameProject(
-  formData: FormData
-): Promise<RenameProjectState> {
-  const member = await requireAccessTier(['admin', 'lead'])
-
-  const parsed = RenameProjectSchema.safeParse({
-    projectId: formData.get('projectId'),
-    name: formData.get('name')
-  })
-  if (!parsed.success) {
-    return {
-      error: 'Invalid input.',
-      fieldErrors: z.flattenError(parsed.error).fieldErrors
-    }
-  }
-
-  try {
-    await prisma.project.updateMany({
-      where: { id: parsed.data.projectId, companyId: member.companyId },
-      data: { name: parsed.data.name }
-    })
-  } catch (e) {
-    const message =
-      e instanceof Error && 'code' in e && e.code === 'P2002'
-        ? 'A project with that name already exists.'
-        : "Couldn't rename the project. Try again."
-    return { error: message }
-  }
-
-  revalidatePath('/dashboard')
-  return undefined
+  ...args: Parameters<typeof renameProjectImpl>
+) {
+  return renameProjectImpl(...args)
 }

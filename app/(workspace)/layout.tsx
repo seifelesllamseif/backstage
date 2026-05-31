@@ -1,4 +1,5 @@
-import { verifySession } from "@/lib/dal";
+import { Suspense } from "react";
+import { requireOnboardingComplete } from "@/lib/dal";
 
 // (workspace) — shell-less authenticated route group.
 //
@@ -6,18 +7,34 @@ import { verifySession } from "@/lib/dal";
 // /dashboard and /projects/[id] (which is a thin wrapper around the same
 // DashboardShell with the project filter pre-pinned). See decision 0022.
 //
-// Identical security path to (authenticated)/layout.tsx — same
-// verifySession() call — but does NOT wrap with <Shell>. The (authenticated)
+// Identical security path to (authenticated)/layout.tsx — verifies the
+// session — but does NOT wrap with <Shell>. The (authenticated)
 // group is kept for /cockpit and /projects (list) which still use the
 // shadcn sidebar; this group is for full-bleed surfaces.
 //
-// The sonner <Toaster /> lives in the root layout — see app/layout.tsx.
+// Decision 0029: also gates the workspace behind a completed onboarding
+// (avatar_url IS NOT NULL). Members with a null avatar are redirected to
+// /onboarding before they reach the app shell.
+//
+// next.config.ts has cacheComponents: true, so the auth gate runs inside
+// a Suspense boundary - the await on supabase.auth.getClaims() is
+// uncached and would otherwise block route rendering. Fallback is null
+// because the child page's own Suspense (DashboardSkeleton) supplies the
+// visible loading state.
 
-export default async function WorkspaceLayout({
+export default function WorkspaceLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  await verifySession();
+  return (
+    <Suspense fallback={null}>
+      <Gated>{children}</Gated>
+    </Suspense>
+  );
+}
+
+async function Gated({ children }: { children: React.ReactNode }) {
+  await requireOnboardingComplete();
   return <>{children}</>;
 }
