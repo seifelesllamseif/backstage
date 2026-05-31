@@ -30,5 +30,10 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "reference", "backstage design"]
+  "exclude": [
+    "node_modules",
+    "reference",
+    "backstage design",
+    "prisma/scripts/seed-dashboard.ts"
+  ]
 }
