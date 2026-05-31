@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/supabase/server";
 import { DEFAULT_LOGIN_ROUTE, safeInternalRedirect } from "@/routes";
 
 export type LoginState = { error: string } | undefined;
