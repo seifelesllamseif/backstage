@@ -1,6 +1,7 @@
 import { DashboardChrome } from './_components/DashboardChrome'
 import { DashboardTour } from './_components/DashboardTour'
 import { QueryProvider } from './_components/QueryProvider'
+import { ServiceWorkerRegistrar } from './_components/ServiceWorkerRegistrar'
 
 // Mounts the dashboard chrome (sidebar + topbar + modals) ONCE at the
 // route-segment layout level. It persists across every navigation under
@@ -18,6 +19,7 @@ export default function DashboardLayout({
 }) {
   return (
     <QueryProvider>
+      <ServiceWorkerRegistrar />
       <DashboardChrome />
       <DashboardTour />
       {children}

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { createAdminClient } from '@/supabase/admin'
 import { getCurrentTeamMember, requireAccessTier } from '@/lib/dal'
+import { getVapidPublicKey, sendPushToMember } from '@/lib/push'
 import { parseExternalRef } from '@/lib/externalRef'
 import { scrapeDocTitle } from '@/lib/scrapeDocTitle'
 import { countMissingFields, isHandoffComplete, HANDOFF_FIELDS } from '@/lib/handoff'
@@ -615,6 +616,19 @@ export async function updateDashboardTaskAssignee(taskId: string, assigneeId: st
       to: assigneeId,
       toName
     })
+    // Ping the new assignee (never yourself).
+    if (assigneeId && assigneeId !== member.id) {
+      const { data: t } = await supabase
+        .from('tasks').select('ref, title').eq('id', taskId).maybeSingle()
+      if (t?.ref) {
+        await sendPushToMember(assigneeId, {
+          title: `Assigned to you: ${t.ref}`,
+          body: t.title ?? '',
+          url: `/share/${t.ref}`,
+          tag: `task:${t.ref}`
+        }).catch(() => undefined)
+      }
+    }
   }
   revalidatePath('/dashboard')
   return { ok: true }
@@ -664,6 +678,19 @@ export async function updateDashboardTaskLead(taskId: string, leadId: string | n
       to: leadId,
       toName
     })
+    // Ping the new lead (never yourself).
+    if (leadId && leadId !== member.id) {
+      const { data: t } = await supabase
+        .from('tasks').select('ref, title').eq('id', taskId).maybeSingle()
+      if (t?.ref) {
+        await sendPushToMember(leadId, {
+          title: `You're now lead on ${t.ref}`,
+          body: t.title ?? '',
+          url: `/share/${t.ref}`,
+          tag: `task:${t.ref}`
+        }).catch(() => undefined)
+      }
+    }
   }
   revalidatePath('/dashboard')
   return { ok: true }
@@ -1045,6 +1072,30 @@ export async function addComment(taskId: string, body: string, mentions?: string
           invited_by: member.id
         })),
         { onConflict: 'task_id,member_id', ignoreDuplicates: true }
+      )
+    }
+  }
+
+  // Fan out web-push to mentioned members (best-effort, never block the
+  // comment). The mention list is already deduped client-side; we still
+  // drop the author and the 'team' target to avoid self-pings.
+  if (mentionMemberIds.length > 0) {
+    const { data: taskRow } = await supabase
+      .from('tasks')
+      .select('ref, title')
+      .eq('id', taskId)
+      .maybeSingle()
+    if (taskRow?.ref) {
+      const trimmedBody = body.length > 140 ? `${body.slice(0, 137)}...` : body
+      await Promise.all(
+        mentionMemberIds.map((id) =>
+          sendPushToMember(id, {
+            title: `${member.fullName} mentioned you on ${taskRow.ref}`,
+            body: trimmedBody,
+            url: `/share/${taskRow.ref}`,
+            tag: `task:${taskRow.ref}`
+          }).catch(() => undefined)
+        )
       )
     }
   }
@@ -1756,6 +1807,64 @@ export async function fetchMemberPortfolio(memberId: string) {
   }
 }
 
+// ─── Push notifications (Slice D) ────────────────────────────────────────
+// Client subscribes via PushManager once the user enables notifications in
+// Settings; the resulting subscription gets persisted here so we can fan
+// out web-push messages from the server when mentions / assignments /
+// invites land.
+const SubscriptionInput = z.object({
+  endpoint: z.string().url(),
+  p256dh: z.string().min(1),
+  auth: z.string().min(1),
+  userAgent: z.string().nullish()
+})
+
+export async function savePushSubscription(
+  input: z.input<typeof SubscriptionInput>
+) {
+  const member = await getCurrentTeamMember()
+  if (!member) return { error: 'Not signed in.' }
+  const parsed = SubscriptionInput.safeParse(input)
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
+  }
+  const supabase = createAdminClient()
+  const { error } = await supabase.from('push_subscriptions').upsert(
+    {
+      endpoint: parsed.data.endpoint,
+      member_id: member.id,
+      p256dh: parsed.data.p256dh,
+      auth: parsed.data.auth,
+      user_agent: parsed.data.userAgent ?? null
+    },
+    { onConflict: 'endpoint' }
+  )
+  if (error) return { error: error.message }
+  return { ok: true }
+}
+
+export async function deletePushSubscription(endpoint: string) {
+  const member = await getCurrentTeamMember()
+  if (!member) return { error: 'Not signed in.' }
+  const supabase = createAdminClient()
+  // member_id check stops a signed-in member from blowing away someone
+  // else's subscription by guessing an endpoint.
+  await supabase
+    .from('push_subscriptions')
+    .delete()
+    .eq('endpoint', endpoint)
+    .eq('member_id', member.id)
+  return { ok: true }
+}
+
+export async function fetchPushPublicKey() {
+  // Wrapped so the client can call it through the action surface without
+  // exposing server-only modules.
+  const me = await getCurrentTeamMember()
+  if (!me) return { error: 'Not signed in.' }
+  return { publicKey: await getVapidPublicKey() }
+}
+
 // ─── Member presence override ─────────────────────────────────────────────
 // Admin / lead-only direct edit of another member's activity_status.
 // Used from the sidebar right-click menu to mark someone on vacation /
@@ -1854,6 +1963,22 @@ export async function addTaskWatcher(input: z.input<typeof AddWatcherInput>) {
     parsed.data.taskId,
     { memberId: parsed.data.memberId, memberName: target.full_name }
   )
+  // Ping the new spectator (never yourself).
+  if (parsed.data.memberId !== member.id) {
+    const { data: t } = await supabase
+      .from('tasks')
+      .select('ref, title')
+      .eq('id', parsed.data.taskId)
+      .maybeSingle()
+    if (t?.ref) {
+      await sendPushToMember(parsed.data.memberId, {
+        title: `Invited to watch ${t.ref}`,
+        body: t.title ?? '',
+        url: `/share/${t.ref}`,
+        tag: `task:${t.ref}`
+      }).catch(() => undefined)
+    }
+  }
   revalidatePath('/dashboard')
   return { ok: true }
 }

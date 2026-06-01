@@ -36,6 +36,8 @@ import {
 import { BoardTask, BoardAssignee } from './boardData'
 import Avatar from './Avatar'
 import { startDashboardTour } from './DashboardTour'
+import { usePushSubscription } from './usePushSubscription'
+import { useInstallPrompt } from './useInstallPrompt'
 import {
   GithubIcon,
   FigmaIcon,
@@ -2056,11 +2058,67 @@ export function SettingsPanel({
 }) {
   const { t } = useDashTheme()
   const router = useRouter()
+  const push = usePushSubscription()
+  const install = useInstallPrompt()
 
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="flex flex-col gap-5">
         <h2 className={`text-lg font-medium ${t.text}`}>Workspace settings</h2>
+
+        <Row label="Install app">
+          {install.state === 'installed' ? (
+            <span className={`text-[11px] ${t.textMuted}`}>Installed.</span>
+          ) : install.state === 'available' ? (
+            <button
+              onClick={() => install.prompt()}
+              className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-[11px] transition ${t.border} ${t.tab}`}
+            >
+              Install Backstage
+            </button>
+          ) : install.state === 'ios-manual' ? (
+            <span className={`text-[11px] ${t.textMuted}`}>
+              On iOS: tap Share -&gt; Add to Home Screen, then open it from
+              there to receive push notifications.
+            </span>
+          ) : (
+            <span className={`text-[11px] ${t.textMuted}`}>
+              Use your browser&apos;s install / Add-to-home-screen option.
+            </span>
+          )}
+        </Row>
+
+        <Row label="Notifications">
+          {push.permission === 'unsupported' ? (
+            <span className={`text-[11px] ${t.textMuted}`}>
+              This browser doesn&apos;t support web push.
+              {install.state !== 'installed'
+                ? ' On iOS you need to install Backstage first.'
+                : ''}
+            </span>
+          ) : push.permission === 'denied' ? (
+            <span className={`text-[11px] ${t.textMuted}`}>
+              Blocked at the browser level. Enable in site settings.
+            </span>
+          ) : (
+            <button
+              onClick={() => (push.subscribed ? push.disable() : push.enable())}
+              aria-pressed={push.subscribed}
+              disabled={push.busy}
+              className={`relative h-6 w-11 rounded-full border transition disabled:opacity-50 ${
+                push.subscribed
+                  ? 'border-teal-500 bg-teal-500'
+                  : t.surfaceMuted + ' ' + t.border
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 size-4 rounded-full bg-white transition-transform ${
+                  push.subscribed ? 'translate-x-5' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          )}
+        </Row>
 
         {onboardingComplete && (
           <Row label="Profile">

@@ -44,6 +44,9 @@ import {
   listTaskWatchers as listTaskWatchersImpl,
   removeTaskWatcher as removeTaskWatcherImpl,
   updateMemberActivityStatus as updateMemberActivityStatusImpl,
+  savePushSubscription as savePushSubscriptionImpl,
+  deletePushSubscription as deletePushSubscriptionImpl,
+  fetchPushPublicKey as fetchPushPublicKeyImpl,
   updateDashboardTaskAssignee as updateDashboardTaskAssigneeImpl,
   updateDashboardTaskDetails as updateDashboardTaskDetailsImpl,
   updateDashboardTaskLead as updateDashboardTaskLeadImpl,
@@ -320,4 +323,22 @@ export async function updateMemberActivityStatus(
   ...args: Parameters<typeof updateMemberActivityStatusImpl>
 ) {
   return updateMemberActivityStatusImpl(...args)
+}
+
+export async function savePushSubscription(
+  ...args: Parameters<typeof savePushSubscriptionImpl>
+) {
+  return savePushSubscriptionImpl(...args)
+}
+
+export async function deletePushSubscription(
+  ...args: Parameters<typeof deletePushSubscriptionImpl>
+) {
+  return deletePushSubscriptionImpl(...args)
+}
+
+export async function fetchPushPublicKey(
+  ...args: Parameters<typeof fetchPushPublicKeyImpl>
+) {
+  return fetchPushPublicKeyImpl(...args)
 }

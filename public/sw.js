@@ -10,8 +10,8 @@
 //     stale-while-revalidate.
 //   - Everything else (API, Supabase, server actions): network only.
 
-const SHELL_CACHE = 'verbivore-shell-v2'
-const ASSET_CACHE = 'verbivore-assets-v2'
+const SHELL_CACHE = 'verbivore-shell-v3'
+const ASSET_CACHE = 'verbivore-assets-v3'
 
 // Pre-cache the minimum needed to render an offline shell. Keep this tiny;
 // every entry here is a forced download on install.
@@ -97,6 +97,62 @@ self.addEventListener('fetch', (event) => {
         })
         .catch(() => null)
       return cached ?? (await networkPromise) ?? Response.error()
+    })()
+  )
+})
+
+// ── Push notifications ──────────────────────────────────────────────────
+// Payload shape (from lib/push.ts -> PushPayload):
+//   { title, body, url, tag? }
+// `tag` collapses repeat pushes about the same task into one OS tray
+// entry. The icon falls back to the PWA logo we already pre-cache.
+
+self.addEventListener('push', (event) => {
+  if (!event.data) return
+  let payload
+  try {
+    payload = event.data.json()
+  } catch {
+    payload = { title: 'Verbivore', body: event.data.text() }
+  }
+  const title = payload.title || 'Verbivore'
+  const options = {
+    body: payload.body || '',
+    icon: '/logos/pwa-192x192.png',
+    badge: '/logos/pwa-64x64.png',
+    tag: payload.tag,
+    data: { url: payload.url || '/dashboard' },
+    renotify: !!payload.tag
+  }
+  event.waitUntil(self.registration.showNotification(title, options))
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const url = event.notification.data?.url || '/dashboard'
+  event.waitUntil(
+    (async () => {
+      const allClients = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true
+      })
+      // Prefer an already-open dashboard tab: focus + navigate it so we
+      // don't pile up new windows.
+      for (const client of allClients) {
+        try {
+          const u = new URL(client.url)
+          if (u.origin === self.location.origin) {
+            await client.focus()
+            if ('navigate' in client) {
+              try {
+                await client.navigate(url)
+              } catch {}
+            }
+            return
+          }
+        } catch {}
+      }
+      await self.clients.openWindow(url)
     })()
   )
 })
