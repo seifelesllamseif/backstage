@@ -853,12 +853,12 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                             e.currentTarget.value.replace(/\D/g, '').slice(0, 20)
                           )
                         }
-                        placeholder="33612345678"
+                        placeholder="35699123456"
                         className="placeholder:text-muted-foreground w-full bg-transparent py-1 text-xs/relaxed outline-none"
                       />
                     </div>
                     <p className="text-muted-foreground mt-1 text-[10px]">
-                      Digits only, country code first (e.g. 33 for France).
+                      Digits only, country code first (e.g. 356 for Malta).
                       We&apos;ll store it as https://wa.me/<i>{whatsappPhone || '…'}</i>.
                     </p>
                   </Field>
