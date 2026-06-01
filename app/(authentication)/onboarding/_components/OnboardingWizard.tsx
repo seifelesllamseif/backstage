@@ -14,7 +14,8 @@ import {
   skipOnboardingFinish,
   skipPasswordStep,
   skipToStep,
-  updateAbout,
+  updateAboutBasics,
+  updateAboutWork,
   updateIdentity,
   updatePassword,
   updateSocials,
@@ -51,7 +52,8 @@ const STEP_TITLES = [
   'Verify your details',
   'Add a profile photo',
   'Social links',
-  'About you'
+  'About you',
+  'Your work'
 ] as const
 
 // Curated suggestion lists. Static by design (decision 0029 follow-up):
@@ -449,16 +451,25 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
     })
   }
 
-  function submitAbout(skip: boolean) {
+  function submitAboutBasics() {
+    startTransition(async () => {
+      const r = await updateAboutBasics({
+        roleFocus,
+        timezone,
+        workStyle,
+        languages: languages.map((s) => s.trim()).filter(Boolean),
+        headline
+      })
+      if (!r.ok) setError(r.error)
+      else advance()
+    })
+  }
+
+  function submitAboutWork(skip: boolean) {
     startTransition(async () => {
       const r = skip
         ? await skipOnboardingFinish()
-        : await updateAbout({
-            roleFocus,
-            timezone,
-            workStyle,
-            languages: languages.map((s) => s.trim()).filter(Boolean),
-            headline,
+        : await updateAboutWork({
             workLinks: workLinks.filter((l) => l.label.trim() && l.url.trim()),
             skills: skills.filter((s) => s.label.trim())
           })
@@ -514,7 +525,9 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
               {step === 3 &&
                 "All optional. Leave anything blank you'd rather not share."}
               {step === 4 &&
-                "Skip if you'd rather come back later, your profile will still work."}
+                'Who you are. All optional, but the more you fill in the easier it is for teammates to place you.'}
+              {step === 5 &&
+                "Links + skills. Skip if you'd rather come back later, your profile still works."}
             </p>
             <div className="mt-5">
               {step === 0 && (
@@ -935,6 +948,17 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                       maxLength={140}
                     />
                   </Field>
+                  <Footer
+                    onBack={back}
+                    onNext={submitAboutBasics}
+                    nextLabel="Continue"
+                    pending={pending}
+                  />
+                </FieldGroup>
+              )}
+
+              {step === 5 && (
+                <FieldGroup className="gap-4">
                   <Field>
                     <FieldLabel>Work links</FieldLabel>
                     <WorkLinksEditor
@@ -945,7 +969,7 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                   <Field>
                     <FieldLabel>Skills</FieldLabel>
                     <p className="text-muted-foreground text-[10px]">
-                      Rate yourself Beginner to Expert. Free-form — add whatever
+                      Rate yourself Beginner to Expert. Free-form, add whatever
                       applies.
                     </p>
                     <SkillsEditor value={skills} onChange={setSkills} />
@@ -957,13 +981,13 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                     <div className="flex gap-2">
                       <Button
                         variant="outline"
-                        onClick={() => submitAbout(true)}
+                        onClick={() => submitAboutWork(true)}
                         disabled={pending}
                       >
                         Skip and finish
                       </Button>
                       <Button
-                        onClick={() => submitAbout(false)}
+                        onClick={() => submitAboutWork(false)}
                         disabled={pending}
                       >
                         {pending ? 'Saving…' : 'Save and finish'}

@@ -241,7 +241,9 @@ export async function updateSocials(formData: FormData): Promise<ActionResult> {
   return { ok: true };
 }
 
-// ── Step 5 (optional): about you — combined ───────────────────────────────
+// ── Step 5 / 6: about you — split into "basics" and "work" ───────────────
+// Split per the UX refactor: step 5 saves the 'who I am' fields, step 6
+// saves the editor-heavy 'your work' fields. Both optional.
 const workLinkSchema = z.object({
   label: z.string().trim().min(1).max(40),
   url: z.string().trim().url(),
@@ -252,29 +254,30 @@ const skillSchema = z.object({
   level: z.number().int().min(1).max(5),
 });
 
-const aboutSchema = z.object({
+const aboutBasicsSchema = z.object({
   roleFocus: z.string().trim().max(80).or(z.literal("").transform(() => null)),
   timezone: z.string().trim().max(60).or(z.literal("").transform(() => null)),
   workStyle: z.string().trim().max(280).or(z.literal("").transform(() => null)),
   languages: z.array(z.string().trim().min(1)).max(20),
   headline: z.string().trim().max(140).or(z.literal("").transform(() => null)),
+});
+
+const aboutWorkSchema = z.object({
   workLinks: z.array(workLinkSchema).max(10),
   skills: z.array(skillSchema).max(30),
 });
 
-export async function updateAbout(payload: {
+export async function updateAboutBasics(payload: {
   roleFocus: string;
   timezone: string;
   workStyle: string;
   languages: string[];
   headline: string;
-  workLinks: { label: string; url: string }[];
-  skills: { label: string; level: number }[];
 }): Promise<ActionResult> {
   const member = await getCurrentTeamMember();
   if (!member) return { ok: false, error: "Not signed in." };
 
-  const parsed = aboutSchema.safeParse(payload);
+  const parsed = aboutBasicsSchema.safeParse(payload);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
@@ -288,12 +291,35 @@ export async function updateAbout(payload: {
       work_style: parsed.data.workStyle,
       languages: parsed.data.languages,
       headline: parsed.data.headline,
+    })
+    .eq("id", member.id);
+  if (error) return { ok: false, error: error.message };
+  await bumpStep(member.id, 5);
+  return { ok: true };
+}
+
+export async function updateAboutWork(payload: {
+  workLinks: { label: string; url: string }[];
+  skills: { label: string; level: number }[];
+}): Promise<ActionResult> {
+  const member = await getCurrentTeamMember();
+  if (!member) return { ok: false, error: "Not signed in." };
+
+  const parsed = aboutWorkSchema.safeParse(payload);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("team_members")
+    .update({
       work_links: parsed.data.workLinks.length ? parsed.data.workLinks : null,
       skills: parsed.data.skills.length ? parsed.data.skills : null,
     })
     .eq("id", member.id);
   if (error) return { ok: false, error: error.message };
-  await bumpStep(member.id, 5);
+  await bumpStep(member.id, 6);
   return { ok: true };
 }
 
@@ -303,7 +329,7 @@ export async function updateAbout(payload: {
 export async function skipOnboardingFinish(): Promise<ActionResult> {
   const member = await getCurrentTeamMember();
   if (!member) return { ok: false, error: "Not signed in." };
-  await bumpStep(member.id, 5);
+  await bumpStep(member.id, 6);
   return { ok: true };
 }
 
@@ -325,7 +351,7 @@ export async function skipPasswordStep(): Promise<ActionResult> {
 export async function skipToStep(step: number): Promise<ActionResult> {
   const member = await getCurrentTeamMember();
   if (!member) return { ok: false, error: "Not signed in." };
-  if (!Number.isInteger(step) || step < 0 || step > 5) {
+  if (!Number.isInteger(step) || step < 0 || step > 6) {
     return { ok: false, error: "Invalid step." };
   }
   await bumpStep(member.id, step);

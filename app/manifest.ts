@@ -2,8 +2,8 @@ import type { MetadataRoute } from 'next'
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Verbivore',
-    short_name: 'Verbivore',
+    name: 'Verbivore Backstage',
+    short_name: 'Verbivore Backstage',
     description:
       'Internal ops platform for Verbivore projects, tasks, and handoffs.',
     start_url: '/dashboard',
