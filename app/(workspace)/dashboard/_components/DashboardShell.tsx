@@ -2449,6 +2449,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   projects={initial.projects}
                   currentUserId={currentUserId}
                   accessTier={initial.currentMember.accessTier}
+                  allMembers={team}
                   onOpenProject={onOpenProject}
                   refsByProject={projectExternalRefs}
                   onAddProjectRef={addProjectExternalRef}

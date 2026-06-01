@@ -35,6 +35,7 @@ import {
 } from 'lucide-react'
 import { BoardTask, BoardAssignee } from './boardData'
 import Avatar from './Avatar'
+import { startDashboardTour } from './DashboardTour'
 import {
   GithubIcon,
   FigmaIcon,
@@ -94,6 +95,7 @@ export function ProjectsPanel({
   projects,
   currentUserId,
   accessTier,
+  allMembers,
   onOpenProject,
   refsByProject,
   onAddProjectRef,
@@ -105,6 +107,10 @@ export function ProjectsPanel({
   projects: ProjectRow[]
   currentUserId: string
   accessTier: 'admin' | 'lead' | 'member'
+  // Full company team. Used as the project member roster for members
+  // (whose visible task slice is just their own assignments, which would
+  // otherwise render "1 member" on every project card).
+  allMembers: BoardAssignee[]
   onOpenProject: (id: string) => void
   refsByProject: Record<string, ProjectExternalRef[]>
   onAddProjectRef: (projectId: string, url: string) => void
@@ -148,20 +154,32 @@ export function ProjectsPanel({
 
   // Distinct assignees per project, derived from the task assignee chips.
   // Sorted by name so the avatar order is stable across renders.
+  //
+  // Members only see their own tasks, so deriving from `byProject` would
+  // render "1 member" everywhere. For them we fall back to the full
+  // company team on every project; admins / leads keep the precise list.
   const membersByProject = useMemo(() => {
     const map = new Map<string, BoardAssignee[]>()
-    for (const [pid, list] of byProject) {
+    const fullTeam = [...allMembers].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    )
+    for (const project of projects) {
+      if (!canEdit) {
+        map.set(project.id, fullTeam)
+        continue
+      }
+      const list = byProject.get(project.id) ?? []
       const seen = new Map<string, BoardAssignee>()
       for (const task of list) {
         if (task.assignee) seen.set(task.assignee.id, task.assignee)
       }
       map.set(
-        pid,
+        project.id,
         [...seen.values()].sort((a, b) => a.name.localeCompare(b.name))
       )
     }
     return map
-  }, [byProject])
+  }, [byProject, projects, canEdit, allMembers])
 
   // Members only see projects where they have at least one assigned task.
   const visibleProjects = canEdit
@@ -2055,9 +2073,7 @@ export function SettingsPanel({
                 <UserCog className="size-3.5" /> Edit profile
               </button>
               <button
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent('dashboard:tour'))
-                }}
+                onClick={startDashboardTour}
                 className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition ${t.border} ${t.tab}`}
               >
                 <Compass className="size-3.5" /> Take a tour

@@ -10,6 +10,12 @@ import { useDashTheme } from './theme'
 interface MentionInputProps {
   onSubmit: (body: string, mentions: string[]) => void
   placeholder?: string
+  // Used to gate the special "team" target. Members shouldn't be able to
+  // ping the whole team from the dropdown (the scope-limited dashboard
+  // makes that a noisy / surprising action); admins and leads still can.
+  // Existing @team chips in already-posted comments still render either
+  // way - this only affects the suggestion dropdown.
+  accessTier?: 'admin' | 'lead' | 'member'
 }
 
 interface TriggerState {
@@ -112,11 +118,18 @@ function mentionColor(
 
 export default function MentionInput({
   onSubmit,
-  placeholder = 'Leave a comment… type @ to mention'
+  placeholder = 'Leave a comment… type @ to mention',
+  accessTier
 }: MentionInputProps) {
   const { t } = useDashTheme()
   const team = useTeam()
-  const targets = useMemo(() => buildMentionTargets(team), [team])
+  const targets = useMemo(() => {
+    const built = buildMentionTargets(team)
+    if (accessTier === 'member') {
+      return built.filter((t) => t.id !== 'team')
+    }
+    return built
+  }, [team, accessTier])
   const [value, setValue] = useState('')
   const [trigger, setTrigger] = useState<TriggerState>({
     active: false,

@@ -324,6 +324,7 @@ export default function TaskDetailContent({
         {canEditOwner ? (
           <div className="mt-3" onClick={(e) => e.stopPropagation()}>
             <MentionInput
+              accessTier={accessTier}
               onSubmit={(body, mentions) =>
                 onAddComment(task.id, body, mentions)
               }

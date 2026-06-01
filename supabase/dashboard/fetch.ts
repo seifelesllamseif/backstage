@@ -262,15 +262,6 @@ export async function fetchDashboardData(
   const taskList = rawTasks ?? []
   const taskIds = taskList.map((t) => t.id)
 
-  // "Project team" for non-admins: distinct assignees on the visible
-  // tasks, always including the current member so they can see themselves
-  // in pickers even before they are assigned anything.
-  const teamMemberIds = new Set<string>([member.id])
-  for (const t of taskList) {
-    if (t.assignee_id) teamMemberIds.add(t.assignee_id)
-    if (t.lead_id) teamMemberIds.add(t.lead_id)
-  }
-
   // Parallel fetches keyed on the visible task / project set.
   const projectScopeForSprintsAndRefs: string[] | null = projectId
     ? [projectId]
@@ -298,19 +289,16 @@ export async function fetchDashboardData(
     projectExternalRefsRes,
     refTasksRes
   ] = await Promise.all([
-    // members - scoped to project team for non-admins
-    (() => {
-      let q = supabase
-        .from('team_members')
-        .select('id, full_name, avatar_url, access_tier, slug')
-        .eq('company_id', member.companyId)
-        .order('full_name', { ascending: true })
-      if (myProjectIds !== null) {
-        const ids = [...teamMemberIds]
-        q = q.in('id', ids.length === 0 ? ['00000000-0000-0000-0000-000000000000'] : ids)
-      }
-      return q
-    })(),
+    // members - always the full company team. Members previously got a
+    // narrow slice (just the assignees / leads of their visible tasks),
+    // which rendered "1 member" on every project card and made @-mention
+    // pickers feel broken. The roster is small and read-only here, so we
+    // hand it down whole and let the UI decide what to show.
+    supabase
+      .from('team_members')
+      .select('id, full_name, avatar_url, access_tier, slug')
+      .eq('company_id', member.companyId)
+      .order('full_name', { ascending: true }),
     // projects - scoped to my projects for non-admins
     (() => {
       let q = supabase

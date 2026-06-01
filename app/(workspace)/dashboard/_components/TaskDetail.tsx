@@ -652,6 +652,7 @@ export default function TaskDetail({
       {canEditOwner ? (
         <div className={`border-t p-3 ${t.border}`}>
           <MentionInput
+            accessTier={accessTier}
             onSubmit={(body, mentions) =>
               onAddComment(task.id, body, mentions)
             }

@@ -21,6 +21,7 @@ import { STATUSES, TaskStatus } from './status'
 import StatusIcon from './StatusIcon'
 import { useTeam } from './TeamContext'
 import Avatar from './Avatar'
+import { startDashboardTour } from './DashboardTour'
 import { useDashTheme } from './theme'
 import { useContextMenu } from './ContextMenu'
 import { useTaskActions } from './actions'
@@ -331,9 +332,7 @@ export default function Sidebar({
             <SidebarItem
               icon={<Compass className="size-3.5" />}
               label="Take a tour"
-              onClick={() => {
-                window.dispatchEvent(new CustomEvent('dashboard:tour'))
-              }}
+              onClick={startDashboardTour}
               hint={
                 showHints
                   ? 'A quick 5-step walkthrough of the dashboard.'
