@@ -11,6 +11,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   skipOnboardingFinish,
+  skipPasswordStep,
   updateAbout,
   updateIdentity,
   updatePassword,
@@ -125,6 +126,23 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
       else advance();
     });
   }
+
+  function keepCurrentPassword() {
+    startTransition(async () => {
+      const r = await skipPasswordStep();
+      if (!r.ok) setError(r.error);
+      else advance();
+    });
+  }
+
+  // Returning user heuristic: any populated profile state means they
+  // were already in the app before. Surfaces a "Keep current password"
+  // skip on step 0 instead of forcing them to set a new one.
+  const isReturningUser =
+    initial.avatarUrl !== null ||
+    initial.fullName.trim().length > 0 ||
+    initial.bio.trim().length > 0 ||
+    initial.contactEmail.trim().length > 0;
 
   function submitIdentity() {
     const fd = new FormData();
@@ -266,7 +284,19 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                 onChange={(e) => setConfirm(e.currentTarget.value)}
               />
             </Field>
-            <div className="flex justify-end">
+            <div className="flex items-center justify-between gap-2">
+              {isReturningUser ? (
+                <button
+                  type="button"
+                  onClick={keepCurrentPassword}
+                  disabled={pending}
+                  className="text-muted-foreground hover:text-foreground text-xs underline-offset-2 hover:underline disabled:opacity-50"
+                >
+                  Keep current password
+                </button>
+              ) : (
+                <span />
+              )}
               <Button onClick={submitPassword} disabled={pending}>
                 {pending ? "Saving…" : "Continue"}
               </Button>

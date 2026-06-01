@@ -254,3 +254,13 @@ export async function skipOnboardingFinish(): Promise<ActionResult> {
   await bumpStep(member.id, 5);
   return { ok: true };
 }
+
+// Returning user wants to keep their existing password (admin reset
+// onboarding_step but their auth.users row still has the hash). Just
+// bumps the step pointer; no auth changes.
+export async function skipPasswordStep(): Promise<ActionResult> {
+  const member = await getCurrentTeamMember();
+  if (!member) return { ok: false, error: "Not signed in." };
+  await bumpStep(member.id, 1);
+  return { ok: true };
+}
