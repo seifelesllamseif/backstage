@@ -592,6 +592,49 @@ export type Database = {
           },
         ]
       }
+      task_watchers: {
+        Row: {
+          invited_at: string
+          invited_by: string | null
+          member_id: string
+          task_id: string
+        }
+        Insert: {
+          invited_at?: string
+          invited_by?: string | null
+          member_id: string
+          task_id: string
+        }
+        Update: {
+          invited_at?: string
+          invited_by?: string | null
+          member_id?: string
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_watchers_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_watchers_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_watchers_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
           assignee_id: string | null

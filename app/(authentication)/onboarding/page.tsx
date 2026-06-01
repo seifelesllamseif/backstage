@@ -28,6 +28,7 @@ async function OnboardingContent() {
       <OnboardingWizard
         initial={{
           userId: member.id,
+          email: member.email,
           startStep: member.onboardingStep,
           fullName: member.fullName,
           contactEmail: member.contactEmail ?? "",

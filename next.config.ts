@@ -13,6 +13,15 @@ const supabaseHostname = (() => {
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
+  // Default is 1 MB, which strands the onboarding avatar upload mid-flight
+  // (we allow up to 5 MB and the server action body has to fit the whole
+  // file). 10 MB gives headroom without opening the floodgates for unrelated
+  // actions.
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '10mb'
+    }
+  },
   images: {
     remotePatterns: [
       {

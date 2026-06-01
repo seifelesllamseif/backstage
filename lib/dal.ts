@@ -3,6 +3,7 @@ import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/supabase/server";
+import { createAdminClient } from "@/supabase/admin";
 import type { Database } from "@/supabase/types";
 import {
   DEFAULT_LOGIN_ROUTE,
@@ -133,10 +134,12 @@ export const requireOnboardingComplete = cache(async () => {
 });
 
 // Bumps last_seen_at on the caller's own row. Fired from the workspace layout
-// on every authenticated render. Self-mutation goes through the user-session
-// client, covered by the existing team_members_update_own policy.
+// inside Next's after() helper, which runs after the response is sent and
+// disallows cookies(). The user-session client depends on cookies, so we use
+// the service-role admin client here; safety comes from the caller having
+// already passed requireOnboardingComplete() with this exact memberId.
 export async function touchLastSeen(memberId: string): Promise<void> {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   await supabase
     .from("team_members")
     .update({ last_seen_at: new Date().toISOString() })

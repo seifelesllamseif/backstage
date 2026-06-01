@@ -15,6 +15,11 @@ export interface BoardAssignee {
   // URL-safe handle from team_members.slug. Used to render readable
   // /dashboard URLs (e.g. ?assignee=asim-selim) instead of UUIDs.
   slug?: string | null
+  // Presence inputs. lastSeenAt is the most recent workspace-layout
+  // touch; activityStatus is the stored manual override (or 'active').
+  // Consumers derive a display state via lib/presence.
+  lastSeenAt?: string | null
+  activityStatus?: 'active' | 'away' | 'on_vacation' | 'left'
 }
 
 export interface TaskRelation {
@@ -32,6 +37,7 @@ export interface BoardTask {
   id: string
   ref: string
   title: string
+  description?: string | null
   status: TaskStatus
   priority: TaskPriority
   assignee?: BoardAssignee

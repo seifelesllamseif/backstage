@@ -21,7 +21,13 @@ import {
 } from 'lucide-react'
 import { defaultExternalRefLabel, parseExternalRef } from '@/lib/externalRef'
 import type { TaskExternalRef, TaskExternalRefKind } from './boardData'
-import { fetchTaskHandoff } from '../actions'
+import {
+  addTaskWatcher,
+  fetchTaskHandoff,
+  listTaskWatchers,
+  removeTaskWatcher
+} from '../actions'
+import { toast } from 'sonner'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { VisuallyHidden } from 'radix-ui'
 import {
@@ -54,7 +60,7 @@ import {
   StripeIcon
 } from './BrandIcons'
 import { Rabbit } from 'lucide-react'
-import { BoardTask } from './boardData'
+import { BoardAssignee, BoardTask } from './boardData'
 import { useTeam } from './TeamContext'
 import {
   STATUS_BY_ID,
@@ -121,6 +127,8 @@ interface TaskDetailProps {
   onChangeAssignee: (id: string, assigneeId: string | null) => void
   onChangeLead: (id: string, leadId: string | null) => void
   onChangeDueDate: (id: string, dueIso: string | null) => void
+  onChangeTitle: (id: string, title: string) => void
+  onChangeDescription: (id: string, description: string | null) => void
   onAddComment: (id: string, body: string, mentions?: string[]) => void
   onEditComment: (commentId: string, body: string) => void
   onDeleteComment: (commentId: string) => void
@@ -158,6 +166,8 @@ export default function TaskDetail({
   onChangeAssignee,
   onChangeLead,
   onChangeDueDate,
+  onChangeTitle,
+  onChangeDescription,
   onAddComment,
   onEditComment,
   onDeleteComment,
@@ -253,9 +263,19 @@ export default function TaskDetail({
       </div>
 
       <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-5">
-        <h2 className={`text-xl leading-snug font-medium ${t.text}`}>
-          {task.title}
-        </h2>
+        <EditableTitle
+          value={task.title}
+          canEdit={canEditOwner}
+          onSave={(next) => onChangeTitle(task.id, next)}
+        />
+
+        <EditableDescription
+          value={task.description ?? ''}
+          canEdit={canEditOwner}
+          onSave={(next) =>
+            onChangeDescription(task.id, next.trim() ? next : null)
+          }
+        />
 
         <div className="grid grid-cols-[88px_1fr] items-center gap-y-2.5 text-xs">
           <FieldLabel>Status</FieldLabel>
@@ -394,20 +414,22 @@ export default function TaskDetail({
                 </span>
                 No lead
               </button>
-              {team.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => {
-                    onChangeLead(task.id, m.id)
-                    setLeadOpen(false)
-                  }}
-                  className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-xs ${
-                    task.lead?.id === m.id ? t.btnActive : t.tab
-                  }`}
-                >
-                  <Avatar user={m} size={20} />
-                  {m.name}
-                </button>
+              {team
+                .filter((m) => m.role === 'admin' || m.role === 'lead')
+                .map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      onChangeLead(task.id, m.id)
+                      setLeadOpen(false)
+                    }}
+                    className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-xs ${
+                      task.lead?.id === m.id ? t.btnActive : t.tab
+                    }`}
+                  >
+                    <Avatar user={m} size={20} />
+                    {m.name}
+                  </button>
               ))}
             </Popover>
             {task.lead &&
@@ -455,6 +477,14 @@ export default function TaskDetail({
             variant="compact"
           />
         </div>
+
+        <WatchersSection
+          taskId={task.id}
+          assigneeId={task.assignee?.id ?? null}
+          canInvite={canEditOwner}
+          currentUserId={currentUserId}
+          team={team}
+        />
 
         <LinksSection
           task={task}
@@ -725,6 +755,7 @@ function AskLeadSheet({
       <SheetContent
         side="right"
         showCloseButton={false}
+        aria-describedby={undefined}
         className={`w-full p-0 sm:max-w-120! ${t.detail}`}
       >
         <VisuallyHidden.Root>
@@ -1436,6 +1467,309 @@ function HandoffReadView({
             )
           })}
         </dl>
+      )}
+    </div>
+  )
+}
+
+function EditableTitle({
+  value,
+  canEdit,
+  onSave
+}: {
+  value: string
+  canEdit: boolean
+  onSave: (next: string) => void
+}) {
+  const { t } = useDashTheme()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+
+  // Reset the local draft whenever the upstream value changes (e.g. a
+  // server fetch returned a fresher title) so the displayed text stays in
+  // sync when the field is closed.
+  useEffect(() => {
+    if (!editing) setDraft(value)
+  }, [value, editing])
+
+  if (!editing) {
+    return (
+      <h2
+        className={`text-xl leading-snug font-medium ${t.text} ${
+          canEdit ? 'cursor-text rounded-sm hover:bg-foreground/5' : ''
+        }`}
+        onClick={() => canEdit && setEditing(true)}
+        title={canEdit ? 'Click to edit' : undefined}
+      >
+        {value}
+      </h2>
+    )
+  }
+
+  const commit = () => {
+    const next = draft.trim()
+    if (!next) {
+      setDraft(value)
+      setEditing(false)
+      return
+    }
+    if (next !== value) onSave(next)
+    setEditing(false)
+  }
+
+  return (
+    <input
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          commit()
+        } else if (e.key === 'Escape') {
+          setDraft(value)
+          setEditing(false)
+        }
+      }}
+      className={`w-full rounded-md border px-2 py-1 text-xl leading-snug font-medium outline-none focus:border-zinc-400 dark:focus:border-white/30 ${t.input}`}
+    />
+  )
+}
+
+function EditableDescription({
+  value,
+  canEdit,
+  onSave
+}: {
+  value: string
+  canEdit: boolean
+  onSave: (next: string) => void
+}) {
+  const { t } = useDashTheme()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+
+  useEffect(() => {
+    if (!editing) setDraft(value)
+  }, [value, editing])
+
+  if (!editing) {
+    return (
+      <div
+        onClick={() => canEdit && setEditing(true)}
+        title={canEdit ? 'Click to edit' : undefined}
+        className={`rounded-md ${
+          canEdit ? 'cursor-text hover:bg-foreground/5' : ''
+        }`}
+      >
+        {value ? (
+          <p className={`text-xs leading-relaxed whitespace-pre-wrap ${t.text}`}>
+            {value}
+          </p>
+        ) : (
+          <p className={`text-xs italic ${t.textSubtle}`}>
+            {canEdit ? 'Add a brief...' : 'No brief.'}
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  const commit = () => {
+    if (draft !== value) onSave(draft)
+    setEditing(false)
+  }
+
+  return (
+    <textarea
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          setDraft(value)
+          setEditing(false)
+        }
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault()
+          commit()
+        }
+      }}
+      rows={4}
+      placeholder="Add a brief - what does the next person need?"
+      className={`w-full resize-none rounded-md border px-2 py-1.5 text-xs leading-relaxed outline-none focus:border-zinc-400 dark:focus:border-white/30 ${t.input}`}
+    />
+  )
+}
+
+interface WatcherRow {
+  memberId: string
+  fullName: string
+  avatarUrl: string | null
+  invitedAt: string
+}
+
+function WatchersSection({
+  taskId,
+  assigneeId,
+  canInvite,
+  currentUserId,
+  team
+}: {
+  taskId: string
+  assigneeId: string | null
+  // True for admin / lead / assignee. Members who are watchers themselves
+  // can still leave (handled inside) but can't add others.
+  canInvite: boolean
+  currentUserId: string
+  team: BoardAssignee[]
+}) {
+  const { t } = useDashTheme()
+  const [watchers, setWatchers] = useState<WatcherRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pending, setPending] = useState(false)
+
+  const refresh = async () => {
+    setLoading(true)
+    const res = await listTaskWatchers(taskId)
+    if ('error' in res) {
+      toast.error(res.error)
+      setWatchers([])
+    } else {
+      setWatchers(
+        res.watchers.map((w) => ({
+          memberId: w.memberId,
+          fullName: w.fullName,
+          avatarUrl: w.avatarUrl,
+          invitedAt: w.invitedAt
+        }))
+      )
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    void refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId])
+
+  const watcherIdSet = new Set(watchers.map((w) => w.memberId))
+  const candidates = team.filter(
+    (m) => m.id !== assigneeId && !watcherIdSet.has(m.id)
+  )
+
+  const invite = (memberId: string) => {
+    setPending(true)
+    addTaskWatcher({ taskId, memberId })
+      .then((res) => {
+        if ('error' in res) {
+          toast.error(res.error)
+        } else {
+          toast.success('Watcher added.')
+          void refresh()
+        }
+      })
+      .finally(() => {
+        setPending(false)
+        setPickerOpen(false)
+      })
+  }
+
+  const remove = (memberId: string) => {
+    setPending(true)
+    removeTaskWatcher({ taskId, memberId })
+      .then((res) => {
+        if ('error' in res) toast.error(res.error)
+        else void refresh()
+      })
+      .finally(() => setPending(false))
+  }
+
+  if (loading && watchers.length === 0 && !canInvite) return null
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <span
+          className={`text-[10px] tracking-wider uppercase ${t.textMuted}`}
+        >
+          Watchers
+        </span>
+        {canInvite && (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setPickerOpen((v) => !v)}
+              disabled={pending || candidates.length === 0}
+              className={`inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[10px] transition disabled:opacity-50 ${t.btn}`}
+            >
+              + Invite
+            </button>
+            {pickerOpen && (
+              <div
+                className={`absolute right-0 z-30 mt-1 flex max-h-60 w-56 flex-col gap-0.5 overflow-y-auto rounded-md border p-1 text-xs shadow-lg ${t.detail}`}
+              >
+                {candidates.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => invite(m.id)}
+                    className={`flex items-center gap-2 rounded px-2 py-1.5 text-left text-xs ${t.tab}`}
+                  >
+                    <Avatar user={m} size={18} />
+                    <span className="truncate">{m.name}</span>
+                  </button>
+                ))}
+                {candidates.length === 0 && (
+                  <p className={`px-2 py-1.5 text-[11px] ${t.textMuted}`}>
+                    No one left to invite.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      {watchers.length === 0 ? (
+        <p className={`text-[11px] italic ${t.textSubtle}`}>
+          No watchers yet.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-1">
+          {watchers.map((w) => {
+            const teamMember = team.find((m) => m.id === w.memberId)
+            const canRemove = canInvite || w.memberId === currentUserId
+            return (
+              <div
+                key={w.memberId}
+                className="flex items-center gap-2 text-xs"
+              >
+                {teamMember ? (
+                  <Avatar user={teamMember} size={20} />
+                ) : (
+                  <span
+                    className={`inline-flex size-5 items-center justify-center rounded-full text-[9px] font-semibold ${t.surfaceMuted}`}
+                  >
+                    {w.fullName.slice(0, 2).toUpperCase()}
+                  </span>
+                )}
+                <span className="flex-1 truncate">{w.fullName}</span>
+                {canRemove && (
+                  <button
+                    type="button"
+                    onClick={() => remove(w.memberId)}
+                    disabled={pending}
+                    className={`text-[10px] underline-offset-2 hover:underline disabled:opacity-50 ${t.textMuted}`}
+                  >
+                    {w.memberId === currentUserId ? 'Leave' : 'Remove'}
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )

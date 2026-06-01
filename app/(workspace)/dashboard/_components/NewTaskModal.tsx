@@ -347,11 +347,13 @@ function ManualTab({
             className={`h-9 w-full rounded-md border px-2 text-xs focus:outline-none ${t.input}`}
           >
             <option value="">No lead</option>
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
+            {members
+              .filter((m) => m.role === 'admin' || m.role === 'lead')
+              .map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
           </select>
         </Field>
       </div>

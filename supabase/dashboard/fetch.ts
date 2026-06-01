@@ -97,6 +97,11 @@ export interface DashboardMemberRow {
   // URL-safe slug from team_members.slug. Powers readable filter URLs
   // (?assignee=asim-selim) and shareable per-member links.
   slug: string | null
+  // Presence signals. last_seen_at is bumped from the workspace layout's
+  // after() hook; activity_status is manually set (or stays 'active').
+  // The UI derives the displayed badge from both via lib/presence.
+  lastSeenAt: string | null
+  activityStatus: Database['public']['Enums']['activity_status']
 }
 
 export interface DashboardProjectRow {
@@ -209,21 +214,37 @@ export async function fetchDashboardData(
   const supabase = createAdminClient()
 
   // Admins and leads see everything in the company. Members see only "their
-  // projects" - projects where they have >=1 assigned task. There is no
-  // ProjectMember table yet, so member-project membership is derived from
-  // task assignments.
+  // projects" - projects where they have >=1 assigned task OR where they're
+  // a watcher on a task (Slice B). There is no ProjectMember table yet, so
+  // member-project membership is derived from task assignments + watchers.
   const seesAllProjects =
     member.accessTier === 'admin' || member.accessTier === 'lead'
   let myProjectIds: string[] | null = null
+  // Tasks the member is explicitly invited to watch. Used both in the task
+  // query (`assignee_id == me OR id IN watcherTaskIds`) and to pull the
+  // hosting projects into the scope.
+  let watcherTaskIds: string[] = []
   if (!seesAllProjects) {
-    const { data: assignedRows, error } = await supabase
-      .from('tasks')
-      .select('project_id')
-      .eq('company_id', member.companyId)
-      .eq('assignee_id', member.id)
-    if (error) throw error
+    const [assignedRes, watcherRes] = await Promise.all([
+      supabase
+        .from('tasks')
+        .select('project_id')
+        .eq('company_id', member.companyId)
+        .eq('assignee_id', member.id),
+      supabase
+        .from('task_watchers')
+        .select('task_id, task:tasks!task_watchers_task_id_fkey(project_id)')
+        .eq('member_id', member.id)
+    ])
+    if (assignedRes.error) throw assignedRes.error
+    if (watcherRes.error) throw watcherRes.error
     const ids = new Set<string>()
-    for (const r of assignedRows ?? []) ids.add(r.project_id)
+    for (const r of assignedRes.data ?? []) ids.add(r.project_id)
+    for (const r of watcherRes.data ?? []) {
+      watcherTaskIds.push(r.task_id)
+      const t = Array.isArray(r.task) ? r.task[0] : r.task
+      if (t?.project_id) ids.add(t.project_id)
+    }
     myProjectIds = [...ids]
     if (projectId && !myProjectIds.includes(projectId)) {
       myProjectIds = []
@@ -249,12 +270,18 @@ export async function fetchDashboardData(
     }
   }
 
-  // Members see only tasks they're personally assigned. Admins and leads
-  // still see the full project. This replaces the prior "project context"
-  // scope where a member who was assigned one task in a project could see
-  // every other task in that project too.
+  // Members see only tasks they're personally assigned OR tasks they've
+  // been invited to watch (Slice B). Admins and leads still see the full
+  // project. The two axes are unioned via PostgREST .or() so a single
+  // query covers both cases.
   if (!seesAllProjects) {
-    taskQuery = taskQuery.eq('assignee_id', member.id)
+    if (watcherTaskIds.length === 0) {
+      taskQuery = taskQuery.eq('assignee_id', member.id)
+    } else {
+      taskQuery = taskQuery.or(
+        `assignee_id.eq.${member.id},id.in.(${watcherTaskIds.join(',')})`
+      )
+    }
   }
 
   const { data: rawTasks, error: tasksError } = await taskQuery
@@ -296,7 +323,9 @@ export async function fetchDashboardData(
     // hand it down whole and let the UI decide what to show.
     supabase
       .from('team_members')
-      .select('id, full_name, avatar_url, access_tier, slug')
+      .select(
+        'id, full_name, avatar_url, access_tier, slug, last_seen_at, activity_status'
+      )
       .eq('company_id', member.companyId)
       .order('full_name', { ascending: true }),
     // projects - scoped to my projects for non-admins
@@ -570,7 +599,9 @@ export async function fetchDashboardData(
     fullName: m.full_name,
     avatarUrl: m.avatar_url,
     accessTier: m.access_tier,
-    slug: m.slug
+    slug: m.slug,
+    lastSeenAt: m.last_seen_at,
+    activityStatus: m.activity_status
   }))
 
   const projects: DashboardProjectRow[] = (projectsRes.data ?? []).map((p) => ({

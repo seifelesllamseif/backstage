@@ -108,7 +108,7 @@ async function logActivity(
 // optimistic UI in DashboardShell rolls back on { error }.
 async function ensureTaskAccess(
   taskId: string,
-  kind: 'planner' | 'owner'
+  kind: 'planner' | 'owner' | 'commenter'
 ): Promise<
   | { member: Awaited<ReturnType<typeof getCurrentTeamMember>> & object }
   | { error: string }
@@ -132,10 +132,20 @@ async function ensureTaskAccess(
     .eq('company_id', member.companyId)
     .maybeSingle()
   if (!task) return { error: 'Task not found.' }
-  if (task.assignee_id !== member.id) {
-    return { error: 'You can only edit tasks assigned to you.' }
+  if (task.assignee_id === member.id) return { member }
+  // Watchers (Slice B) are allowed to comment but NOT to invoke owner-level
+  // edits (title / description / status / assignee / etc.). Only widen the
+  // gate for the 'commenter' kind.
+  if (kind === 'commenter') {
+    const { data: watcher } = await supabase
+      .from('task_watchers')
+      .select('member_id')
+      .eq('task_id', taskId)
+      .eq('member_id', member.id)
+      .maybeSingle()
+    if (watcher) return { member }
   }
-  return { member }
+  return { error: 'You can only edit tasks assigned to you.' }
 }
 
 // ─── Bulk-add validation (decision 0025) ──────────────────────────────────
@@ -198,6 +208,21 @@ export async function createDashboardTask(data: {
     .eq('company_id', member.companyId)
     .maybeSingle()
   if (!project) return { error: 'Project not found.' }
+
+  // Same lead-tier constraint as updateDashboardTaskLead. Run before the
+  // INSERT so we never persist a member as the "ask for help" target.
+  if (data.leadId) {
+    const { data: candidate } = await supabase
+      .from('team_members')
+      .select('access_tier')
+      .eq('id', data.leadId)
+      .eq('company_id', member.companyId)
+      .maybeSingle()
+    if (!candidate) return { error: 'Lead not found.' }
+    if (candidate.access_tier === 'member') {
+      return { error: 'Lead must be an admin or a lead.' }
+    }
+  }
 
   const prefix = project.name.split(/\s+/)[0].toUpperCase().slice(0, 4)
   const ref = `${prefix}-${nextSeq}`
@@ -601,6 +626,22 @@ export async function updateDashboardTaskLead(taskId: string, leadId: string | n
   const { member } = gate
   const supabase = createAdminClient()
 
+  // Leads can only be admins or leads. Members shouldn't be set as the
+  // "ask for help" person for someone equal or senior; UI pickers already
+  // filter this, defend at the action boundary too.
+  if (leadId) {
+    const { data: candidate } = await supabase
+      .from('team_members')
+      .select('access_tier')
+      .eq('id', leadId)
+      .eq('company_id', member.companyId)
+      .maybeSingle()
+    if (!candidate) return { error: 'Lead not found.' }
+    if (candidate.access_tier === 'member') {
+      return { error: 'Lead must be an admin or a lead.' }
+    }
+  }
+
   const { data: prev } = await supabase
     .from('tasks')
     .select('lead_id, lead:team_members!task_lead_id_fkey(full_name)')
@@ -636,6 +677,80 @@ export async function updateDashboardTaskLead(taskId: string, leadId: string | n
 // tag always reflects the MOST RECENT change. No tag added when going
 // from null -> date (there's nothing to compare against) or when the
 // date doesn't actually change.
+// Title + description live together because edits typically come from the
+// task detail's body and the activity log only needs one entry per save.
+const UpdateTaskDetailsInput = z
+  .object({
+    taskId: z.string().uuid(),
+    title: z.string().trim().min(1).max(500).optional(),
+    description: z.string().trim().max(5000).nullable().optional()
+  })
+  .refine(
+    (v) => v.title !== undefined || v.description !== undefined,
+    { message: 'Nothing to update.' }
+  )
+
+export async function updateDashboardTaskDetails(
+  input: z.input<typeof UpdateTaskDetailsInput>
+) {
+  const parsed = UpdateTaskDetailsInput.safeParse(input)
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
+  }
+  const gate = await ensureTaskAccess(parsed.data.taskId, 'owner')
+  if ('error' in gate) return { error: gate.error }
+  const { member } = gate
+  const supabase = createAdminClient()
+
+  const { data: prev } = await supabase
+    .from('tasks')
+    .select('title, description')
+    .eq('id', parsed.data.taskId)
+    .eq('company_id', member.companyId)
+    .maybeSingle()
+  if (!prev) return { error: 'Task not found.' }
+
+  const patch: Database['public']['Tables']['tasks']['Update'] = {}
+  if (parsed.data.title !== undefined) patch.title = parsed.data.title
+  if (parsed.data.description !== undefined) {
+    patch.description = parsed.data.description
+  }
+  if (Object.keys(patch).length === 0) return { ok: true }
+
+  const { error } = await supabase
+    .from('tasks')
+    .update(patch)
+    .eq('id', parsed.data.taskId)
+  if (error) return { error: error.message }
+
+  if (parsed.data.title !== undefined && parsed.data.title !== prev.title) {
+    await logActivity(
+      supabase,
+      member.companyId,
+      member.id,
+      'task.title_changed',
+      'task',
+      parsed.data.taskId,
+      { from: prev.title, to: parsed.data.title }
+    )
+  }
+  if (
+    parsed.data.description !== undefined &&
+    parsed.data.description !== prev.description
+  ) {
+    await logActivity(
+      supabase,
+      member.companyId,
+      member.id,
+      'task.description_changed',
+      'task',
+      parsed.data.taskId
+    )
+  }
+  revalidatePath('/dashboard')
+  return { ok: true }
+}
+
 export async function updateDashboardTaskDueDate(
   taskId: string,
   dueDate: string | null
@@ -876,7 +991,7 @@ export async function duplicateDashboardTask(taskId: string) {
 // ─── Comments ─────────────────────────────────────────────────────────────
 
 export async function addComment(taskId: string, body: string, mentions?: string[]) {
-  const gate = await ensureTaskAccess(taskId, 'owner')
+  const gate = await ensureTaskAccess(taskId, 'commenter')
   if ('error' in gate) return { error: gate.error }
   const { member } = gate
   const supabase = createAdminClient()
@@ -1518,4 +1633,180 @@ export async function renameProject(formData: FormData): Promise<RenameProjectSt
   }
   revalidatePath('/dashboard')
   return undefined
+}
+
+// ─── Member portfolio (sidebar peek) ──────────────────────────────────────
+// Fetches a teammate's profile fields for the right-side portfolio sheet.
+// Scoped to the viewer's company. Read-only.
+export async function fetchMemberPortfolio(memberId: string) {
+  const viewer = await getCurrentTeamMember()
+  if (!viewer) return { error: 'Not signed in.' }
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('team_members')
+    .select(
+      'id, full_name, avatar_url, access_tier, bio, contact_email, headline, role_focus, timezone, work_style, languages, social_linkedin, social_instagram, social_whatsapp, work_links, skills'
+    )
+    .eq('id', memberId)
+    .eq('company_id', viewer.companyId)
+    .maybeSingle()
+  if (error) return { error: error.message }
+  if (!data) return { error: 'Member not found.' }
+  return {
+    member: {
+      id: data.id,
+      fullName: data.full_name,
+      avatarUrl: data.avatar_url,
+      accessTier: data.access_tier,
+      bio: data.bio,
+      contactEmail: data.contact_email,
+      headline: data.headline,
+      roleFocus: data.role_focus,
+      timezone: data.timezone,
+      workStyle: data.work_style,
+      languages: data.languages ?? [],
+      socialLinkedin: data.social_linkedin,
+      socialInstagram: data.social_instagram,
+      socialWhatsapp: data.social_whatsapp,
+      workLinks: Array.isArray(data.work_links)
+        ? (data.work_links as { label: string; url: string }[])
+        : [],
+      skills: Array.isArray(data.skills)
+        ? (data.skills as { label: string; level: number }[])
+        : []
+    }
+  }
+}
+
+// ─── Task watchers (Slice B: spectators) ──────────────────────────────────
+// A watcher is a teammate who can view + comment on a task they aren't
+// assigned to. Invite rights mirror the 'owner' gate (admin / lead /
+// assignee). Watching is per-task; dependencies are not implied.
+const AddWatcherInput = z.object({
+  taskId: z.string().uuid(),
+  memberId: z.string().uuid()
+})
+
+export async function addTaskWatcher(input: z.input<typeof AddWatcherInput>) {
+  const parsed = AddWatcherInput.safeParse(input)
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
+  }
+  const gate = await ensureTaskAccess(parsed.data.taskId, 'owner')
+  if ('error' in gate) return { error: gate.error }
+  const { member } = gate
+  const supabase = createAdminClient()
+
+  // Confirm the target lives in this company; rejects cross-tenant ids.
+  const { data: target } = await supabase
+    .from('team_members')
+    .select('id, full_name')
+    .eq('id', parsed.data.memberId)
+    .eq('company_id', member.companyId)
+    .maybeSingle()
+  if (!target) return { error: 'Member not found.' }
+
+  // Skip if the target is already the assignee - they already see it.
+  const { data: task } = await supabase
+    .from('tasks')
+    .select('assignee_id')
+    .eq('id', parsed.data.taskId)
+    .eq('company_id', member.companyId)
+    .maybeSingle()
+  if (!task) return { error: 'Task not found.' }
+  if (task.assignee_id === parsed.data.memberId) {
+    return { error: 'That member is already the assignee.' }
+  }
+
+  const { error } = await supabase
+    .from('task_watchers')
+    .upsert(
+      {
+        task_id: parsed.data.taskId,
+        member_id: parsed.data.memberId,
+        invited_by: member.id
+      },
+      { onConflict: 'task_id,member_id', ignoreDuplicates: true }
+    )
+  if (error) return { error: error.message }
+
+  await logActivity(
+    supabase,
+    member.companyId,
+    member.id,
+    'task.watcher_added',
+    'task',
+    parsed.data.taskId,
+    { memberId: parsed.data.memberId, memberName: target.full_name }
+  )
+  revalidatePath('/dashboard')
+  return { ok: true }
+}
+
+const RemoveWatcherInput = z.object({
+  taskId: z.string().uuid(),
+  memberId: z.string().uuid()
+})
+
+export async function removeTaskWatcher(
+  input: z.input<typeof RemoveWatcherInput>
+) {
+  const parsed = RemoveWatcherInput.safeParse(input)
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
+  }
+  // Watchers can remove themselves; everyone else needs owner-level access.
+  const me = await getCurrentTeamMember()
+  if (!me) return { error: 'Not signed in.' }
+  if (me.id !== parsed.data.memberId) {
+    const gate = await ensureTaskAccess(parsed.data.taskId, 'owner')
+    if ('error' in gate) return { error: gate.error }
+  }
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from('task_watchers')
+    .delete()
+    .eq('task_id', parsed.data.taskId)
+    .eq('member_id', parsed.data.memberId)
+  if (error) return { error: error.message }
+
+  await logActivity(
+    supabase,
+    me.companyId,
+    me.id,
+    'task.watcher_removed',
+    'task',
+    parsed.data.taskId,
+    { memberId: parsed.data.memberId }
+  )
+  revalidatePath('/dashboard')
+  return { ok: true }
+}
+
+export async function listTaskWatchers(taskId: string) {
+  const me = await getCurrentTeamMember()
+  if (!me) return { error: 'Not signed in.' }
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('task_watchers')
+    .select(
+      'member_id, invited_at, invited_by, member:team_members!task_watchers_member_id_fkey(id, full_name, avatar_url, access_tier, slug)'
+    )
+    .eq('task_id', taskId)
+    .order('invited_at', { ascending: true })
+  if (error) return { error: error.message }
+  return {
+    watchers: (data ?? []).map((row) => {
+      const m = Array.isArray(row.member) ? row.member[0] : row.member
+      return {
+        memberId: row.member_id,
+        invitedBy: row.invited_by,
+        invitedAt: row.invited_at,
+        fullName: m?.full_name ?? '',
+        avatarUrl: m?.avatar_url ?? null,
+        accessTier: m?.access_tier ?? 'member',
+        slug: m?.slug ?? null
+      }
+    })
+  }
 }

@@ -2,12 +2,13 @@
 
 import Image from 'next/image'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   AtSign,
-  Inbox,
   Info,
   LayoutGrid,
   Star,
+  Target,
   Users,
   Bell,
   Settings,
@@ -22,6 +23,8 @@ import StatusIcon from './StatusIcon'
 import { useTeam } from './TeamContext'
 import Avatar from './Avatar'
 import { startDashboardTour } from './DashboardTour'
+import { getPresence, PRESENCE_LABEL, presenceRank } from './presence'
+import { usePortfolioSheet } from './PortfolioSheet'
 import { useDashTheme } from './theme'
 import { useContextMenu } from './ContextMenu'
 import { useTaskActions } from './actions'
@@ -39,7 +42,7 @@ import {
 const HINTS = {
   all: 'Every task in your projects.',
   mine: 'Tasks assigned to you.',
-  inbox: 'Tasks ready to start (Todo) or waiting for review.',
+  inbox: 'Todo + In Review in the active sprint.',
   mentions: 'Tasks where someone @-mentioned you in a comment.',
   archive: 'Completed sprints and old tasks.',
   projects: 'Discover and switch to another project',
@@ -99,10 +102,20 @@ export default function Sidebar({
   const { t } = useDashTheme()
   const { open } = useContextMenu()
   const a = useTaskActions()
+  const router = useRouter()
   const team = useTeam()
+  const { open: openPortfolio } = usePortfolioSheet()
+  // Self first; remaining members ordered by how reachable they look right
+  // now (online > active today > away > on vacation > left).
   const orderedTeam = [
     ...team.filter((m) => m.id === currentUserId),
-    ...team.filter((m) => m.id !== currentUserId)
+    ...team
+      .filter((m) => m.id !== currentUserId)
+      .sort((a, b) => {
+        const dr = presenceRank(a) - presenceRank(b)
+        if (dr !== 0) return dr
+        return a.name.localeCompare(b.name)
+      })
   ]
 
   const memberMenu = (
@@ -112,6 +125,12 @@ export default function Sidebar({
   ) => {
     const isActive = assigneeFilter.includes(memberId)
     open(e, [
+      {
+        id: 'profile',
+        label: 'View profile',
+        icon: <Users className="size-3.5" />,
+        onSelect: () => openPortfolio(memberId)
+      },
       {
         id: 'filter',
         label: isActive
@@ -198,8 +217,8 @@ export default function Sidebar({
             hint={showHints ? HINTS.mine : undefined}
           />
           <SidebarItem
-            icon={<Inbox className="size-3.5" />}
-            label="Inbox"
+            icon={<Target className="size-3.5" />}
+            label="Active"
             count={counts.inbox}
             active={secondary === 'inbox'}
             onClick={() => onView('inbox')}
@@ -271,17 +290,33 @@ export default function Sidebar({
             </span>
             Everyone
           </SidebarFilter>
-          {orderedTeam.map((m) => (
-            <SidebarFilter
-              key={m.id}
-              active={assigneeFilter.includes(m.id)}
-              onClick={() => onToggleAssignee(m.id)}
-              onContextMenu={(e) => memberMenu(e, m.id, m.name)}
-            >
-              <Avatar user={m} size={20} />
-              <span className="truncate">{m.name}</span>
-            </SidebarFilter>
-          ))}
+          {orderedTeam.map((m) => {
+            const presence = getPresence(m)
+            const isOut = presence === 'on_vacation' || presence === 'left'
+            return (
+              <SidebarFilter
+                key={m.id}
+                active={assigneeFilter.includes(m.id)}
+                onClick={() => onToggleAssignee(m.id)}
+                onContextMenu={(e) => memberMenu(e, m.id, m.name)}
+              >
+                <Avatar user={m} size={20} showPresence />
+                <span
+                  className={`truncate ${isOut ? 'opacity-50' : ''}`}
+                  title={PRESENCE_LABEL[presence]}
+                >
+                  {m.name}
+                </span>
+                {isOut && (
+                  <span
+                    className={`ml-auto shrink-0 text-[9px] tracking-wide uppercase ${t.textSubtle}`}
+                  >
+                    {presence === 'left' ? 'Left' : 'PTO'}
+                  </span>
+                )}
+              </SidebarFilter>
+            )
+          })}
         </div>
 
         <div className="mt-auto flex flex-col gap-0.5">
@@ -332,7 +367,7 @@ export default function Sidebar({
             <SidebarItem
               icon={<Compass className="size-3.5" />}
               label="Take a tour"
-              onClick={startDashboardTour}
+              onClick={() => startDashboardTour(router)}
               hint={
                 showHints
                   ? 'A quick 5-step walkthrough of the dashboard.'

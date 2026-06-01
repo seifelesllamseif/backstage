@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { driver } from 'driver.js'
 import 'driver.js/dist/driver.css'
+import type { useRouter } from 'next/navigation'
 
 // 5-step intro for new members landing on the dashboard. Targets stable
 // data-tour attributes added on the sidebar, project switcher, board
@@ -18,24 +19,26 @@ import 'driver.js/dist/driver.css'
 //   sidebar 'Take a tour' button). Always runs.
 
 const STORAGE_KEY = 'dashboard.tour.seen.v1'
-// Set by Sidebar/Settings "Take a tour" when fired from a page that doesn't
-// host the tour selectors (anything other than /dashboard/board). The board
-// route reads this on mount and runs the tour once.
-const PENDING_KEY = 'dashboard.tour.pending'
 const BOARD_ROUTE = '/dashboard/board'
 
-export function startDashboardTour() {
+// Soft-navigates to the board if we're not there, then dispatches the manual
+// trigger event once the board page elements (the tour's data-tour targets)
+// have mounted. Callers pass router so we don't hard-reload the page.
+export function startDashboardTour(router: ReturnType<typeof useRouter>) {
   if (typeof window === 'undefined') return
   if (window.location.pathname === BOARD_ROUTE) {
     window.dispatchEvent(new CustomEvent('dashboard:tour'))
     return
   }
-  try {
-    window.sessionStorage.setItem(PENDING_KEY, '1')
-  } catch {}
-  // Hard nav so DashboardTour re-mounts and the pending flag fires in the
-  // same render where board selectors exist.
-  window.location.href = BOARD_ROUTE
+  router.push(BOARD_ROUTE)
+  // Wait long enough for the route swap + DashboardChrome / board to paint.
+  // The DashboardTour listener stays mounted across /dashboard/* navigation
+  // so the dispatched event is caught on the new route.
+  window.setTimeout(() => {
+    if (document.querySelector(selector('sidebar'))) {
+      window.dispatchEvent(new CustomEvent('dashboard:tour'))
+    }
+  }, 600)
 }
 
 function selector(name: string): string {
@@ -116,7 +119,6 @@ export function DashboardTour() {
     // First-visit auto-trigger. Defer to after paint so the targets
     // are mounted; do nothing if the user has seen it before.
     let timer: number | undefined
-    let pendingTimer: number | undefined
     try {
       const seen = window.localStorage.getItem(STORAGE_KEY)
       if (!seen) {
@@ -127,21 +129,11 @@ export function DashboardTour() {
           makeDriver().drive()
         }, 800)
       }
-      // Cross-route trigger: another page set the pending flag and
-      // navigated us here, where the board selectors live. Consume once.
-      if (window.sessionStorage.getItem(PENDING_KEY) === '1') {
-        window.sessionStorage.removeItem(PENDING_KEY)
-        pendingTimer = window.setTimeout(() => {
-          if (!document.querySelector(selector('sidebar'))) return
-          makeDriver().drive()
-        }, 800)
-      }
     } catch {}
 
     return () => {
       window.removeEventListener('dashboard:tour', handler)
       if (timer) window.clearTimeout(timer)
-      if (pendingTimer) window.clearTimeout(pendingTimer)
     }
   }, [])
 

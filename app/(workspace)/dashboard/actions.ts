@@ -38,7 +38,12 @@ import {
   submitHandoffForReview as submitHandoffForReviewImpl,
   toggleChecklistItem as toggleChecklistItemImpl,
   unarchiveProject as unarchiveProjectImpl,
+  addTaskWatcher as addTaskWatcherImpl,
+  fetchMemberPortfolio as fetchMemberPortfolioImpl,
+  listTaskWatchers as listTaskWatchersImpl,
+  removeTaskWatcher as removeTaskWatcherImpl,
   updateDashboardTaskAssignee as updateDashboardTaskAssigneeImpl,
+  updateDashboardTaskDetails as updateDashboardTaskDetailsImpl,
   updateDashboardTaskLead as updateDashboardTaskLeadImpl,
   updateDashboardTaskPriority as updateDashboardTaskPriorityImpl,
   updateDashboardTaskDueDate as updateDashboardTaskDueDateImpl,
@@ -109,6 +114,12 @@ export async function updateDashboardTaskLead(
   ...args: Parameters<typeof updateDashboardTaskLeadImpl>
 ) {
   return updateDashboardTaskLeadImpl(...args)
+}
+
+export async function updateDashboardTaskDetails(
+  ...args: Parameters<typeof updateDashboardTaskDetailsImpl>
+) {
+  return updateDashboardTaskDetailsImpl(...args)
 }
 
 export async function updateDashboardTaskDueDate(
@@ -271,4 +282,28 @@ export async function renameProject(
   ...args: Parameters<typeof renameProjectImpl>
 ) {
   return renameProjectImpl(...args)
+}
+
+export async function fetchMemberPortfolio(
+  ...args: Parameters<typeof fetchMemberPortfolioImpl>
+) {
+  return fetchMemberPortfolioImpl(...args)
+}
+
+export async function addTaskWatcher(
+  ...args: Parameters<typeof addTaskWatcherImpl>
+) {
+  return addTaskWatcherImpl(...args)
+}
+
+export async function removeTaskWatcher(
+  ...args: Parameters<typeof removeTaskWatcherImpl>
+) {
+  return removeTaskWatcherImpl(...args)
+}
+
+export async function listTaskWatchers(
+  ...args: Parameters<typeof listTaskWatchersImpl>
+) {
+  return listTaskWatchersImpl(...args)
 }

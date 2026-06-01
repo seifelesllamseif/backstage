@@ -60,6 +60,8 @@ export function mapMember(
     photo: member.avatarUrl ?? undefined,
     role: member.accessTier,
     slug: member.slug ?? null,
+    lastSeenAt: member.lastSeenAt,
+    activityStatus: member.activityStatus,
   };
 }
 
@@ -111,6 +113,7 @@ export function mapTask(
     id: task.id,
     ref: task.ref ?? task.id.slice(0, 8).toUpperCase(),
     title: task.title,
+    description: task.description,
     status: task.status as TaskStatus,
     priority: task.priority as TaskPriority,
     assignee,

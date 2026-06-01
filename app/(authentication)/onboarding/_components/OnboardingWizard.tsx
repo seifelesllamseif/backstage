@@ -25,6 +25,10 @@ type Skill = { label: string; level: number }
 
 export type OnboardingInitial = {
   userId: string
+  // Auth email (verbivore.app). Surfaced as a hidden `username` input on
+  // the password step so Chrome / Google Password Manager pairs the new
+  // password with this user instead of skipping the save prompt.
+  email: string
   startStep: number
   fullName: string
   contactEmail: string
@@ -44,6 +48,14 @@ export type OnboardingInitial = {
   workLinks: WorkLink[]
   skills: Skill[]
 }
+
+// Kept in sync with the server-side check in onboarding/actions.ts.
+const ALLOWED_AVATAR_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp'
+])
+const MAX_AVATAR_BYTES = 5 * 1024 * 1024
 
 const STEP_TITLES = [
   'Set a new password',
@@ -213,14 +225,33 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
       setError('Pick an image first.')
       return
     }
+    // Validate client-side BEFORE shipping the file to the server action.
+    // Without this, a video or oversized image would sit on the wire
+    // waiting on a body the server has already capped, leaving the
+    // wizard stuck on "Uploading…".
+    if (!ALLOWED_AVATAR_TYPES.has(avatarFile.type)) {
+      setError('Image must be JPG, PNG, or WEBP.')
+      return
+    }
+    if (avatarFile.size > MAX_AVATAR_BYTES) {
+      setError('Image must be 5 MB or smaller.')
+      return
+    }
     setUploading(true)
     setError(null)
-    const fd = new FormData()
-    fd.set('file', avatarFile)
-    const r = await uploadAvatar(fd)
-    setUploading(false)
-    if (!r.ok) setError(r.error)
-    else advance()
+    try {
+      const fd = new FormData()
+      fd.set('file', avatarFile)
+      const r = await uploadAvatar(fd)
+      if (!r.ok) setError(r.error)
+      else advance()
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Upload failed. Try again."
+      )
+    } finally {
+      setUploading(false)
+    }
   }
 
   function submitSocials() {
@@ -317,61 +348,86 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
             </p>
             <div className="mt-5">
               {step === 0 && (
-                <FieldGroup className="gap-4">
-                  <Field>
-                    <FieldLabel htmlFor="password">New password</FieldLabel>
-                    <div className="relative">
+                // <form> + autocomplete="username" hidden input is the
+                // pattern Chrome / Google Password Manager looks for to
+                // offer to save the new password. Without it the save
+                // prompt is silently skipped.
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    submitPassword()
+                  }}
+                >
+                  <FieldGroup className="gap-4">
+                    <input
+                      type="email"
+                      name="username"
+                      autoComplete="username"
+                      value={initial.email}
+                      readOnly
+                      hidden
+                    />
+                    <Field>
+                      <FieldLabel htmlFor="password">New password</FieldLabel>
+                      <div className="relative">
+                        <Input
+                          id="password"
+                          name="new-password"
+                          type={showPw ? 'text' : 'password'}
+                          autoComplete="new-password"
+                          value={password}
+                          onChange={(e) => setPassword(e.currentTarget.value)}
+                          className="pr-7"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPw((v) => !v)}
+                          className="text-muted-foreground hover:text-foreground absolute inset-y-0 right-1 flex items-center"
+                          tabIndex={-1}
+                          aria-label={
+                            showPw ? 'Hide password' : 'Show password'
+                          }
+                        >
+                          {showPw ? (
+                            <EyeOff className="size-3.5" />
+                          ) : (
+                            <Eye className="size-3.5" />
+                          )}
+                        </button>
+                      </div>
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="confirm">
+                        Confirm password
+                      </FieldLabel>
                       <Input
-                        id="password"
+                        id="confirm"
+                        name="confirm-password"
                         type={showPw ? 'text' : 'password'}
                         autoComplete="new-password"
-                        value={password}
-                        onChange={(e) => setPassword(e.currentTarget.value)}
-                        className="pr-7"
+                        value={confirm}
+                        onChange={(e) => setConfirm(e.currentTarget.value)}
                       />
-                      <button
-                        type="button"
-                        onClick={() => setShowPw((v) => !v)}
-                        className="text-muted-foreground hover:text-foreground absolute inset-y-0 right-1 flex items-center"
-                        tabIndex={-1}
-                        aria-label={showPw ? 'Hide password' : 'Show password'}
-                      >
-                        {showPw ? (
-                          <EyeOff className="size-3.5" />
-                        ) : (
-                          <Eye className="size-3.5" />
-                        )}
-                      </button>
+                    </Field>
+                    <div className="flex items-center justify-between gap-2">
+                      {isReturningUser ? (
+                        <button
+                          type="button"
+                          onClick={keepCurrentPassword}
+                          disabled={pending}
+                          className="text-muted-foreground hover:text-foreground text-xs underline-offset-2 hover:underline disabled:opacity-50"
+                        >
+                          Keep current password
+                        </button>
+                      ) : (
+                        <span />
+                      )}
+                      <Button type="submit" disabled={pending}>
+                        {pending ? 'Saving…' : 'Continue'}
+                      </Button>
                     </div>
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="confirm">Confirm password</FieldLabel>
-                    <Input
-                      id="confirm"
-                      type={showPw ? 'text' : 'password'}
-                      autoComplete="new-password"
-                      value={confirm}
-                      onChange={(e) => setConfirm(e.currentTarget.value)}
-                    />
-                  </Field>
-                  <div className="flex items-center justify-between gap-2">
-                    {isReturningUser ? (
-                      <button
-                        type="button"
-                        onClick={keepCurrentPassword}
-                        disabled={pending}
-                        className="text-muted-foreground hover:text-foreground text-xs underline-offset-2 hover:underline disabled:opacity-50"
-                      >
-                        Keep current password
-                      </button>
-                    ) : (
-                      <span />
-                    )}
-                    <Button onClick={submitPassword} disabled={pending}>
-                      {pending ? 'Saving…' : 'Continue'}
-                    </Button>
-                  </div>
-                </FieldGroup>
+                  </FieldGroup>
+                </form>
               )}
 
               {step === 1 && (
@@ -453,7 +509,7 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                             : 'Choose an image'}
                         <input
                           type="file"
-                          accept="image/jpeg,image/png,image/webp"
+                          accept="image/*"
                           className="sr-only"
                           onChange={(e) => {
                             const f = e.currentTarget.files?.[0] ?? null

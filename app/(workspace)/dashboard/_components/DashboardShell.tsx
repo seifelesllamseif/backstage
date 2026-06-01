@@ -42,6 +42,7 @@ import {
   removeProjectExternalRef as removeProjectExternalRefAction,
   removeTaskExternalRef as removeTaskExternalRefAction,
   updateDashboardTaskAssignee,
+  updateDashboardTaskDetails,
   updateDashboardTaskDueDate,
   updateDashboardTaskLead,
   updateDashboardTaskPriority,
@@ -87,6 +88,7 @@ import { DashboardThemeProvider, useDashTheme } from './theme'
 import { ContextMenuProvider, useContextMenu } from './ContextMenu'
 import { TaskActionsProvider } from './actions'
 import { TeamProvider } from './TeamContext'
+import { PortfolioSheetProvider } from './PortfolioSheet'
 import { useDashboardSearchParams } from './useDashboardSearchParams'
 
 export type GroupBy = 'status' | 'assignee' | 'priority'
@@ -373,7 +375,9 @@ export default function DashboardShellWrapper(props: {
     <DashboardThemeProvider>
       <ContextMenuProvider>
         <TeamProvider members={props.initial.members}>
-          <DashboardShellInner {...props} />
+          <PortfolioSheetProvider>
+            <DashboardShellInner {...props} />
+          </PortfolioSheetProvider>
         </TeamProvider>
       </ContextMenuProvider>
     </DashboardThemeProvider>
@@ -442,31 +446,18 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   // Resync local state when the server hands us fresh data via router.refresh
   // (bulk create, "reset board", project switch). Per-mutation flows update
   // local state optimistically and don't refresh, so this only fires at the
-  // moments where the server is the source of truth.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+  // moments where the server is the source of truth. Uses render-time state
+  // adjustment (React-recommended) instead of effects.
+  const [prevInitial, setPrevInitial] = useState(initial)
+  if (prevInitial.tasks !== initial.tasks) {
+    setPrevInitial(initial)
     setTasks(initial.tasks)
-  }, [initial.tasks])
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setComments(initial.commentsByTask)
-  }, [initial.commentsByTask])
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setActivity(initial.activityByTask)
-  }, [initial.activityByTask])
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSprints(initial.sprints)
-  }, [initial.sprints])
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setExternalRefs(initial.externalRefsByTask)
-  }, [initial.externalRefsByTask])
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setProjectExternalRefs(initial.externalRefsByProject)
-  }, [initial.externalRefsByProject])
+  }
 
   // The active tab + view + feed are all derived from the URL (pathname for
   // the route, search params for feed) so that browser back/forward, refresh,
@@ -550,22 +541,31 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     router.push(qs ? `${route}?${qs}` : route)
   }
 
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   // Deep-link: open the task slide-over when ?task=<ref> is in the URL.
   // Used by the public /share/<ref> page's "Open in Backstage" CTA.
-  // Strips the param after handling so a refresh / share doesn't keep
-  // forcing the same task open.
+  // Derives the initial selectedId during render to avoid setState inside
+  // an effect; then strips the param via router.replace in an effect.
+  const deepLinkRef = currentSearchParams.get('task')
+  const deepLinkMatch = deepLinkRef
+    ? tasks.find((t) => t.ref === deepLinkRef)
+    : undefined
+  const [selectedId, setSelectedId] = useState<string | null>(
+    deepLinkMatch?.id ?? null
+  )
+  const [handledDeepLink, setHandledDeepLink] = useState<string | null>(null)
+  if (deepLinkRef && deepLinkMatch && handledDeepLink !== deepLinkRef) {
+    setHandledDeepLink(deepLinkRef)
+    setSelectedId(deepLinkMatch.id)
+  }
+  // Strip the ?task= param after handling so a refresh / share doesn't
+  // keep forcing the same task open.
   useEffect(() => {
-    const ref = currentSearchParams.get('task')
-    if (!ref) return
-    const match = tasks.find((t) => t.ref === ref)
-    if (!match) return
-    setSelectedId(match.id)
+    if (!deepLinkRef || !deepLinkMatch) return
     const params = new URLSearchParams(currentSearchParams.toString())
     params.delete('task')
     const qs = params.toString()
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
-  }, [currentSearchParams, tasks, router, pathname])
+  }, [deepLinkRef, deepLinkMatch, currentSearchParams, router, pathname])
   // Open task descriptor for the handoff sheet. Populated when a Done
   // move is blocked by the slice-2 handoff gate.
   const [handoffTaskTarget, setHandoffTaskTarget] = useState<{
@@ -592,33 +592,32 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   )
 
-  const [density, setDensity] = useState<'compact' | 'cozy'>('cozy')
-  const [wipLimit, setWipLimit] = useState(0)
+  const [density, setDensity] = useState<'compact' | 'cozy'>(() => {
+    if (typeof window === 'undefined') return 'cozy'
+    const stored = window.localStorage.getItem('dashboard.density')
+    return stored === 'compact' || stored === 'cozy' ? stored : 'cozy'
+  })
+  const [wipLimit, setWipLimit] = useState(() => {
+    if (typeof window === 'undefined') return 0
+    const stored = window.localStorage.getItem('dashboard.wipLimit')
+    if (stored !== null) {
+      const n = Number(stored)
+      if (Number.isFinite(n) && n >= 0) return n
+    }
+    return 0
+  })
   // Mobile-only: controls the Sheet that wraps the Sidebar on small
   // screens. Always false on desktop because the static sidebar covers it.
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   // Help hints in the sidebar. Persisted to localStorage so members who
   // turn them off don't see them again on refresh. Defaults to on so the
-  // first thing a new member sees explains the navigation.
-  const [showHints, setShowHints] = useState(true)
-  useEffect(() => {
-    // Lazy initializer + suppressHydrationWarning would avoid this
-    // setState, but only at the cost of a hydration mismatch (the
-    // server can't read localStorage). One mount-time re-render is the
-    // lesser evil here — these three flips are visual-only.
-    const storedHints = window.localStorage.getItem('dashboard.showHints')
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (storedHints === '0') setShowHints(false)
-    const storedDensity = window.localStorage.getItem('dashboard.density')
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (storedDensity === 'compact' || storedDensity === 'cozy') setDensity(storedDensity)
-    const storedWip = window.localStorage.getItem('dashboard.wipLimit')
-    if (storedWip !== null) {
-      const n = Number(storedWip)
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (Number.isFinite(n) && n >= 0) setWipLimit(n)
-    }
-  }, [])
+  // first thing a new member sees explains the navigation. Lazy
+  // initializers read localStorage on the client; SSR falls back to the
+  // default value (visual-only state, no meaningful hydration mismatch).
+  const [showHints, setShowHints] = useState(() => {
+    if (typeof window === 'undefined') return true
+    return window.localStorage.getItem('dashboard.showHints') !== '0'
+  })
   useEffect(() => {
     window.localStorage.setItem('dashboard.showHints', showHints ? '1' : '0')
   }, [showHints])
@@ -678,15 +677,36 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     return set
   }, [comments, currentUserId])
 
+  // Task ids that live in any sprint currently marked `current`. Returns
+  // null when no sprint is active so callers can fall back to the prior
+  // unscoped behavior (mainly the Inbox / sprint-focus view).
+  const activeSprintTaskIdSet = useMemo<Set<string> | null>(() => {
+    const current = sprints.filter((s) => s.status === 'current')
+    if (current.length === 0) return null
+    const set = new Set<string>()
+    for (const s of current) {
+      for (const id of s.taskIds) set.add(id)
+    }
+    return set
+  }, [sprints])
+
   const filtered = useMemo(() => {
     let list = visibleTasks
 
     if (view === 'mine')
       list = list.filter((task) => task.assignee?.id === currentUserId)
-    if (view === 'inbox')
-      list = list.filter(
-        (task) => task.status === 'todo' || task.status === 'in_review'
-      )
+    if (view === 'inbox') {
+      // "Sprint focus" view: actionable statuses in the active sprint(s).
+      // If no sprint is currently active, fall back to all actionable tasks
+      // so the view still shows something useful.
+      list = list.filter((task) => {
+        const actionable =
+          task.status === 'todo' || task.status === 'in_review'
+        if (!actionable) return false
+        if (activeSprintTaskIdSet === null) return true
+        return activeSprintTaskIdSet.has(task.id)
+      })
+    }
     if (view === 'mentions')
       list = list.filter((task) => mentionedTaskIds.has(task.id))
 
@@ -738,16 +758,21 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     sprints,
     query,
     currentUserId,
-    mentionedTaskIds
+    mentionedTaskIds,
+    activeSprintTaskIdSet
   ])
 
   const counts = {
     all: visibleTasks.length,
     mine: visibleTasks.filter((task) => task.assignee?.id === currentUserId)
       .length,
-    inbox: visibleTasks.filter(
-      (task) => task.status === 'todo' || task.status === 'in_review'
-    ).length,
+    inbox: visibleTasks.filter((task) => {
+      const actionable =
+        task.status === 'todo' || task.status === 'in_review'
+      if (!actionable) return false
+      if (activeSprintTaskIdSet === null) return true
+      return activeSprintTaskIdSet.has(task.id)
+    }).length,
     mentions: visibleTasks.filter((task) => mentionedTaskIds.has(task.id))
       .length
   }
@@ -967,6 +992,43 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         return
       }
       invalidateDashboard()
+    })
+  }
+
+  const updateTitle = (id: string, title: string) => {
+    const trimmed = title.trim()
+    if (!trimmed) return
+    setTasks((cur) =>
+      cur.map((task) => (task.id === id ? { ...task, title: trimmed } : task))
+    )
+    startTransition(async () => {
+      const res = await updateDashboardTaskDetails({
+        taskId: id,
+        title: trimmed
+      })
+      if ('error' in res) {
+        console.error('updateTitle:', res.error)
+        toast.error("Couldn't update title.")
+      }
+    })
+  }
+
+  const updateDescription = (id: string, description: string | null) => {
+    const next = description === null ? null : description.trim()
+    setTasks((cur) =>
+      cur.map((task) =>
+        task.id === id ? { ...task, description: next } : task
+      )
+    )
+    startTransition(async () => {
+      const res = await updateDashboardTaskDetails({
+        taskId: id,
+        description: next
+      })
+      if ('error' in res) {
+        console.error('updateDescription:', res.error)
+        toast.error("Couldn't update description.")
+      }
     })
   }
 
@@ -1778,7 +1840,10 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     toggleStatusFilter: toggleStatus,
     clearStatusFilter: () => setStatusFilter([]),
     toggleAssigneeFilter: toggleAssignee,
-    clearAssigneeFilter: () => setAssigneeFilter([])
+    clearAssigneeFilter: () => setAssigneeFilter([]),
+    canDeleteTasks:
+      initial.currentMember.accessTier === 'admin' ||
+      initial.currentMember.accessTier === 'lead'
   }
 
   const onProjectChange = (projectId: string | null) => {
@@ -1925,7 +1990,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           </Link>
           <span
             aria-live="polite"
-            className={`pointer-events-none absolute left-1/2 hidden -translate-x-1/2 truncate text-[11px] tracking-[0.05em] sm:inline ${t.textMuted}`}
+            className={`pointer-events-none absolute left-1/2 hidden -translate-x-1/2 truncate text-[11px] tracking-wider sm:inline ${t.textMuted}`}
           >
             <span
               key={wordmarkPhase}
@@ -2032,6 +2097,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
             <SheetContent
               side="left"
+              aria-describedby={undefined}
               className="w-64 max-w-[80vw] gap-0 p-0 md:hidden"
             >
               <SheetTitle className="sr-only">Navigation</SheetTitle>
@@ -2093,7 +2159,9 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 // user there so the choice is immediately visible.
                 if (tab !== 'board') {
                   const qs = currentSearchParams.toString()
-                  router.push(qs ? `/dashboard/board?${qs}` : '/dashboard/board')
+                  router.push(
+                    qs ? `/dashboard/board?${qs}` : '/dashboard/board'
+                  )
                 }
               }}
               groupOpen={groupOpen}
@@ -2582,6 +2650,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               <SheetContent
                 side="right"
                 showCloseButton={false}
+                aria-describedby={undefined}
                 className={`w-full p-0 sm:max-w-160! ${t.detail}`}
               >
                 <VisuallyHidden.Root>
@@ -2604,6 +2673,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                     onChangeAssignee={updateAssignee}
                     onChangeLead={updateLead}
                     onChangeDueDate={updateDueDate}
+                    onChangeTitle={updateTitle}
+                    onChangeDescription={updateDescription}
                     onAddComment={addComment}
                     onEditComment={editComment}
                     onDeleteComment={deleteComment}

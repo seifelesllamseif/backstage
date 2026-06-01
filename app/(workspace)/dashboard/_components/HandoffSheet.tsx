@@ -323,6 +323,7 @@ export default function HandoffSheet({
       <SheetContent
         side="right"
         showCloseButton={false}
+        aria-describedby={undefined}
         className={`w-full p-0 sm:max-w-160! ${t.detail}`}
       >
         <VisuallyHidden.Root>

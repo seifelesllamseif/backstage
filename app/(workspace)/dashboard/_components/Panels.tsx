@@ -2055,6 +2055,7 @@ export function SettingsPanel({
   onboardingComplete: boolean
 }) {
   const { t } = useDashTheme()
+  const router = useRouter()
 
   return (
     <div className="h-full overflow-y-auto p-6">
@@ -2063,22 +2064,14 @@ export function SettingsPanel({
 
         {onboardingComplete && (
           <Row label="Profile">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                onClick={() => {
-                  window.location.href = '/onboarding'
-                }}
-                className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition ${t.border} ${t.tab}`}
-              >
-                <UserCog className="size-3.5" /> Edit profile
-              </button>
-              <button
-                onClick={startDashboardTour}
-                className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition ${t.border} ${t.tab}`}
-              >
-                <Compass className="size-3.5" /> Take a tour
-              </button>
-            </div>
+            <button
+              onClick={() => {
+                window.location.href = '/onboarding'
+              }}
+              className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition ${t.border} ${t.tab}`}
+            >
+              <UserCog className="size-3.5" /> Edit profile
+            </button>
           </Row>
         )}
 
@@ -2093,6 +2086,7 @@ export function SettingsPanel({
           />
         </Row>
 
+        {/* WIP limit per column - hidden for now.
         <Row label="WIP limit per column">
           <input
             type="number"
@@ -2102,6 +2096,7 @@ export function SettingsPanel({
             className={`h-9 w-24 rounded-md border px-2 text-xs ${t.input}`}
           />
         </Row>
+        */}
 
         <Row label="Show help hints">
           <button
@@ -2120,6 +2115,17 @@ export function SettingsPanel({
             />
           </button>
         </Row>
+
+        {onboardingComplete && (
+          <Row label="Walkthrough">
+            <button
+              onClick={() => startDashboardTour(router)}
+              className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition ${t.border} ${t.tab}`}
+            >
+              <Compass className="size-3.5" /> Take a tour
+            </button>
+          </Row>
+        )}
 
       </div>
     </div>
