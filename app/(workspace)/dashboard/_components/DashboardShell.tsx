@@ -550,6 +550,21 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   }
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Deep-link: open the task slide-over when ?task=<ref> is in the URL.
+  // Used by the public /share/<ref> page's "Open in Backstage" CTA.
+  // Strips the param after handling so a refresh / share doesn't keep
+  // forcing the same task open.
+  useEffect(() => {
+    const ref = currentSearchParams.get('task')
+    if (!ref) return
+    const match = tasks.find((t) => t.ref === ref)
+    if (!match) return
+    setSelectedId(match.id)
+    const params = new URLSearchParams(currentSearchParams.toString())
+    params.delete('task')
+    const qs = params.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }, [currentSearchParams, tasks, router, pathname])
   // Open task descriptor for the handoff sheet. Populated when a Done
   // move is blocked by the slice-2 handoff gate.
   const [handoffTaskTarget, setHandoffTaskTarget] = useState<{
