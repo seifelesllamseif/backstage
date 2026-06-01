@@ -54,6 +54,135 @@ const STEP_TITLES = [
   'About you'
 ] as const
 
+// Curated suggestion lists. Static by design (decision 0029 follow-up):
+// fast, predictable, no server calls; easy to extend by editing this
+// array. The chip pickers below render the first 8 by default with a
+// 'Show more' toggle so the form stays compact.
+const ROLE_SUGGESTIONS = [
+  'Frontend',
+  'Backend',
+  'Full-stack',
+  'Mobile',
+  'Design',
+  'QA',
+  'DevOps',
+  'Data',
+  'Product',
+  'Content',
+  'Marketing',
+  'Sales',
+  'Customer support',
+  'Transcription',
+  'Security',
+  'Legal & compliance',
+  'Finance',
+  'People & HR',
+  'Operations',
+  'Research'
+] as const
+
+const TIMEZONE_SUGGESTIONS = [
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Europe/Istanbul',
+  'Africa/Cairo',
+  'Asia/Karachi',
+  'Asia/Dubai',
+  'Asia/Kolkata',
+  'Asia/Singapore',
+  'Asia/Tokyo',
+  'America/Los_Angeles',
+  'America/Denver',
+  'America/Chicago',
+  'America/New_York',
+  'America/Sao_Paulo',
+  'Australia/Sydney'
+] as const
+
+const LANGUAGE_SUGGESTIONS = [
+  'English',
+  'Spanish',
+  'French',
+  'German',
+  'Italian',
+  'Portuguese',
+  'Dutch',
+  'Polish',
+  'Russian',
+  'Turkish',
+  'Arabic',
+  'Persian',
+  'Hebrew',
+  'Hindi',
+  'Urdu',
+  'Bengali',
+  'Tamil',
+  'Mandarin',
+  'Cantonese',
+  'Japanese',
+  'Korean',
+  'Vietnamese',
+  'Thai',
+  'Indonesian',
+  'Swahili',
+  'Maltese'
+] as const
+
+const SKILL_SUGGESTIONS = [
+  'React',
+  'Next.js',
+  'TypeScript',
+  'Node.js',
+  'Python',
+  'Go',
+  'Rust',
+  'Swift',
+  'Kotlin',
+  'Java',
+  'C#',
+  'PHP',
+  'Tailwind CSS',
+  'CSS',
+  'HTML',
+  'Figma',
+  'Photoshop',
+  'Illustrator',
+  'After Effects',
+  'Webflow',
+  'WordPress',
+  'Supabase',
+  'Stripe',
+  'PostgreSQL',
+  'Redis',
+  'Docker',
+  'AWS',
+  'Vercel',
+  'Copywriting',
+  'SEO',
+  'Translation',
+  'Transcription',
+  'Video editing',
+  'Photography',
+  'Public speaking',
+  'Project management'
+] as const
+
+const WORK_LINK_LABEL_SUGGESTIONS = [
+  'GitHub',
+  'LinkedIn',
+  'Twitter/X',
+  'Personal site',
+  'Portfolio',
+  'Dribbble',
+  'Behance',
+  'Medium',
+  'Substack',
+  'YouTube',
+  'Twitch',
+  'Read.cv'
+] as const
+
 export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
   const router = useRouter()
   const [step, setStep] = useState(
@@ -665,6 +794,11 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                       onChange={(e) => setRoleFocus(e.currentTarget.value)}
                       placeholder="Frontend, Transcription, Cybersecurity…"
                     />
+                    <SuggestionChips
+                      items={ROLE_SUGGESTIONS}
+                      selected={[roleFocus]}
+                      onPick={(s) => setRoleFocus(s)}
+                    />
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="timezone">Time zone</FieldLabel>
@@ -673,6 +807,11 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                       value={timezone}
                       onChange={(e) => setTimezone(e.currentTarget.value)}
                       placeholder="Europe/Paris"
+                    />
+                    <SuggestionChips
+                      items={TIMEZONE_SUGGESTIONS}
+                      selected={[timezone]}
+                      onPick={(s) => setTimezone(s)}
                     />
                   </Field>
                   <Field>
@@ -690,22 +829,10 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="langs">Languages</FieldLabel>
-                    <Input
-                      id="langs"
-                      value={languages.join(', ')}
-                      onChange={(e) =>
-                        setLanguages(
-                          e.currentTarget.value
-                            .split(',')
-                            .map((s) => s.trim())
-                            .filter(Boolean)
-                        )
-                      }
-                      placeholder="English, French, Arabic"
+                    <LanguagesPicker
+                      value={languages}
+                      onChange={setLanguages}
                     />
-                    <p className="text-muted-foreground text-[10px]">
-                      Comma-separated.
-                    </p>
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="headline">Headline</FieldLabel>
@@ -844,43 +971,71 @@ function WorkLinksEditor({
   function remove(idx: number) {
     onChange(value.filter((_, i) => i !== idx))
   }
-  function add() {
+  function add(label = '') {
     if (value.length >= 10) return
-    onChange([...value, { label: '', url: '' }])
+    onChange([...value, { label, url: '' }])
   }
+  const existingLabels = new Set(
+    value.map((l) => l.label.trim().toLowerCase()).filter(Boolean)
+  )
+  const available = WORK_LINK_LABEL_SUGGESTIONS.filter(
+    (s) => !existingLabels.has(s.toLowerCase())
+  )
   return (
-    <div className="flex flex-col gap-2">
-      {value.map((link, i) => (
-        <div key={i} className="flex items-center gap-1.5">
-          <Input
-            value={link.label}
-            onChange={(e) => update(i, { label: e.currentTarget.value })}
-            placeholder="GitHub"
-            className="w-28"
-          />
-          <Input
-            value={link.url}
-            onChange={(e) => update(i, { url: e.currentTarget.value })}
-            placeholder="https://..."
-          />
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => remove(i)}
-            aria-label="Remove link"
-          >
-            <Trash2 className="size-3" />
-          </Button>
+    <div className="flex flex-col gap-3">
+      {value.length > 0 && (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {value.map((link, i) => (
+            <div
+              key={i}
+              className="group border-input bg-input/10 hover:bg-input/20 relative flex flex-col gap-1.5 rounded-md border p-2 transition"
+            >
+              <Input
+                value={link.label}
+                onChange={(e) => update(i, { label: e.currentTarget.value })}
+                placeholder="Label"
+                className="text-[11px]"
+              />
+              <Input
+                value={link.url}
+                onChange={(e) => update(i, { url: e.currentTarget.value })}
+                placeholder="https://…"
+                className="text-[11px]"
+              />
+              <button
+                type="button"
+                onClick={() => remove(i)}
+                aria-label="Remove link"
+                className="text-muted-foreground hover:text-foreground absolute top-1.5 right-1.5 flex size-5 items-center justify-center rounded opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100"
+              >
+                <Trash2 className="size-3" />
+              </button>
+            </div>
+          ))}
         </div>
-      ))}
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={add}
-        disabled={value.length >= 10}
-      >
-        <Plus className="size-3" /> Add link
-      </Button>
+      )}
+      {available.length > 0 && (
+        <div>
+          <p className="text-muted-foreground mb-1.5 text-[10px] tracking-wider uppercase">
+            Add a link
+          </p>
+          <SuggestionChips
+            items={available}
+            selected={[]}
+            onPick={(label) => add(label)}
+            collapsedCount={8}
+          />
+        </div>
+      )}
+      {value.length < 10 && (
+        <button
+          type="button"
+          onClick={() => add()}
+          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 self-start text-[11px]"
+        >
+          <Plus className="size-3" /> Custom link
+        </button>
+      )}
     </div>
   )
 }
@@ -906,51 +1061,242 @@ function SkillsEditor({
   function remove(idx: number) {
     onChange(value.filter((_, i) => i !== idx))
   }
-  function add() {
+  function add(label = '') {
     if (value.length >= 30) return
-    onChange([...value, { label: '', level: 3 }])
+    onChange([...value, { label, level: 3 }])
   }
+  const existing = new Set(
+    value.map((s) => s.label.trim().toLowerCase()).filter(Boolean)
+  )
+  const available = SKILL_SUGGESTIONS.filter(
+    (s) => !existing.has(s.toLowerCase())
+  )
 
   return (
     <div className="flex flex-col gap-3">
-      {value.map((skill, i) => (
-        <div
-          key={i}
-          className="border-input bg-input/10 flex flex-col gap-1.5 rounded-md border p-2.5"
-        >
-          <div className="flex items-center gap-1.5">
-            <Input
-              value={skill.label}
-              onChange={(e) => update(i, { label: e.currentTarget.value })}
-              placeholder="React, Figma, Arabic transcription…"
-              className="flex-1"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => remove(i)}
-              aria-label="Remove skill"
+      {value.length > 0 && (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {value.map((skill, i) => (
+            <div
+              key={i}
+              className="group border-input bg-input/10 hover:bg-input/20 relative flex flex-col gap-2 rounded-md border p-2.5 transition"
             >
-              <Trash2 className="size-3" />
-            </Button>
-          </div>
-          <RatingScale
-            name={`skill-${i}`}
-            value={skill.level}
-            onChange={(level) => update(i, { level })}
+              <Input
+                value={skill.label}
+                onChange={(e) => update(i, { label: e.currentTarget.value })}
+                placeholder="Skill"
+                className="pr-7 text-[11px]"
+              />
+              <CompactRatingScale
+                name={`skill-${i}`}
+                value={skill.level}
+                onChange={(level) => update(i, { level })}
+              />
+              <button
+                type="button"
+                onClick={() => remove(i)}
+                aria-label="Remove skill"
+                className="text-muted-foreground hover:text-foreground absolute top-1.5 right-1.5 flex size-5 items-center justify-center rounded opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100"
+              >
+                <Trash2 className="size-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {available.length > 0 && value.length < 30 && (
+        <div>
+          <p className="text-muted-foreground mb-1.5 text-[10px] tracking-wider uppercase">
+            Suggestions
+          </p>
+          <SuggestionChips
+            items={available}
+            selected={[]}
+            onPick={(label) => add(label)}
+            collapsedCount={12}
           />
         </div>
-      ))}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={add}
-        disabled={value.length >= 30}
-      >
-        <Plus className="size-3" /> Add skill
-      </Button>
+      )}
+      {value.length < 30 && (
+        <button
+          type="button"
+          onClick={() => add()}
+          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 self-start text-[11px]"
+        >
+          <Plus className="size-3" /> Custom skill
+        </button>
+      )}
+    </div>
+  )
+}
+
+// Compact 5-dot rating used inside skill tiles. No labels (Beginner /
+// Expert) so the dots fit on a single line of the tile; the cluster
+// stays selectable via the same radio-input pattern as RatingScale.
+function CompactRatingScale({
+  name,
+  value,
+  onChange
+}: {
+  name: string
+  value: number
+  onChange: (level: number) => void
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {LEVEL_LABELS.map((label, idx) => {
+        const level = idx + 1
+        const active = value >= level
+        return (
+          <label key={level} className="cursor-pointer" title={label}>
+            <input
+              type="radio"
+              name={name}
+              value={level}
+              checked={value === level}
+              onChange={() => onChange(level)}
+              className="sr-only"
+            />
+            <span
+              aria-hidden
+              className={cn(
+                'block size-3 rounded-full transition-colors',
+                active ? 'bg-primary' : 'bg-input'
+              )}
+            />
+          </label>
+        )
+      })}
+      <span className="text-muted-foreground ml-1 text-[10px] tabular-nums">
+        {LEVEL_LABELS[value - 1] ?? '—'}
+      </span>
+    </div>
+  )
+}
+
+// Multi-select pill list with a free-text input for custom values. Used
+// by the Languages field on step 4. Selected languages render as
+// removable pills; tapping a suggestion adds it; the input adds a
+// custom one on Enter / comma.
+function LanguagesPicker({
+  value,
+  onChange
+}: {
+  value: string[]
+  onChange: (next: string[]) => void
+}) {
+  const [draft, setDraft] = useState('')
+  const lower = new Set(value.map((v) => v.toLowerCase()))
+  const available = LANGUAGE_SUGGESTIONS.filter(
+    (s) => !lower.has(s.toLowerCase())
+  )
+  const addOne = (raw: string) => {
+    const v = raw.trim()
+    if (!v || lower.has(v.toLowerCase())) {
+      setDraft('')
+      return
+    }
+    onChange([...value, v])
+    setDraft('')
+  }
+  const remove = (v: string) =>
+    onChange(value.filter((x) => x.toLowerCase() !== v.toLowerCase()))
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {value.map((v) => (
+          <span
+            key={v}
+            className="bg-input/40 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]"
+          >
+            {v}
+            <button
+              type="button"
+              onClick={() => remove(v)}
+              aria-label={`Remove ${v}`}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-3" />
+            </button>
+          </span>
+        ))}
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ',') {
+              e.preventDefault()
+              addOne(draft)
+            } else if (e.key === 'Backspace' && draft === '' && value.length) {
+              remove(value[value.length - 1])
+            }
+          }}
+          onBlur={() => draft.trim() && addOne(draft)}
+          placeholder={value.length === 0 ? 'Add a language…' : 'Add another…'}
+          className="placeholder:text-muted-foreground flex-1 min-w-32 bg-transparent text-xs outline-none"
+        />
+      </div>
+      {available.length > 0 && (
+        <SuggestionChips
+          items={available}
+          selected={[]}
+          onPick={(s) => addOne(s)}
+          collapsedCount={10}
+        />
+      )}
+    </div>
+  )
+}
+
+// Horizontal-wrap suggestion list. Renders the first `collapsedCount`
+// chips; if there are more, a 'Show more' chip expands the rest.
+// Selected chips are visually muted but still clickable (no-op).
+function SuggestionChips({
+  items,
+  selected,
+  onPick,
+  collapsedCount = 8
+}: {
+  items: readonly string[]
+  selected: string[]
+  onPick: (value: string) => void
+  collapsedCount?: number
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const lower = new Set(selected.map((s) => s.toLowerCase()))
+  const visible = expanded ? items : items.slice(0, collapsedCount)
+  const hasMore = items.length > collapsedCount
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {visible.map((s) => {
+        const active = lower.has(s.toLowerCase())
+        return (
+          <button
+            key={s}
+            type="button"
+            onClick={() => onPick(s)}
+            disabled={active}
+            className={cn(
+              'border-input rounded-full border px-2 py-0.5 text-[11px] transition disabled:opacity-50',
+              active
+                ? 'bg-primary/15 text-foreground'
+                : 'bg-input/20 hover:bg-input/40'
+            )}
+          >
+            {s}
+          </button>
+        )
+      })}
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="text-muted-foreground hover:text-foreground text-[11px] underline-offset-2 hover:underline"
+        >
+          {expanded ? 'Show fewer' : `Show ${items.length - collapsedCount} more`}
+        </button>
+      )}
     </div>
   )
 }
