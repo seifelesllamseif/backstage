@@ -21,7 +21,19 @@ const geistMono = Geist_Mono({
   subsets: ['latin']
 })
 
+// Used by next/metadata to resolve relative URLs in openGraph + twitter
+// tags (e.g. og:image and og:url on /share/[ref]) into absolute URLs.
+// VERCEL_PROJECT_PRODUCTION_URL is set automatically by Vercel; falls
+// back to NEXT_PUBLIC_SITE_URL for local + custom deployments, then to
+// localhost for dev.
+const siteOrigin =
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : 'http://localhost:3000')
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteOrigin),
   title: 'Verbivore',
   description:
     'Internal ops platform for Verbivore projects, tasks, and handoffs.',

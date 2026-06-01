@@ -1647,7 +1647,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   // any deploy without an env baseUrl.
   const copyShareLink = (taskRef: string) => {
     if (typeof window === 'undefined') return
-    const url = `${window.location.origin}/dashboard/task/${taskRef}`
+    const url = `${window.location.origin}/share/${taskRef}`
     if (navigator.clipboard) {
       navigator.clipboard
         .writeText(url)

@@ -26,15 +26,6 @@ export const protectedRoutes: string[] = [
 ]
 
 /**
- * Subpaths under protected prefixes that are PUBLIC. Used for shareable
- * surfaces like the task-by-ref page at /dashboard/task/[ref], which
- * renders a read-only summary intended for OG crawlers and recipients
- * who do not have a Backstage account.
- * @type {string[]}
- */
-export const publicSubpaths: string[] = ['/dashboard/task/']
-
-/**
  * The base route of the API application:
  * Routes with this prefix are used for application APIs
  * @type {string}
@@ -72,7 +63,6 @@ export const ONBOARDING_ROUTE: string = '/onboarding'
  * and by the (authenticated) layout as defense-in-depth.
  */
 export function isProtectedRoute(pathname: string): boolean {
-  if (publicSubpaths.some((sub) => pathname.startsWith(sub))) return false
   return protectedRoutes.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)
   )

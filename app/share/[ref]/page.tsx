@@ -3,7 +3,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import Image from 'next/image'
 import { notFound } from 'next/navigation'
-import { ArrowLeft, ArrowUpRight } from 'lucide-react'
+import { ArrowUpRight } from 'lucide-react'
 import { fetchTaskByRef } from '@/supabase/dashboard/fetchTaskByRef'
 
 type Params = Promise<{ ref: string }>
@@ -25,7 +25,9 @@ export async function generateMetadata({
     openGraph: {
       title: `${task.ref} · ${task.title}`,
       description: desc,
-      type: 'article'
+      siteName: 'Verbivore Backstage',
+      type: 'article',
+      url: `/share/${task.ref}`
     },
     twitter: {
       card: 'summary_large_image',
@@ -56,18 +58,15 @@ async function SharedTaskContent({ params }: { params: Params }) {
     <main className="min-h-screen bg-zinc-50 px-4 py-12 dark:bg-black">
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
         <header className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-          <Link
-            href="/dashboard/board"
-            className="inline-flex items-center gap-1.5 hover:text-zinc-900 dark:hover:text-zinc-100"
-          >
-            <ArrowLeft className="size-3.5" />
-            Back to dashboard
-          </Link>
+          <span className="text-[11px] tracking-[0.25em] uppercase">
+            Verbivore
+          </span>
           <Link
             href={`/dashboard/board?project=${task.project.id}`}
-            className="inline-flex items-center gap-1.5 hover:text-zinc-900 dark:hover:text-zinc-100"
+            prefetch={false}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[11px] font-medium text-white transition hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
           >
-            Open in board
+            Open in Backstage
             <ArrowUpRight className="size-3.5" />
           </Link>
         </header>

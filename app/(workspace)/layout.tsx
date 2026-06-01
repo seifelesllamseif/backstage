@@ -1,7 +1,5 @@
 import { Suspense } from "react";
-import { headers } from "next/headers";
 import { requireOnboardingComplete } from "@/lib/dal";
-import { publicSubpaths } from "@/routes";
 
 // (workspace) — shell-less authenticated route group.
 //
@@ -37,14 +35,6 @@ export default function WorkspaceLayout({
 }
 
 async function Gated({ children }: { children: React.ReactNode }) {
-  const pathname = (await headers()).get("x-pathname") ?? "";
-  // Public subpaths (e.g. /dashboard/task/[ref] share view) skip the
-  // onboarding + session gate so OG crawlers and unauthed recipients
-  // can render the read-only summary. proxy.ts stamps x-pathname on
-  // every request; an empty header is treated as gated (safe default).
-  if (pathname && publicSubpaths.some((p) => pathname.startsWith(p))) {
-    return <>{children}</>;
-  }
   await requireOnboardingComplete();
   return <>{children}</>;
 }
