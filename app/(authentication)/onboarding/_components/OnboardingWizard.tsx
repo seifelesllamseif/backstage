@@ -83,9 +83,14 @@ const ROLE_SUGGESTIONS = [
   'Research'
 ] as const
 
+// Ordered to match the team footprint: Malta first (HQ), then Ghana
+// (Oheneba) + France (Corentin). One zone per country, no Americas
+// (no one on the team there).
 const TIMEZONE_SUGGESTIONS = [
-  'Europe/London',
+  'Europe/Malta',
+  'Africa/Accra',
   'Europe/Paris',
+  'Europe/London',
   'Europe/Berlin',
   'Europe/Istanbul',
   'Africa/Cairo',
@@ -94,11 +99,6 @@ const TIMEZONE_SUGGESTIONS = [
   'Asia/Kolkata',
   'Asia/Singapore',
   'Asia/Tokyo',
-  'America/Los_Angeles',
-  'America/Denver',
-  'America/Chicago',
-  'America/New_York',
-  'America/Sao_Paulo',
   'Australia/Sydney'
 ] as const
 
