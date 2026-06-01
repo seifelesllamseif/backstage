@@ -81,6 +81,7 @@ export default function BoardColumn({
     <div
       ref={setNodeRef}
       onContextMenu={columnMenu}
+      data-tour="board-column"
       className={`flex w-65 shrink-0 flex-col rounded-xl border backdrop-blur-sm transition ${t.column} ${
         isOver ? 'ring-2 ring-teal-500/30 ring-offset-0' : ''
       }`}

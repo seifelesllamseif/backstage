@@ -1,4 +1,5 @@
 import { DashboardChrome } from './_components/DashboardChrome'
+import { DashboardTour } from './_components/DashboardTour'
 import { QueryProvider } from './_components/QueryProvider'
 
 // Mounts the dashboard chrome (sidebar + topbar + modals) ONCE at the
@@ -18,6 +19,7 @@ export default function DashboardLayout({
   return (
     <QueryProvider>
       <DashboardChrome />
+      <DashboardTour />
       {children}
     </QueryProvider>
   )

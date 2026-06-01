@@ -13,6 +13,7 @@ import {
   Settings,
   Folder,
   Shapes,
+  Compass,
   Archive as ArchiveIcon
 } from 'lucide-react'
 import { STATUSES, TaskStatus } from './status'
@@ -147,6 +148,7 @@ export default function Sidebar({
   return (
     <TooltipProvider delayDuration={150}>
       <aside
+        data-tour="sidebar"
         className={`flex h-full min-w-0 scrollbar-none flex-col gap-5 overflow-y-auto border-r px-3 py-4 [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden ${t.sidebar}`}
       >
         <Link
@@ -304,6 +306,21 @@ export default function Sidebar({
             active={secondary === 'settings'}
             onClick={() => onSecondary('settings')}
             hint={showHints ? HINTS.settings : undefined}
+          />
+        </div>
+
+        <div className={`mt-auto border-t pt-3 ${t.border}`}>
+          <SidebarItem
+            icon={<Compass className="size-3.5" />}
+            label="Take a tour"
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('dashboard:tour'))
+            }}
+            hint={
+              showHints
+                ? 'A quick 5-step walkthrough of the dashboard.'
+                : undefined
+            }
           />
         </div>
       </aside>

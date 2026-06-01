@@ -198,6 +198,7 @@ export default function TaskCard({
       onClick={onClick}
       onContextMenu={handleContext}
       data-card
+      data-tour="task-card"
       data-selected={selected ? 'true' : undefined}
       className={`group w-full text-left rounded-lg border transition flex flex-col ${
         compact ? 'px-2 py-1.5 gap-1' : 'px-3 py-2.5 gap-2'

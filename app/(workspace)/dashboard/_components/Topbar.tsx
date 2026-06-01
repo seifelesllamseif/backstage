@@ -174,6 +174,7 @@ export default function Topbar({
           <span className={`hidden sm:inline ${t.textFaint}`}>/</span>
           <div className="relative min-w-0" ref={projectMenuRef}>
             <button
+              data-tour="project-switcher"
               onClick={() => setProjectMenuOpen((o) => !o)}
               className={`flex items-center gap-1 ${t.text} transition hover:opacity-80`}
               title="Switch project"
@@ -410,6 +411,7 @@ export default function Topbar({
         {copySlot}
 
         <button
+          data-tour="new-task"
           onClick={onNewTask}
           aria-label="New task"
           title="New task"
