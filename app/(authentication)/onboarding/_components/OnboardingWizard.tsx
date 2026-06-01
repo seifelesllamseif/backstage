@@ -196,9 +196,11 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
 
   // Step state. Each step owns its inputs so back-and-forth navigation
   // doesn't reset what the user typed.
+  const [oldPassword, setOldPassword] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [showPw, setShowPw] = useState(false)
+  const [showOldPw, setShowOldPw] = useState(false)
 
   const [fullName, setFullName] = useState(initial.fullName)
   const [contactEmail, setContactEmail] = useState(initial.contactEmail)
@@ -264,6 +266,7 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
   // ── Step actions ────────────────────────────────────────────────────────
   function submitPassword() {
     const fd = new FormData()
+    fd.set('oldPassword', oldPassword)
     fd.set('password', password)
     fd.set('confirm', confirm)
     startTransition(async () => {
@@ -271,6 +274,49 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
       if (!r.ok) setError(r.error)
       else advance()
     })
+  }
+
+  // Strong-password generator. 16 chars from a deliberately-curated
+  // alphabet (no look-alike pairs like 0/O or 1/l/I) + guaranteed mix
+  // of each character class so any downstream policy is satisfied.
+  // crypto.getRandomValues is used over Math.random for entropy.
+  function generatePassword(): string {
+    const lower = 'abcdefghjkmnpqrstuvwxyz'
+    const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+    const digits = '23456789'
+    const symbols = '!@#$%^&*-_=+'
+    const all = lower + upper + digits + symbols
+    const pick = (set: string, n: number) => {
+      const out: string[] = []
+      const arr = new Uint32Array(n)
+      crypto.getRandomValues(arr)
+      for (let i = 0; i < n; i++) out.push(set[arr[i] % set.length])
+      return out
+    }
+    const required = [
+      ...pick(lower, 2),
+      ...pick(upper, 2),
+      ...pick(digits, 2),
+      ...pick(symbols, 2)
+    ]
+    const filler = pick(all, 16 - required.length)
+    const chars = [...required, ...filler]
+    // Fisher-Yates shuffle so the required chars aren't always upfront.
+    for (let i = chars.length - 1; i > 0; i--) {
+      const buf = new Uint32Array(1)
+      crypto.getRandomValues(buf)
+      const j = buf[0] % (i + 1)
+      ;[chars[i], chars[j]] = [chars[j], chars[i]]
+    }
+    return chars.join('')
+  }
+
+  function fillGeneratedPassword() {
+    const next = generatePassword()
+    setPassword(next)
+    setConfirm(next)
+    setShowPw(true)
+    setError(null)
   }
 
   function keepCurrentPassword() {
@@ -474,7 +520,52 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
               {step === 0 && (
                 <FieldGroup className="gap-4">
                   <Field>
-                    <FieldLabel htmlFor="password">New password</FieldLabel>
+                    <FieldLabel htmlFor="oldPassword">
+                      Current password
+                    </FieldLabel>
+                    <div className="relative">
+                      <Input
+                        id="oldPassword"
+                        type={showOldPw ? 'text' : 'password'}
+                        autoComplete="current-password"
+                        value={oldPassword}
+                        onChange={(e) => setOldPassword(e.currentTarget.value)}
+                        className="pr-7"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowOldPw((v) => !v)}
+                        className="text-muted-foreground hover:text-foreground absolute inset-y-0 right-1 flex items-center"
+                        tabIndex={-1}
+                        aria-label={
+                          showOldPw
+                            ? 'Hide current password'
+                            : 'Show current password'
+                        }
+                      >
+                        {showOldPw ? (
+                          <EyeOff className="size-3.5" />
+                        ) : (
+                          <Eye className="size-3.5" />
+                        )}
+                      </button>
+                    </div>
+                    <p className="text-muted-foreground mt-1 text-[10px]">
+                      The one you used to sign in (or the temp one you were
+                      sent).
+                    </p>
+                  </Field>
+                  <Field>
+                    <div className="flex items-center justify-between gap-2">
+                      <FieldLabel htmlFor="password">New password</FieldLabel>
+                      <button
+                        type="button"
+                        onClick={fillGeneratedPassword}
+                        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-[10px] underline-offset-2 hover:underline"
+                      >
+                        Generate a strong one
+                      </button>
+                    </div>
                     <div className="relative">
                       <Input
                         id="password"

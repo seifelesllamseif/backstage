@@ -35,20 +35,30 @@ async function bumpStep(memberId: string, step: number) {
 }
 
 // ── Step 1: password ──────────────────────────────────────────────────────
+// Requires the current password as a verification step before letting the
+// session set a new one. Stops a session-hijack scenario from quietly
+// rotating credentials without knowing what the member set previously
+// (or what admin set as the temp / invite password).
 const passwordSchema = z
   .object({
+    oldPassword: z.string().min(1, "Enter your current password."),
     password: z.string().min(8, "Password must be at least 8 characters."),
     confirm: z.string(),
   })
   .refine((d) => d.password === d.confirm, {
     message: "Passwords do not match.",
     path: ["confirm"],
+  })
+  .refine((d) => d.password !== d.oldPassword, {
+    message: "New password must be different from the current one.",
+    path: ["password"],
   });
 
 export async function updatePassword(formData: FormData): Promise<ActionResult> {
   const member = await getCurrentTeamMember();
   if (!member) return { ok: false, error: "Not signed in." };
   const parsed = passwordSchema.safeParse({
+    oldPassword: formData.get("oldPassword"),
     password: formData.get("password"),
     confirm: formData.get("confirm"),
   });
@@ -57,6 +67,17 @@ export async function updatePassword(formData: FormData): Promise<ActionResult> 
   }
 
   const supabase = await createClient();
+  // Verify the current password by attempting a fresh sign-in. Supabase
+  // returns an Invalid login credentials error when it doesn't match.
+  // Re-signs the same user in (no session disruption).
+  const { error: verifyErr } = await supabase.auth.signInWithPassword({
+    email: member.email,
+    password: parsed.data.oldPassword,
+  });
+  if (verifyErr) {
+    return { ok: false, error: "Current password is wrong." };
+  }
+
   const { error } = await supabase.auth.updateUser({ password: parsed.data.password });
   if (error) return { ok: false, error: error.message };
   await bumpStep(member.id, 1);
