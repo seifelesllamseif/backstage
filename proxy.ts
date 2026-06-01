@@ -8,6 +8,12 @@ import {
 } from '@/routes'
 
 export async function proxy(request: NextRequest) {
+  // Stamp the request pathname onto a custom header so RSC layouts can
+  // read it via headers() (Next.js exposes no built-in pathname in
+  // server contexts). The (workspace) layout uses this to short-circuit
+  // its auth gate for paths in publicSubpaths.
+  request.headers.set('x-pathname', request.nextUrl.pathname)
+
   const { response, claims } = await updateSession(request)
 
   const pathname = request.nextUrl.pathname
