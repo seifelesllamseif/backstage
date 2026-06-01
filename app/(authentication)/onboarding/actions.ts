@@ -156,10 +156,41 @@ export async function uploadAvatar(formData: FormData): Promise<ActionResult> {
 }
 
 // ── Step 4: social links (each field optional) ────────────────────────────
+// Tightened from "any URL" to platform-specific matches so a typo or a
+// link to the wrong service is caught at submit time. Empty stays valid.
+const linkedinSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^https:\/\/(www\.)?linkedin\.com\/(in|company)\/[A-Za-z0-9\-_%]+\/?$/i,
+    "Use a real LinkedIn profile or company URL (https://linkedin.com/in/…).",
+  )
+  .or(z.literal("").transform(() => null));
+
+const instagramSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^https:\/\/(www\.)?instagram\.com\/[A-Za-z0-9._]+\/?$/i,
+    "Use a real Instagram profile URL (https://instagram.com/…).",
+  )
+  .or(z.literal("").transform(() => null));
+
+// Generated client-side from a phone-number input; we still revalidate
+// the resulting wa.me URL on the server.
+const whatsappSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^https:\/\/wa\.me\/\d{6,20}$/,
+    "WhatsApp number must include the country code (digits only).",
+  )
+  .or(z.literal("").transform(() => null));
+
 const socialsSchema = z.object({
-  socialLinkedin: z.string().trim().url().or(z.literal("").transform(() => null)),
-  socialInstagram: z.string().trim().url().or(z.literal("").transform(() => null)),
-  socialWhatsapp: z.string().trim().url().or(z.literal("").transform(() => null)),
+  socialLinkedin: linkedinSchema,
+  socialInstagram: instagramSchema,
+  socialWhatsapp: whatsappSchema,
 });
 
 export async function updateSocials(formData: FormData): Promise<ActionResult> {
@@ -277,5 +308,45 @@ export async function skipToStep(step: number): Promise<ActionResult> {
     return { ok: false, error: "Invalid step." };
   }
   await bumpStep(member.id, step);
+  return { ok: true };
+}
+
+// Set avatar_url directly to an external URL the member pasted, no
+// upload. Useful when the photo lives on a CDN they already trust.
+// Constraints: https only, hostname required, length cap to keep DB
+// column sane. Storage is NOT involved here, so members can later
+// replace the URL with an upload via uploadAvatar() the normal way.
+const avatarUrlSchema = z
+  .string()
+  .trim()
+  .url("That doesn't look like a URL.")
+  .max(2048, "URL is too long.");
+
+export async function setAvatarUrl(rawUrl: string): Promise<ActionResult> {
+  const member = await getCurrentTeamMember();
+  if (!member) return { ok: false, error: "Not signed in." };
+  const parsed = avatarUrlSchema.safeParse(rawUrl);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid URL." };
+  }
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(parsed.data);
+  } catch {
+    return { ok: false, error: "Invalid URL." };
+  }
+  if (parsedUrl.protocol !== "https:") {
+    return { ok: false, error: "Use an https URL." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("team_members")
+    .update({ avatar_url: parsed.data })
+    .eq("id", member.id);
+  if (error) return { ok: false, error: error.message };
+
+  await bumpStep(member.id, 3);
+  revalidatePath("/dashboard");
   return { ok: true };
 }

@@ -3,13 +3,14 @@
 import { useRouter } from 'next/navigation'
 import { useState, useTransition } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Eye, EyeOff, Plus, Trash2, Upload } from 'lucide-react'
+import { Eye, EyeOff, Link2, Plus, Trash2, Upload, X } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import {
+  setAvatarUrl,
   skipOnboardingFinish,
   skipPasswordStep,
   skipToStep,
@@ -82,12 +83,27 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
     initial.avatarUrl
   )
   const [uploading, setUploading] = useState(false)
+  // Drop-zone hover state for the avatar step. Drives the border ring.
+  const [avatarDragOver, setAvatarDragOver] = useState(false)
+  // 'Paste a URL' affordance: toggled by the link icon, shows an inline
+  // input under the upload row. Submitting calls setAvatarUrl which
+  // writes the URL directly to team_members without going through
+  // Supabase Storage.
+  const [avatarUrlMode, setAvatarUrlMode] = useState(false)
+  const [avatarUrlDraft, setAvatarUrlDraft] = useState('')
 
   const [socialLinkedin, setSocialLinkedin] = useState(initial.socialLinkedin)
   const [socialInstagram, setSocialInstagram] = useState(
     initial.socialInstagram
   )
-  const [socialWhatsapp, setSocialWhatsapp] = useState(initial.socialWhatsapp)
+  // WhatsApp is stored as https://wa.me/<digits> server-side but we only
+  // ask the member for the phone number (digits, country code first).
+  // Derive the initial digits from any existing wa.me URL so editing
+  // doesn't lose the previously-entered number.
+  const [whatsappPhone, setWhatsappPhone] = useState<string>(() => {
+    const m = initial.socialWhatsapp.match(/wa\.me\/(\d+)/i)
+    return m?.[1] ?? ''
+  })
 
   const [roleFocus, setRoleFocus] = useState(initial.roleFocus)
   const [timezone, setTimezone] = useState(initial.timezone || guessTimezone())
@@ -202,11 +218,55 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
     else advance()
   }
 
+  // Drop-zone helpers for the avatar step. Validates kind/size client-
+  // side before we even open the Object URL; the server still re-checks
+  // in uploadAvatar.
+  function applyAvatarFile(f: File | null) {
+    if (!f) {
+      setAvatarFile(null)
+      setAvatarPreview(initial.avatarUrl)
+      return
+    }
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) {
+      setError('Image must be JPG, PNG, or WEBP.')
+      return
+    }
+    if (f.size > 5 * 1024 * 1024) {
+      setError('Image must be 5 MB or smaller.')
+      return
+    }
+    setError(null)
+    setAvatarFile(f)
+    setAvatarPreview(URL.createObjectURL(f))
+  }
+
+  async function submitAvatarFromUrl() {
+    const url = avatarUrlDraft.trim()
+    if (!url) {
+      setError('Paste a URL first.')
+      return
+    }
+    setUploading(true)
+    setError(null)
+    const r = await setAvatarUrl(url)
+    setUploading(false)
+    if (!r.ok) {
+      setError(r.error)
+      return
+    }
+    setAvatarPreview(url)
+    setAvatarUrlMode(false)
+    setAvatarUrlDraft('')
+    advance()
+  }
+
   function submitSocials() {
+    const digits = whatsappPhone.replace(/\D/g, '')
+    const whatsappUrl = digits ? `https://wa.me/${digits}` : ''
     const fd = new FormData()
     fd.set('socialLinkedin', socialLinkedin)
     fd.set('socialInstagram', socialInstagram)
-    fd.set('socialWhatsapp', socialWhatsapp)
+    fd.set('socialWhatsapp', whatsappUrl)
     startTransition(async () => {
       const r = await updateSocials(fd)
       if (!r.ok) setError(r.error)
@@ -410,7 +470,30 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
 
               {step === 2 && (
                 <FieldGroup className="gap-4">
-                  <div className="flex items-center gap-4">
+                  <label
+                    htmlFor="avatar-input"
+                    onDragEnter={(e) => {
+                      e.preventDefault()
+                      setAvatarDragOver(true)
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault()
+                      setAvatarDragOver(true)
+                    }}
+                    onDragLeave={() => setAvatarDragOver(false)}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      setAvatarDragOver(false)
+                      const f = e.dataTransfer.files?.[0] ?? null
+                      applyAvatarFile(f)
+                    }}
+                    className={cn(
+                      'group relative flex cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed px-4 py-6 text-center transition',
+                      avatarDragOver
+                        ? 'border-[#00A89E] bg-[#00A89E]/5'
+                        : 'border-input bg-input/10 hover:border-foreground/30 hover:bg-input/20'
+                    )}
+                  >
                     <div className="bg-input/40 ring-foreground/10 flex size-20 items-center justify-center overflow-hidden rounded-full ring-1">
                       {avatarPreview ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -425,36 +508,78 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                         </span>
                       )}
                     </div>
-                    <div className="flex-1">
-                      <label className="border-input bg-input/20 hover:bg-input/40 flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-xs">
+                    <div className="flex flex-col items-center gap-0.5">
+                      <span className="text-foreground inline-flex items-center gap-1.5 text-xs font-medium">
                         <Upload className="size-3.5" />
                         {avatarFile
                           ? avatarFile.name
-                          : initial.avatarUrl
-                            ? 'Replace photo'
-                            : 'Choose an image'}
-                        <input
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp"
-                          className="sr-only"
-                          onChange={(e) => {
-                            const f = e.currentTarget.files?.[0] ?? null
-                            setAvatarFile(f)
-                            // New pick wins; if cleared, fall back to the
-                            // existing avatar URL instead of going blank.
-                            setAvatarPreview(
-                              f ? URL.createObjectURL(f) : initial.avatarUrl
-                            )
-                          }}
-                        />
-                      </label>
-                      <p className="text-muted-foreground mt-2 text-[10px]">
+                          : avatarDragOver
+                            ? 'Drop to upload'
+                            : initial.avatarUrl
+                              ? 'Click or drop to replace'
+                              : 'Click or drop an image'}
+                      </span>
+                      <span className="text-muted-foreground text-[10px]">
                         {initial.avatarUrl
-                          ? "We've kept the one you uploaded. Replace it or continue with this."
-                          : 'Required to finish onboarding. Stored in the avatars bucket.'}
-                      </p>
+                          ? "We've kept the one you uploaded. Replace or continue."
+                          : 'JPG, PNG, or WEBP up to 5 MB.'}
+                      </span>
                     </div>
-                  </div>
+
+                    <input
+                      id="avatar-input"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="sr-only"
+                      onChange={(e) =>
+                        applyAvatarFile(e.currentTarget.files?.[0] ?? null)
+                      }
+                    />
+
+                    <button
+                      type="button"
+                      title={
+                        avatarUrlMode ? 'Cancel URL input' : 'Paste image URL'
+                      }
+                      aria-label={
+                        avatarUrlMode ? 'Cancel URL input' : 'Paste image URL'
+                      }
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setAvatarUrlMode((v) => !v)
+                      }}
+                      className="absolute top-2 right-2 flex size-7 items-center justify-center rounded-md border border-input bg-background/80 text-muted-foreground transition hover:text-foreground"
+                    >
+                      {avatarUrlMode ? (
+                        <X className="size-3.5" />
+                      ) : (
+                        <Link2 className="size-3.5" />
+                      )}
+                    </button>
+                  </label>
+
+                  {avatarUrlMode && (
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        type="url"
+                        autoFocus
+                        value={avatarUrlDraft}
+                        onChange={(e) =>
+                          setAvatarUrlDraft(e.currentTarget.value)
+                        }
+                        placeholder="https://… (link to an image)"
+                        className="text-xs"
+                      />
+                      <Button
+                        type="button"
+                        onClick={submitAvatarFromUrl}
+                        disabled={uploading || !avatarUrlDraft.trim()}
+                      >
+                        {uploading ? 'Saving…' : 'Use link'}
+                      </Button>
+                    </div>
+                  )}
                   <Footer
                     onBack={back}
                     onNext={submitAvatar}
@@ -494,13 +619,28 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                     />
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="wa">WhatsApp link</FieldLabel>
-                    <Input
-                      id="wa"
-                      value={socialWhatsapp}
-                      onChange={(e) => setSocialWhatsapp(e.currentTarget.value)}
-                      placeholder="https://wa.me/..."
-                    />
+                    <FieldLabel htmlFor="wa">WhatsApp number</FieldLabel>
+                    <div className="border-input bg-input/20 focus-within:border-ring focus-within:ring-ring/30 flex items-center gap-1.5 rounded-md border px-2 focus-within:ring-2">
+                      <span className="text-muted-foreground text-xs">+</span>
+                      <input
+                        id="wa"
+                        type="tel"
+                        inputMode="numeric"
+                        autoComplete="tel"
+                        value={whatsappPhone}
+                        onChange={(e) =>
+                          setWhatsappPhone(
+                            e.currentTarget.value.replace(/\D/g, '').slice(0, 20)
+                          )
+                        }
+                        placeholder="33612345678"
+                        className="placeholder:text-muted-foreground w-full bg-transparent py-1 text-xs/relaxed outline-none"
+                      />
+                    </div>
+                    <p className="text-muted-foreground mt-1 text-[10px]">
+                      Digits only, country code first (e.g. 33 for France).
+                      We&apos;ll store it as https://wa.me/<i>{whatsappPhone || '…'}</i>.
+                    </p>
                   </Field>
                   <Footer
                     onBack={back}
