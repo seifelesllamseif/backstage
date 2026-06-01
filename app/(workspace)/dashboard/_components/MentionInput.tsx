@@ -131,7 +131,11 @@ export default function MentionInput({
   const matches = useMemo(() => {
     if (!trigger.active) return []
     const q = trigger.query.toLowerCase()
-    return targets.filter((m) => m.label.toLowerCase().includes(q)).slice(0, 6)
+    // Cap high enough to comfortably hold the whole team + the special
+    // "team" target. A tight cap (6) silently dropped alphabetically-last
+    // members like "Seifelesllam Seif" when the member typed @ without a
+    // query yet.
+    return targets.filter((m) => m.label.toLowerCase().includes(q)).slice(0, 12)
   }, [trigger, targets])
 
   const detectMention = (next: string, caret: number) => {

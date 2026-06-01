@@ -66,7 +66,8 @@ export async function fetchInitial(
     currentMember: {
       id: data.currentMember.id,
       fullName: data.currentMember.fullName,
-      accessTier: data.currentMember.accessTier
+      accessTier: data.currentMember.accessTier,
+      onboardingComplete: data.currentMember.onboardingComplete
     },
     currentProjectId,
     defaultProjectId

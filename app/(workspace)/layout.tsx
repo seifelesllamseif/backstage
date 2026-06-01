@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { requireOnboardingComplete } from "@/lib/dal";
+import { after } from "next/server";
+import { requireOnboardingComplete, touchLastSeen } from "@/lib/dal";
 
 // (workspace) — shell-less authenticated route group.
 //
@@ -35,6 +36,11 @@ export default function WorkspaceLayout({
 }
 
 async function Gated({ children }: { children: React.ReactNode }) {
-  await requireOnboardingComplete();
+  const member = await requireOnboardingComplete();
+  // Defer the last_seen_at write so it doesn't sit in the render path. The
+  // wizard's post-save redirect kept the React transition pending until the
+  // dashboard rendered, which kept "Saving…" visible until the UPDATE
+  // returned. after() runs it once the response is sent.
+  after(() => touchLastSeen(member.id));
   return <>{children}</>;
 }

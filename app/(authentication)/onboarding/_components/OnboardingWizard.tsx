@@ -1,16 +1,14 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
-import { useState, useTransition } from 'react'
+import { useRef, useState, useTransition } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Eye, EyeOff, Link2, Plus, Trash2, Upload, X } from 'lucide-react'
+import { Eye, EyeOff, Upload, X } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import {
-  setAvatarUrl,
   skipOnboardingFinish,
   skipPasswordStep,
   skipToStep,
@@ -56,10 +54,8 @@ const STEP_TITLES = [
   'Your work'
 ] as const
 
-// Curated suggestion lists. Static by design (decision 0029 follow-up):
-// fast, predictable, no server calls; easy to extend by editing this
-// array. The chip pickers below render the first 8 by default with a
-// 'Show more' toggle so the form stays compact.
+// Curated role pills shown on the About step so members can fill the field
+// with a click. Static by design (no server call); edit this list to retune.
 const ROLE_SUGGESTIONS = [
   'Frontend',
   'Backend',
@@ -83,110 +79,7 @@ const ROLE_SUGGESTIONS = [
   'Research'
 ] as const
 
-// Ordered to match the team footprint: Malta first (HQ), then Ghana
-// (Oheneba) + France (Corentin). One zone per country, no Americas
-// (no one on the team there).
-const TIMEZONE_SUGGESTIONS = [
-  'Europe/Malta',
-  'Africa/Accra',
-  'Europe/Paris',
-  'Europe/London',
-  'Europe/Berlin',
-  'Europe/Istanbul',
-  'Africa/Cairo',
-  'Asia/Karachi',
-  'Asia/Dubai',
-  'Asia/Kolkata',
-  'Asia/Singapore',
-  'Asia/Tokyo',
-  'Australia/Sydney'
-] as const
-
-const LANGUAGE_SUGGESTIONS = [
-  'English',
-  'Spanish',
-  'French',
-  'German',
-  'Italian',
-  'Portuguese',
-  'Dutch',
-  'Polish',
-  'Russian',
-  'Turkish',
-  'Arabic',
-  'Persian',
-  'Hebrew',
-  'Hindi',
-  'Urdu',
-  'Bengali',
-  'Tamil',
-  'Mandarin',
-  'Cantonese',
-  'Japanese',
-  'Korean',
-  'Vietnamese',
-  'Thai',
-  'Indonesian',
-  'Swahili',
-  'Maltese'
-] as const
-
-const SKILL_SUGGESTIONS = [
-  'React',
-  'Next.js',
-  'TypeScript',
-  'Node.js',
-  'Python',
-  'Go',
-  'Rust',
-  'Swift',
-  'Kotlin',
-  'Java',
-  'C#',
-  'PHP',
-  'Tailwind CSS',
-  'CSS',
-  'HTML',
-  'Figma',
-  'Photoshop',
-  'Illustrator',
-  'After Effects',
-  'Webflow',
-  'WordPress',
-  'Supabase',
-  'Stripe',
-  'PostgreSQL',
-  'Redis',
-  'Docker',
-  'AWS',
-  'Vercel',
-  'Copywriting',
-  'SEO',
-  'Translation',
-  'Transcription',
-  'Video editing',
-  'Photography',
-  'Public speaking',
-  'Project management'
-] as const
-
-const WORK_LINK_LABEL_SUGGESTIONS = [
-  'GitHub',
-  'LinkedIn',
-  'Twitter/X',
-  'Personal site',
-  'Portfolio',
-  'Dribbble',
-  'Behance',
-  'Medium',
-  'Substack',
-  'YouTube',
-  'Twitch',
-  'Read.cv'
-] as const
-
 export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
-  const router = useRouter()
   const [step, setStep] = useState(
     Math.min(Math.max(initial.startStep, 0), STEP_TITLES.length - 1)
   )
@@ -198,11 +91,9 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
 
   // Step state. Each step owns its inputs so back-and-forth navigation
   // doesn't reset what the user typed.
-  const [oldPassword, setOldPassword] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [showPw, setShowPw] = useState(false)
-  const [showOldPw, setShowOldPw] = useState(false)
 
   const [fullName, setFullName] = useState(initial.fullName)
   const [contactEmail, setContactEmail] = useState(initial.contactEmail)
@@ -216,41 +107,18 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
     initial.avatarUrl
   )
   const [uploading, setUploading] = useState(false)
-  // Drop-zone hover state for the avatar step. Drives the border ring.
-  const [avatarDragOver, setAvatarDragOver] = useState(false)
-  // 'Paste a URL' affordance: toggled by the link icon, shows an inline
-  // input under the upload row. Submitting calls setAvatarUrl which
-  // writes the URL directly to team_members without going through
-  // Supabase Storage.
-  const [avatarUrlMode, setAvatarUrlMode] = useState(false)
-  const [avatarUrlDraft, setAvatarUrlDraft] = useState('')
 
   const [socialLinkedin, setSocialLinkedin] = useState(initial.socialLinkedin)
   const [socialInstagram, setSocialInstagram] = useState(
     initial.socialInstagram
   )
-  // WhatsApp is stored as https://wa.me/<digits> server-side but we only
-  // ask the member for the phone number (digits, country code first).
-  // Derive the initial digits from any existing wa.me URL so editing
-  // doesn't lose the previously-entered number.
-  const [whatsappPhone, setWhatsappPhone] = useState<string>(() => {
-    const m = initial.socialWhatsapp.match(/wa\.me\/(\d+)/i)
-    return m?.[1] ?? ''
-  })
+  const [socialWhatsapp, setSocialWhatsapp] = useState(initial.socialWhatsapp)
 
-  // Role accepts multiple values (e.g. 'Frontend' + 'Design'). Stored
-  // as a comma-separated string in role_focus so no schema migration
-  // is needed; split on mount, join before saving.
-  const [roleFocus, setRoleFocus] = useState<string[]>(() =>
-    initial.roleFocus
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-  )
+  const [roleFocus, setRoleFocus] = useState(initial.roleFocus)
   const [timezone, setTimezone] = useState(initial.timezone || guessTimezone())
   const [workStyle, setWorkStyle] = useState(initial.workStyle)
   const [languages, setLanguages] = useState<string[]>(
-    initial.languages.length ? initial.languages : ['English']
+    initial.languages.length ? initial.languages : ['Maltese']
   )
   const [headline, setHeadline] = useState(initial.headline)
   const [workLinks, setWorkLinks] = useState<WorkLink[]>(initial.workLinks)
@@ -268,15 +136,10 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
     setStep((s) => Math.max(0, s - 1))
   }
 
-  function finish() {
-    router.replace('/dashboard')
-    router.refresh()
-  }
+  // Step actions
 
-  // ── Step actions ────────────────────────────────────────────────────────
   function submitPassword() {
     const fd = new FormData()
-    fd.set('oldPassword', oldPassword)
     fd.set('password', password)
     fd.set('confirm', confirm)
     startTransition(async () => {
@@ -284,49 +147,6 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
       if (!r.ok) setError(r.error)
       else advance()
     })
-  }
-
-  // Strong-password generator. 16 chars from a deliberately-curated
-  // alphabet (no look-alike pairs like 0/O or 1/l/I) + guaranteed mix
-  // of each character class so any downstream policy is satisfied.
-  // crypto.getRandomValues is used over Math.random for entropy.
-  function generatePassword(): string {
-    const lower = 'abcdefghjkmnpqrstuvwxyz'
-    const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
-    const digits = '23456789'
-    const symbols = '!@#$%^&*-_=+'
-    const all = lower + upper + digits + symbols
-    const pick = (set: string, n: number) => {
-      const out: string[] = []
-      const arr = new Uint32Array(n)
-      crypto.getRandomValues(arr)
-      for (let i = 0; i < n; i++) out.push(set[arr[i] % set.length])
-      return out
-    }
-    const required = [
-      ...pick(lower, 2),
-      ...pick(upper, 2),
-      ...pick(digits, 2),
-      ...pick(symbols, 2)
-    ]
-    const filler = pick(all, 16 - required.length)
-    const chars = [...required, ...filler]
-    // Fisher-Yates shuffle so the required chars aren't always upfront.
-    for (let i = chars.length - 1; i > 0; i--) {
-      const buf = new Uint32Array(1)
-      crypto.getRandomValues(buf)
-      const j = buf[0] % (i + 1)
-      ;[chars[i], chars[j]] = [chars[j], chars[i]]
-    }
-    return chars.join('')
-  }
-
-  function fillGeneratedPassword() {
-    const next = generatePassword()
-    setPassword(next)
-    setConfirm(next)
-    setShowPw(true)
-    setError(null)
   }
 
   function keepCurrentPassword() {
@@ -369,39 +189,6 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
     initial.socialInstagram.trim().length > 0 ||
     initial.socialWhatsapp.trim().length > 0
 
-  // Per-step 'isDirty' flags. Continue disables when the user hasn't
-  // changed anything from the initial server state. The skip button
-  // stays enabled in parallel, so a returning member who's happy with
-  // what they have can always advance via Keep current.
-  const initialWhatsappPhone = (() => {
-    const m = initial.socialWhatsapp.match(/wa\.me\/(\d+)/i)
-    return m?.[1] ?? ''
-  })()
-  const identityDirty =
-    fullName !== initial.fullName ||
-    contactEmail !== initial.contactEmail ||
-    bio !== initial.bio
-  const socialsDirty =
-    socialLinkedin !== initial.socialLinkedin ||
-    socialInstagram !== initial.socialInstagram ||
-    whatsappPhone !== initialWhatsappPhone
-  const initialRoles = initial.roleFocus
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-  const aboutBasicsDirty =
-    JSON.stringify(roleFocus) !== JSON.stringify(initialRoles) ||
-    timezone !== (initial.timezone || guessTimezone()) ||
-    workStyle !== initial.workStyle ||
-    headline !== initial.headline ||
-    JSON.stringify(languages) !==
-      JSON.stringify(
-        initial.languages.length ? initial.languages : ['English']
-      )
-  const aboutWorkDirty =
-    JSON.stringify(workLinks) !== JSON.stringify(initial.workLinks) ||
-    JSON.stringify(skills) !== JSON.stringify(initial.skills)
-
   function submitIdentity() {
     const fd = new FormData()
     fd.set('fullName', fullName)
@@ -436,55 +223,11 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
     else advance()
   }
 
-  // Drop-zone helpers for the avatar step. Validates kind/size client-
-  // side before we even open the Object URL; the server still re-checks
-  // in uploadAvatar.
-  function applyAvatarFile(f: File | null) {
-    if (!f) {
-      setAvatarFile(null)
-      setAvatarPreview(initial.avatarUrl)
-      return
-    }
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) {
-      setError('Image must be JPG, PNG, or WEBP.')
-      return
-    }
-    if (f.size > 5 * 1024 * 1024) {
-      setError('Image must be 5 MB or smaller.')
-      return
-    }
-    setError(null)
-    setAvatarFile(f)
-    setAvatarPreview(URL.createObjectURL(f))
-  }
-
-  async function submitAvatarFromUrl() {
-    const url = avatarUrlDraft.trim()
-    if (!url) {
-      setError('Paste a URL first.')
-      return
-    }
-    setUploading(true)
-    setError(null)
-    const r = await setAvatarUrl(url)
-    setUploading(false)
-    if (!r.ok) {
-      setError(r.error)
-      return
-    }
-    setAvatarPreview(url)
-    setAvatarUrlMode(false)
-    setAvatarUrlDraft('')
-    advance()
-  }
-
   function submitSocials() {
-    const digits = whatsappPhone.replace(/\D/g, '')
-    const whatsappUrl = digits ? `https://wa.me/${digits}` : ''
     const fd = new FormData()
     fd.set('socialLinkedin', socialLinkedin)
     fd.set('socialInstagram', socialInstagram)
-    fd.set('socialWhatsapp', whatsappUrl)
+    fd.set('socialWhatsapp', socialWhatsapp)
     startTransition(async () => {
       const r = await updateSocials(fd)
       if (!r.ok) setError(r.error)
@@ -495,9 +238,7 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
   function submitAboutBasics() {
     startTransition(async () => {
       const r = await updateAboutBasics({
-        // Join multi-role array into the comma-separated string the
-        // server schema expects; max 80 chars enforced server-side.
-        roleFocus: roleFocus.map((s) => s.trim()).filter(Boolean).join(', '),
+        roleFocus,
         timezone,
         workStyle,
         languages: languages.map((s) => s.trim()).filter(Boolean),
@@ -510,14 +251,16 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
 
   function submitAboutWork(skip: boolean) {
     startTransition(async () => {
+      // Both actions redirect server-side on success, so the resolved value
+      // is only present on validation failure. Treat a missing value as a
+      // successful redirect already in flight.
       const r = skip
         ? await skipOnboardingFinish()
         : await updateAboutWork({
             workLinks: workLinks.filter((l) => l.label.trim() && l.url.trim()),
             skills: skills.filter((s) => s.label.trim())
           })
-      if (!r.ok) setError(r.error)
-      else finish()
+      if (r && !r.ok) setError(r.error)
     })
   }
 
@@ -568,60 +311,15 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
               {step === 3 &&
                 "All optional. Leave anything blank you'd rather not share."}
               {step === 4 &&
-                'Who you are. All optional, but the more you fill in the easier it is for teammates to place you.'}
+                'A few details so teammates know what to ask you about.'}
               {step === 5 &&
-                "Links + skills. Skip if you'd rather come back later, your profile still works."}
+                "Skip if you'd rather come back later, your profile will still work."}
             </p>
             <div className="mt-5">
               {step === 0 && (
                 <FieldGroup className="gap-4">
                   <Field>
-                    <FieldLabel htmlFor="oldPassword">
-                      Current password
-                    </FieldLabel>
-                    <div className="relative">
-                      <Input
-                        id="oldPassword"
-                        type={showOldPw ? 'text' : 'password'}
-                        autoComplete="current-password"
-                        value={oldPassword}
-                        onChange={(e) => setOldPassword(e.currentTarget.value)}
-                        className="pr-7"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowOldPw((v) => !v)}
-                        className="text-muted-foreground hover:text-foreground absolute inset-y-0 right-1 flex items-center"
-                        tabIndex={-1}
-                        aria-label={
-                          showOldPw
-                            ? 'Hide current password'
-                            : 'Show current password'
-                        }
-                      >
-                        {showOldPw ? (
-                          <EyeOff className="size-3.5" />
-                        ) : (
-                          <Eye className="size-3.5" />
-                        )}
-                      </button>
-                    </div>
-                    <p className="text-muted-foreground mt-1 text-[10px]">
-                      The one you used to sign in (or the temp one you were
-                      sent).
-                    </p>
-                  </Field>
-                  <Field>
-                    <div className="flex items-center justify-between gap-2">
-                      <FieldLabel htmlFor="password">New password</FieldLabel>
-                      <button
-                        type="button"
-                        onClick={fillGeneratedPassword}
-                        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-[10px] underline-offset-2 hover:underline"
-                      >
-                        Generate a strong one
-                      </button>
-                    </div>
+                    <FieldLabel htmlFor="password">New password</FieldLabel>
                     <div className="relative">
                       <Input
                         id="password"
@@ -704,37 +402,20 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="bio">Short bio</FieldLabel>
-                    <div className="relative">
-                      <textarea
-                        id="bio"
-                        value={bio}
-                        onChange={(e) =>
-                          setBio(e.currentTarget.value.slice(0, 500))
-                        }
-                        rows={3}
-                        maxLength={500}
-                        className="border-input bg-input/20 dark:bg-input/30 placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/30 w-full rounded-md border px-2 py-1 pr-14 text-xs/relaxed outline-none focus-visible:ring-2"
-                      />
-                      <span
-                        aria-live="polite"
-                        className={`pointer-events-none absolute top-1 right-2 rounded bg-background/80 px-1 text-[10px] tabular-nums backdrop-blur-sm ${
-                          bio.length >= 500
-                            ? 'text-red-500'
-                            : bio.length > 450
-                              ? 'text-amber-500'
-                              : 'text-muted-foreground'
-                        }`}
-                      >
-                        {bio.length}/500
-                      </span>
-                    </div>
+                    <textarea
+                      id="bio"
+                      value={bio}
+                      onChange={(e) => setBio(e.currentTarget.value)}
+                      rows={3}
+                      maxLength={500}
+                      className="border-input bg-input/20 dark:bg-input/30 placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/30 w-full rounded-md border px-2 py-1 text-xs/relaxed outline-none focus-visible:ring-2"
+                    />
                   </Field>
                   <Footer
                     onBack={back}
                     onNext={submitIdentity}
                     nextLabel="Continue"
                     pending={pending}
-                    nextDisabled={!identityDirty}
                     skipLabel={
                       identityFilled ? 'Keep current details' : undefined
                     }
@@ -747,30 +428,7 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
 
               {step === 2 && (
                 <FieldGroup className="gap-4">
-                  <label
-                    htmlFor="avatar-input"
-                    onDragEnter={(e) => {
-                      e.preventDefault()
-                      setAvatarDragOver(true)
-                    }}
-                    onDragOver={(e) => {
-                      e.preventDefault()
-                      setAvatarDragOver(true)
-                    }}
-                    onDragLeave={() => setAvatarDragOver(false)}
-                    onDrop={(e) => {
-                      e.preventDefault()
-                      setAvatarDragOver(false)
-                      const f = e.dataTransfer.files?.[0] ?? null
-                      applyAvatarFile(f)
-                    }}
-                    className={cn(
-                      'group relative flex cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed px-4 py-6 text-center transition',
-                      avatarDragOver
-                        ? 'border-[#00A89E] bg-[#00A89E]/5'
-                        : 'border-input bg-input/10 hover:border-foreground/30 hover:bg-input/20'
-                    )}
-                  >
+                  <div className="flex items-center gap-4">
                     <div className="bg-input/40 ring-foreground/10 flex size-20 items-center justify-center overflow-hidden rounded-full ring-1">
                       {avatarPreview ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -785,78 +443,36 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                         </span>
                       )}
                     </div>
-                    <div className="flex flex-col items-center gap-0.5">
-                      <span className="text-foreground inline-flex items-center gap-1.5 text-xs font-medium">
+                    <div className="flex-1">
+                      <label className="border-input bg-input/20 hover:bg-input/40 flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-xs">
                         <Upload className="size-3.5" />
                         {avatarFile
                           ? avatarFile.name
-                          : avatarDragOver
-                            ? 'Drop to upload'
-                            : initial.avatarUrl
-                              ? 'Click or drop to replace'
-                              : 'Click or drop an image'}
-                      </span>
-                      <span className="text-muted-foreground text-[10px]">
+                          : initial.avatarUrl
+                            ? 'Replace photo'
+                            : 'Choose an image'}
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          className="sr-only"
+                          onChange={(e) => {
+                            const f = e.currentTarget.files?.[0] ?? null
+                            setAvatarFile(f)
+                            // New pick wins; if cleared, fall back to the
+                            // existing avatar URL instead of going blank.
+                            setAvatarPreview(
+                              f ? URL.createObjectURL(f) : initial.avatarUrl
+                            )
+                          }}
+                        />
+                      </label>
+                      <p className="text-muted-foreground mt-2 text-[10px]">
                         {initial.avatarUrl
-                          ? "We've kept the one you uploaded. Replace or continue."
-                          : 'JPG, PNG, or WEBP up to 5 MB.'}
-                      </span>
+                          ? "We've kept the one you uploaded. Replace it or continue with this."
+                          : 'Required to finish onboarding. Stored in the avatars bucket.'}
+                      </p>
                     </div>
-
-                    <input
-                      id="avatar-input"
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      className="sr-only"
-                      onChange={(e) =>
-                        applyAvatarFile(e.currentTarget.files?.[0] ?? null)
-                      }
-                    />
-
-                    <button
-                      type="button"
-                      title={
-                        avatarUrlMode ? 'Cancel URL input' : 'Paste image URL'
-                      }
-                      aria-label={
-                        avatarUrlMode ? 'Cancel URL input' : 'Paste image URL'
-                      }
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        setAvatarUrlMode((v) => !v)
-                      }}
-                      className="absolute top-2 right-2 flex size-7 items-center justify-center rounded-md border border-input bg-background/80 text-muted-foreground transition hover:text-foreground"
-                    >
-                      {avatarUrlMode ? (
-                        <X className="size-3.5" />
-                      ) : (
-                        <Link2 className="size-3.5" />
-                      )}
-                    </button>
-                  </label>
-
-                  {avatarUrlMode && (
-                    <div className="flex items-center gap-1.5">
-                      <Input
-                        type="url"
-                        autoFocus
-                        value={avatarUrlDraft}
-                        onChange={(e) =>
-                          setAvatarUrlDraft(e.currentTarget.value)
-                        }
-                        placeholder="https://… (link to an image)"
-                        className="text-xs"
-                      />
-                      <Button
-                        type="button"
-                        onClick={submitAvatarFromUrl}
-                        disabled={uploading || !avatarUrlDraft.trim()}
-                      >
-                        {uploading ? 'Saving…' : 'Use link'}
-                      </Button>
-                    </div>
-                  )}
+                  </div>
                   <Footer
                     onBack={back}
                     onNext={submitAvatar}
@@ -896,35 +512,19 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                     />
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="wa">WhatsApp number</FieldLabel>
-                    <div className="border-input bg-input/20 focus-within:border-ring focus-within:ring-ring/30 flex items-center gap-1.5 rounded-md border px-2 focus-within:ring-2">
-                      <span className="text-muted-foreground text-xs">+</span>
-                      <input
-                        id="wa"
-                        type="tel"
-                        inputMode="numeric"
-                        autoComplete="tel"
-                        value={whatsappPhone}
-                        onChange={(e) =>
-                          setWhatsappPhone(
-                            e.currentTarget.value.replace(/\D/g, '').slice(0, 20)
-                          )
-                        }
-                        placeholder="35699123456"
-                        className="placeholder:text-muted-foreground w-full bg-transparent py-1 text-xs/relaxed outline-none"
-                      />
-                    </div>
-                    <p className="text-muted-foreground mt-1 text-[10px]">
-                      Digits only, country code first (e.g. 356 for Malta).
-                      We&apos;ll store it as https://wa.me/<i>{whatsappPhone || '…'}</i>.
-                    </p>
+                    <FieldLabel htmlFor="wa">WhatsApp link</FieldLabel>
+                    <Input
+                      id="wa"
+                      value={socialWhatsapp}
+                      onChange={(e) => setSocialWhatsapp(e.currentTarget.value)}
+                      placeholder="https://wa.me/..."
+                    />
                   </Field>
                   <Footer
                     onBack={back}
                     onNext={submitSocials}
                     nextLabel="Continue"
                     pending={pending}
-                    nextDisabled={!socialsDirty}
                     skipLabel={
                       socialsFilled ? 'Keep current socials' : undefined
                     }
@@ -936,15 +536,14 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
               {step === 4 && (
                 <FieldGroup className="gap-4">
                   <Field>
-                    <FieldLabel>Role / focus</FieldLabel>
-                    <ChipsPicker
+                    <FieldLabel htmlFor="roleFocus">Role / focus</FieldLabel>
+                    <Input
+                      id="roleFocus"
                       value={roleFocus}
-                      onChange={setRoleFocus}
-                      suggestions={ROLE_SUGGESTIONS}
-                      placeholder="Add a role…"
-                      morePlaceholder="Add another role…"
-                      collapsedCount={10}
+                      onChange={(e) => setRoleFocus(e.currentTarget.value)}
+                      placeholder="Frontend, Transcription, Cybersecurity…"
                     />
+                    <RolePills value={roleFocus} onChange={setRoleFocus} />
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="timezone">Time zone</FieldLabel>
@@ -953,11 +552,6 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                       value={timezone}
                       onChange={(e) => setTimezone(e.currentTarget.value)}
                       placeholder="Europe/Paris"
-                    />
-                    <SuggestionChips
-                      items={TIMEZONE_SUGGESTIONS}
-                      selected={[timezone]}
-                      onPick={(s) => setTimezone(s)}
                     />
                   </Field>
                   <Field>
@@ -974,14 +568,23 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                     />
                   </Field>
                   <Field>
-                    <FieldLabel>Languages</FieldLabel>
-                    <ChipsPicker
-                      value={languages}
-                      onChange={setLanguages}
-                      suggestions={LANGUAGE_SUGGESTIONS}
-                      placeholder="Add a language…"
-                      morePlaceholder="Add another…"
+                    <FieldLabel htmlFor="langs">Languages</FieldLabel>
+                    <Input
+                      id="langs"
+                      value={languages.join(', ')}
+                      onChange={(e) =>
+                        setLanguages(
+                          e.currentTarget.value
+                            .split(',')
+                            .map((s) => s.trim())
+                            .filter(Boolean)
+                        )
+                      }
+                      placeholder="Maltese, English, French"
                     />
+                    <p className="text-muted-foreground text-[10px]">
+                      Comma-separated.
+                    </p>
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="headline">Headline</FieldLabel>
@@ -998,7 +601,6 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                     onNext={submitAboutBasics}
                     nextLabel="Continue"
                     pending={pending}
-                    nextDisabled={!aboutBasicsDirty}
                   />
                 </FieldGroup>
               )}
@@ -1007,6 +609,9 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                 <FieldGroup className="gap-4">
                   <Field>
                     <FieldLabel>Work links</FieldLabel>
+                    <p className="text-muted-foreground text-[10px]">
+                      Pick a platform to prefill, or paste any URL.
+                    </p>
                     <WorkLinksEditor
                       value={workLinks}
                       onChange={setWorkLinks}
@@ -1015,10 +620,10 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                   <Field>
                     <FieldLabel>Skills</FieldLabel>
                     <p className="text-muted-foreground text-[10px]">
-                      Rate yourself Beginner to Expert. Free-form, add whatever
-                      applies.
+                      Pick from suggestions or type your own.
                     </p>
                     <SkillsEditor value={skills} onChange={setSkills} />
+                    <SkillSuggestions value={skills} onChange={setSkills} />
                   </Field>
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <Button variant="ghost" onClick={back} disabled={pending}>
@@ -1034,7 +639,7 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                       </Button>
                       <Button
                         onClick={() => submitAboutWork(false)}
-                        disabled={pending || !aboutWorkDirty}
+                        disabled={pending}
                       >
                         {pending ? 'Saving…' : 'Save and finish'}
                       </Button>
@@ -1119,6 +724,98 @@ function Stepper({ current, total }: { current: number; total: number }) {
   )
 }
 
+// Click-to-add role pills. Treats the input as a comma-separated list so a
+// member can pick multiple ("Frontend, Design"). Clicking a pill that's
+// already in the list removes it.
+function RolePills({
+  value,
+  onChange
+}: {
+  value: string
+  onChange: (next: string) => void
+}) {
+  const selected = value
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const selectedSet = new Set(selected.map((s) => s.toLowerCase()))
+
+  function toggle(role: string) {
+    const lower = role.toLowerCase()
+    const next = selectedSet.has(lower)
+      ? selected.filter((s) => s.toLowerCase() !== lower)
+      : [...selected, role]
+    onChange(next.join(', '))
+  }
+
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {ROLE_SUGGESTIONS.map((role) => {
+        const active = selectedSet.has(role.toLowerCase())
+        return (
+          <button
+            key={role}
+            type="button"
+            onClick={() => toggle(role)}
+            className={cn(
+              'rounded-md border px-1.5 py-0.5 text-[10px] transition-colors',
+              active
+                ? 'border-primary bg-primary/10 text-foreground'
+                : 'border-input bg-input/10 hover:bg-input/30 hover:border-foreground/30'
+            )}
+          >
+            {active ? role : `+ ${role}`}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// Maps the URL's hostname to a friendlier label. Used by the work-links chip
+// input so the member can paste a URL and skip naming it.
+const HOST_LABELS: Record<string, string> = {
+  'github.com': 'GitHub',
+  'linkedin.com': 'LinkedIn',
+  'twitter.com': 'X',
+  'x.com': 'X',
+  'instagram.com': 'Instagram',
+  'figma.com': 'Figma',
+  'dribbble.com': 'Dribbble',
+  'behance.net': 'Behance',
+  'youtube.com': 'YouTube',
+  'medium.com': 'Medium',
+  'notion.so': 'Notion',
+  'vimeo.com': 'Vimeo'
+}
+
+function inferLinkLabel(url: string): string {
+  try {
+    const normalized = url.match(/^https?:\/\//) ? url : `https://${url}`
+    const host = new URL(normalized).hostname.replace(/^www\./, '')
+    if (HOST_LABELS[host]) return HOST_LABELS[host]
+    const stem = host.split('.')[0]
+    return stem.charAt(0).toUpperCase() + stem.slice(1)
+  } catch {
+    return url
+  }
+}
+
+// Quick-pick platforms for the work-links chip input. `stub` is the URL prefix
+// the member only needs to append their handle to. Edit to retune.
+const WORK_LINK_SUGGESTIONS: ReadonlyArray<{ label: string; stub: string }> = [
+  { label: 'GitHub', stub: 'https://github.com/' },
+  { label: 'Behance', stub: 'https://behance.net/' },
+  { label: 'Dribbble', stub: 'https://dribbble.com/' },
+  { label: 'Figma', stub: 'https://figma.com/@' },
+  { label: 'YouTube', stub: 'https://youtube.com/@' },
+  { label: 'Vimeo', stub: 'https://vimeo.com/' },
+  { label: 'Medium', stub: 'https://medium.com/@' },
+  { label: 'Notion', stub: 'https://notion.so/' },
+  { label: 'Personal site', stub: 'https://' },
+  { label: 'Portfolio', stub: 'https://' }
+]
+
 function WorkLinksEditor({
   value,
   onChange
@@ -1126,88 +823,84 @@ function WorkLinksEditor({
   value: WorkLink[]
   onChange: (next: WorkLink[]) => void
 }) {
-  function update(idx: number, patch: Partial<WorkLink>) {
-    onChange(value.map((l, i) => (i === idx ? { ...l, ...patch } : l)))
+  const [draft, setDraft] = useState('')
+  // When the member clicks a platform pill we remember the label so the
+  // committed chip carries it (avoids deriving "Notion" from a random
+  // sub-page or losing the "Personal site" / "Portfolio" intent).
+  const [pendingLabel, setPendingLabel] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  const picked = new Set(value.map((v) => v.label.toLowerCase()))
+
+  function commit() {
+    const url = draft.trim()
+    if (!url || value.length >= 10) return
+    const label = pendingLabel ?? inferLinkLabel(url)
+    onChange([...value, { label, url }])
+    setDraft('')
+    setPendingLabel(null)
   }
+
   function remove(idx: number) {
     onChange(value.filter((_, i) => i !== idx))
   }
-  function add(label = '') {
-    if (value.length >= 10) return
-    onChange([...value, { label, url: '' }])
+
+  function pickPlatform(s: { label: string; stub: string }) {
+    setDraft(s.stub)
+    setPendingLabel(s.label)
+    requestAnimationFrame(() => {
+      const el = inputRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(el.value.length, el.value.length)
+    })
   }
-  const existingLabels = new Set(
-    value.map((l) => l.label.trim().toLowerCase()).filter(Boolean)
-  )
-  const available = WORK_LINK_LABEL_SUGGESTIONS.filter(
-    (s) => !existingLabels.has(s.toLowerCase())
-  )
+
   return (
-    <div className="flex flex-col gap-3">
-      {value.length > 0 && (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {value.map((link, i) => (
-            <div
-              key={i}
-              className="group border-input bg-input/10 hover:bg-input/20 relative flex flex-col gap-1.5 rounded-md border p-2 transition"
-            >
-              <Input
-                value={link.label}
-                onChange={(e) => update(i, { label: e.currentTarget.value })}
-                placeholder="Label"
-                className="text-[11px]"
-              />
-              <Input
-                value={link.url}
-                onChange={(e) => update(i, { url: e.currentTarget.value })}
-                placeholder="https://…"
-                className="text-[11px]"
-              />
-              <button
-                type="button"
-                onClick={() => remove(i)}
-                aria-label="Remove link"
-                className="text-muted-foreground hover:text-foreground absolute top-1.5 right-1.5 flex size-5 items-center justify-center rounded opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100"
-              >
-                <Trash2 className="size-3" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      {available.length > 0 && (
-        <div>
-          <p className="text-muted-foreground mb-1.5 text-[10px] tracking-wider uppercase">
-            Add a link
-          </p>
-          <SuggestionChips
-            items={available}
-            selected={[]}
-            onPick={(label) => add(label)}
-            collapsedCount={8}
-          />
-        </div>
-      )}
-      {value.length < 10 && (
-        <button
-          type="button"
-          onClick={() => add()}
-          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 self-start text-[11px]"
-        >
-          <Plus className="size-3" /> Custom link
-        </button>
-      )}
+    <div className="flex flex-col gap-2">
+      <ChipShell>
+        {value.map((link, i) => (
+          <Chip key={i} onRemove={() => remove(i)} title={link.url}>
+            {link.label || link.url}
+          </Chip>
+        ))}
+        <ChipInput
+          ref={inputRef}
+          value={draft}
+          onChange={(next) => {
+            setDraft(next)
+            if (!next) setPendingLabel(null)
+          }}
+          onCommit={commit}
+          onBackspace={() => value.length && remove(value.length - 1)}
+          disabled={value.length >= 10}
+          placeholder={
+            value.length
+              ? value.length >= 10
+                ? 'Up to 10 links'
+                : 'Add another link'
+              : 'Paste a URL, then Enter'
+          }
+        />
+      </ChipShell>
+      <div className="flex flex-wrap gap-1">
+        {WORK_LINK_SUGGESTIONS.filter(
+          (s) => !picked.has(s.label.toLowerCase())
+        ).map((s) => (
+          <button
+            key={s.label}
+            type="button"
+            onClick={() => pickPlatform(s)}
+            disabled={value.length >= 10}
+            className="border-input bg-input/10 hover:bg-input/30 hover:border-foreground/30 rounded-md border px-1.5 py-0.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            + {s.label}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
-
-const LEVEL_LABELS = [
-  'Beginner',
-  'Novice',
-  'Intermediate',
-  'Advanced',
-  'Expert'
-] as const
 
 function SkillsEditor({
   value,
@@ -1216,313 +909,204 @@ function SkillsEditor({
   value: Skill[]
   onChange: (next: Skill[]) => void
 }) {
-  function update(idx: number, patch: Partial<Skill>) {
-    onChange(value.map((s, i) => (i === idx ? { ...s, ...patch } : s)))
+  const [draft, setDraft] = useState('')
+
+  function commit() {
+    const label = draft.trim()
+    if (!label || value.length >= 30) return
+    // Existing skill level stays at the schema's mid default; without the
+    // rating UI we can't surface per-skill levels.
+    onChange([...value, { label, level: 3 }])
+    setDraft('')
   }
+
   function remove(idx: number) {
     onChange(value.filter((_, i) => i !== idx))
   }
-  function add(label = '') {
-    if (value.length >= 30) return
+
+  return (
+    <ChipShell>
+      {value.map((skill, i) => (
+        <Chip key={i} onRemove={() => remove(i)}>
+          {skill.label}
+        </Chip>
+      ))}
+      <ChipInput
+        value={draft}
+        onChange={setDraft}
+        onCommit={commit}
+        onBackspace={() => value.length && remove(value.length - 1)}
+        disabled={value.length >= 30}
+        placeholder={
+          value.length
+            ? value.length >= 30
+              ? 'Up to 30 skills'
+              : 'Add another skill'
+            : 'Type a skill, then Enter'
+        }
+      />
+    </ChipShell>
+  )
+}
+
+// Curated, static suggestions grouped by discipline. Edit this map to retune
+// what the chip picker offers; it stays local so there's no network call.
+const SKILL_SUGGESTIONS: Record<string, readonly string[]> = {
+  Engineering: [
+    'React',
+    'Next.js',
+    'TypeScript',
+    'Node.js',
+    'Python',
+    'SQL',
+    'Postgres',
+    'Supabase'
+  ],
+  Design: [
+    'Figma',
+    'UI design',
+    'UX research',
+    'Illustration',
+    'Motion',
+    'Branding'
+  ],
+  Content: [
+    'Copywriting',
+    'Editing',
+    'SEO',
+    'Video editing',
+    'Podcast production'
+  ],
+  Production: [
+    'Transcription',
+    'Translation',
+    'Subtitling',
+    'Color grading',
+    'Audio mixing'
+  ],
+  Operations: [
+    'Project management',
+    'QA',
+    'Customer support',
+    'Recruiting',
+    'Finance ops'
+  ],
+  Security: ['Pen testing', 'Threat modeling', 'Incident response', 'Compliance']
+}
+
+function SkillSuggestions({
+  value,
+  onChange
+}: {
+  value: Skill[]
+  onChange: (next: Skill[]) => void
+}) {
+  const picked = new Set(value.map((s) => s.label.toLowerCase()))
+
+  function pick(label: string) {
+    if (picked.has(label.toLowerCase()) || value.length >= 30) return
     onChange([...value, { label, level: 3 }])
   }
-  const existing = new Set(
-    value.map((s) => s.label.trim().toLowerCase()).filter(Boolean)
-  )
-  const available = SKILL_SUGGESTIONS.filter(
-    (s) => !existing.has(s.toLowerCase())
-  )
 
   return (
-    <div className="flex flex-col gap-3">
-      {value.length > 0 && (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {value.map((skill, i) => (
-            <div
-              key={i}
-              className="group border-input bg-input/10 hover:bg-input/20 relative flex flex-col gap-2 rounded-md border p-2.5 transition"
-            >
-              <Input
-                value={skill.label}
-                onChange={(e) => update(i, { label: e.currentTarget.value })}
-                placeholder="Skill"
-                className="pr-7 text-[11px]"
-              />
-              <CompactRatingScale
-                name={`skill-${i}`}
-                value={skill.level}
-                onChange={(level) => update(i, { level })}
-              />
-              <button
-                type="button"
-                onClick={() => remove(i)}
-                aria-label="Remove skill"
-                className="text-muted-foreground hover:text-foreground absolute top-1.5 right-1.5 flex size-5 items-center justify-center rounded opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100"
-              >
-                <Trash2 className="size-3" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      {available.length > 0 && value.length < 30 && (
-        <div>
-          <p className="text-muted-foreground mb-1.5 text-[10px] tracking-wider uppercase">
-            Suggestions
-          </p>
-          <SuggestionChips
-            items={available}
-            selected={[]}
-            onPick={(label) => add(label)}
-            collapsedCount={12}
-          />
-        </div>
-      )}
-      {value.length < 30 && (
-        <button
-          type="button"
-          onClick={() => add()}
-          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 self-start text-[11px]"
-        >
-          <Plus className="size-3" /> Custom skill
-        </button>
-      )}
-    </div>
-  )
-}
-
-// Compact 5-dot rating used inside skill tiles. No labels (Beginner /
-// Expert) so the dots fit on a single line of the tile; the cluster
-// stays selectable via the same radio-input pattern as RatingScale.
-function CompactRatingScale({
-  name,
-  value,
-  onChange
-}: {
-  name: string
-  value: number
-  onChange: (level: number) => void
-}) {
-  return (
-    <div className="flex items-center gap-1.5">
-      {LEVEL_LABELS.map((label, idx) => {
-        const level = idx + 1
-        const active = value >= level
+    <div className="mt-2 flex flex-col gap-2">
+      {Object.entries(SKILL_SUGGESTIONS).map(([category, items]) => {
+        const available = items.filter((s) => !picked.has(s.toLowerCase()))
+        if (!available.length) return null
         return (
-          <label key={level} className="cursor-pointer" title={label}>
-            <input
-              type="radio"
-              name={name}
-              value={level}
-              checked={value === level}
-              onChange={() => onChange(level)}
-              className="sr-only"
-            />
-            <span
-              aria-hidden
-              className={cn(
-                'block size-3 rounded-full transition-colors',
-                active ? 'bg-primary' : 'bg-input'
-              )}
-            />
-          </label>
+          <div key={category} className="flex flex-wrap items-center gap-1.5">
+            <span className="text-muted-foreground w-20 shrink-0 text-[10px]">
+              {category}
+            </span>
+            <div className="flex flex-1 flex-wrap gap-1">
+              {available.map((label) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => pick(label)}
+                  className="border-input bg-input/10 hover:bg-input/30 hover:border-foreground/30 rounded-md border px-1.5 py-0.5 text-[10px] transition-colors"
+                >
+                  + {label}
+                </button>
+              ))}
+            </div>
+          </div>
         )
       })}
-      <span className="text-muted-foreground ml-1 text-[10px] tabular-nums">
-        {LEVEL_LABELS[value - 1] ?? '—'}
-      </span>
     </div>
   )
 }
 
-// Multi-select pill list with a free-text input for custom values.
-// Selected items render as removable pills; tapping a suggestion adds
-// it; the input adds a custom one on Enter / comma. Used by the Role
-// and Languages fields on step 4.
-function ChipsPicker({
+function ChipShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="border-input bg-input/20 focus-within:border-ring focus-within:ring-ring/30 flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border px-1.5 py-1 transition-colors focus-within:ring-2">
+      {children}
+    </div>
+  )
+}
+
+function Chip({
+  children,
+  onRemove,
+  title
+}: {
+  children: React.ReactNode
+  onRemove: () => void
+  title?: string
+}) {
+  return (
+    <span
+      className="bg-foreground/5 ring-foreground/10 inline-flex max-w-full items-center gap-1 rounded-md px-1.5 py-0.5 text-xs ring-1"
+      title={title}
+    >
+      <span className="truncate">{children}</span>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label="Remove"
+        className="text-muted-foreground hover:text-foreground -mr-0.5 inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm"
+      >
+        <X className="size-3" />
+      </button>
+    </span>
+  )
+}
+
+function ChipInput({
+  ref,
   value,
   onChange,
-  suggestions,
-  placeholder = 'Add one…',
-  morePlaceholder = 'Add another…',
-  collapsedCount = 10
+  onCommit,
+  onBackspace,
+  placeholder,
+  disabled
 }: {
-  value: string[]
-  onChange: (next: string[]) => void
-  suggestions: readonly string[]
-  placeholder?: string
-  morePlaceholder?: string
-  collapsedCount?: number
-}) {
-  const [draft, setDraft] = useState('')
-  const lower = new Set(value.map((v) => v.toLowerCase()))
-  const available = suggestions.filter((s) => !lower.has(s.toLowerCase()))
-  const addOne = (raw: string) => {
-    const v = raw.trim()
-    if (!v || lower.has(v.toLowerCase())) {
-      setDraft('')
-      return
-    }
-    onChange([...value, v])
-    setDraft('')
-  }
-  const remove = (v: string) =>
-    onChange(value.filter((x) => x.toLowerCase() !== v.toLowerCase()))
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="border-input bg-input/20 focus-within:border-ring focus-within:ring-ring/30 flex flex-wrap items-center gap-1.5 rounded-md border px-2 py-1.5 focus-within:ring-2">
-        {value.map((v) => (
-          <span
-            key={v}
-            className="bg-input/60 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]"
-          >
-            {v}
-            <button
-              type="button"
-              onClick={() => remove(v)}
-              aria-label={`Remove ${v}`}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <X className="size-3" />
-            </button>
-          </span>
-        ))}
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ',') {
-              e.preventDefault()
-              addOne(draft)
-            } else if (e.key === 'Backspace' && draft === '' && value.length) {
-              remove(value[value.length - 1])
-            }
-          }}
-          onBlur={() => draft.trim() && addOne(draft)}
-          placeholder={value.length === 0 ? placeholder : morePlaceholder}
-          className="placeholder:text-muted-foreground min-w-32 flex-1 bg-transparent text-xs outline-none"
-        />
-      </div>
-      {available.length > 0 && (
-        <SuggestionChips
-          items={available}
-          selected={[]}
-          onPick={(s) => addOne(s)}
-          collapsedCount={collapsedCount}
-        />
-      )}
-    </div>
-  )
-}
-
-// Horizontal-wrap suggestion list. Renders the first `collapsedCount`
-// chips; if there are more, a 'Show more' chip expands the rest.
-// Selected chips are visually muted but still clickable (no-op).
-function SuggestionChips({
-  items,
-  selected,
-  onPick,
-  collapsedCount = 8
-}: {
-  items: readonly string[]
-  selected: string[]
-  onPick: (value: string) => void
-  collapsedCount?: number
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const lower = new Set(selected.map((s) => s.toLowerCase()))
-  const visible = expanded ? items : items.slice(0, collapsedCount)
-  const hasMore = items.length > collapsedCount
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {visible.map((s) => {
-        const active = lower.has(s.toLowerCase())
-        return (
-          <button
-            key={s}
-            type="button"
-            onClick={() => onPick(s)}
-            disabled={active}
-            className={cn(
-              'border-input rounded-full border px-2 py-0.5 text-[11px] transition disabled:opacity-50',
-              active
-                ? 'bg-primary/15 text-foreground'
-                : 'bg-input/20 hover:bg-input/40'
-            )}
-          >
-            {s}
-          </button>
-        )
-      })}
-      {hasMore && (
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="text-muted-foreground hover:text-foreground text-[11px] underline-offset-2 hover:underline"
-        >
-          {expanded ? 'Show fewer' : `Show ${items.length - collapsedCount} more`}
-        </button>
-      )}
-    </div>
-  )
-}
-
-function RatingScale({
-  name,
-  value,
-  onChange
-}: {
-  name: string
-  value: number
-  onChange: (level: number) => void
+  ref?: React.Ref<HTMLInputElement>
+  value: string
+  onChange: (next: string) => void
+  onCommit: () => void
+  onBackspace: () => void
+  placeholder: string
+  disabled?: boolean
 }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-muted-foreground w-16 text-[10px]">Beginner</span>
-      <div className="flex flex-1 items-center justify-between gap-1">
-        {LEVEL_LABELS.map((label, idx) => {
-          const level = idx + 1
-          const active = value === level
-          return (
-            <label
-              key={level}
-              className="group flex flex-1 cursor-pointer flex-col items-center gap-0.5"
-              title={label}
-            >
-              <input
-                type="radio"
-                name={name}
-                value={level}
-                checked={active}
-                onChange={() => onChange(level)}
-                className="sr-only"
-              />
-              <span
-                aria-hidden
-                className={cn(
-                  'size-4 rounded-full border-2 transition-all',
-                  active
-                    ? 'border-primary bg-primary'
-                    : 'border-input bg-input/30 group-hover:border-foreground/40'
-                )}
-              />
-              <span
-                className={cn(
-                  'text-[9px] tabular-nums transition-colors',
-                  active ? 'text-foreground' : 'text-muted-foreground/60'
-                )}
-              >
-                {level}
-              </span>
-            </label>
-          )
-        })}
-      </div>
-      <span className="text-muted-foreground w-12 text-right text-[10px]">
-        Expert
-      </span>
-    </div>
+    <input
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.currentTarget.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault()
+          onCommit()
+        } else if (e.key === 'Backspace' && !value) {
+          onBackspace()
+        }
+      }}
+      onBlur={onCommit}
+      disabled={disabled}
+      placeholder={placeholder}
+      className="placeholder:text-muted-foreground min-w-35 flex-1 bg-transparent px-1 text-xs outline-none disabled:cursor-not-allowed disabled:opacity-50"
+    />
   )
 }
 

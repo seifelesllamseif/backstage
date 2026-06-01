@@ -179,6 +179,7 @@ export interface DashboardData {
     companyId: string
     fullName: string
     accessTier: AccessTier
+    onboardingComplete: boolean
   }
 }
 
@@ -246,6 +247,14 @@ export async function fetchDashboardData(
     } else {
       taskQuery = taskQuery.in('project_id', myProjectIds)
     }
+  }
+
+  // Members see only tasks they're personally assigned. Admins and leads
+  // still see the full project. This replaces the prior "project context"
+  // scope where a member who was assigned one task in a project could see
+  // every other task in that project too.
+  if (!seesAllProjects) {
+    taskQuery = taskQuery.eq('assignee_id', member.id)
   }
 
   const { data: rawTasks, error: tasksError } = await taskQuery
@@ -659,7 +668,11 @@ export async function fetchDashboardData(
       id: member.id,
       companyId: member.companyId,
       fullName: member.fullName,
-      accessTier: member.accessTier
+      accessTier: member.accessTier,
+      // Wizard bumps onboarding_step to 6 when the last step ("Your work")
+      // saves or is skipped. Used by the dashboard to hide the sidebar
+      // "Finish your profile" entry and move it into Settings.
+      onboardingComplete: member.onboardingStep >= 6
     }
   }
 }

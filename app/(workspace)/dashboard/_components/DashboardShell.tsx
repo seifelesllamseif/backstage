@@ -125,6 +125,7 @@ export interface DashboardInitial {
     id: string
     fullName: string
     accessTier: 'admin' | 'lead' | 'member'
+    onboardingComplete: boolean
   }
   currentProjectId: string | null
   defaultProjectId: string | null
@@ -1302,7 +1303,9 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   }
 
   const createTask = (
-    draft: Omit<BoardTask, 'id' | 'ref' | 'createdAt' | 'updatedAt'>
+    draft: Omit<BoardTask, 'id' | 'ref' | 'createdAt' | 'updatedAt'> & {
+      description?: string | null
+    }
   ) => {
     const targetProjectId = initial.currentProjectId ?? initial.defaultProjectId
     if (!targetProjectId) {
@@ -1340,6 +1343,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     startTransition(async () => {
       const res = await createDashboardTask({
         title: draft.title,
+        description: draft.description ?? null,
         status: draft.status,
         priority: draft.priority,
         projectId: targetProjectId,
@@ -1347,8 +1351,6 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         leadId: draft.lead?.id ?? null,
         dueDate: null,
         labelIds,
-        // The picker on ManualTab stores pending relations on draft.
-        // Passed through to the server action as { kind, ref } pairs.
         relations: draft.relations?.map((rel) => ({
           kind: rel.kind,
           ref: rel.ref
@@ -2023,6 +2025,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               onSecondary={(v) => setView(v)}
               showHints={showHints}
               currentUserId={currentUserId}
+              onboardingComplete={initial.currentMember.onboardingComplete}
             />
           </div>
 
@@ -2060,6 +2063,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 }}
                 showHints={showHints}
                 currentUserId={currentUserId}
+                onboardingComplete={initial.currentMember.onboardingComplete}
               />
             </SheetContent>
           </Sheet>
@@ -2563,6 +2567,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   setWipLimit={setWipLimit}
                   showHints={showHints}
                   setShowHints={setShowHints}
+                  onboardingComplete={initial.currentMember.onboardingComplete}
                 />
               )}
             </main>

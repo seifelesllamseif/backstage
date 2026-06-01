@@ -1,11 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { getCurrentTeamMember } from "@/lib/dal";
 import { createAdminClient } from "@/supabase/admin";
 import { createClient } from "@/supabase/server";
+import { DEFAULT_REDIRECT_ROUTE } from "@/routes";
 
 // Decision 0029: onboarding writes go through @supabase/supabase-js with the
 // user's session (RLS policies in migration 20260531_avatars_and_onboarding_*
@@ -241,9 +243,9 @@ export async function updateSocials(formData: FormData): Promise<ActionResult> {
   return { ok: true };
 }
 
-// ── Step 5 / 6: about you — split into "basics" and "work" ───────────────
-// Split per the UX refactor: step 5 saves the 'who I am' fields, step 6
-// saves the editor-heavy 'your work' fields. Both optional.
+// Steps 5 / 6: about you - split into "basics" and "work". Step 5 saves
+// the 'who I am' fields; step 6 saves the editor-heavy work links + skills.
+// Both optional.
 const workLinkSchema = z.object({
   label: z.string().trim().min(1).max(40),
   url: z.string().trim().url(),
@@ -320,7 +322,11 @@ export async function updateAboutWork(payload: {
     .eq("id", member.id);
   if (error) return { ok: false, error: error.message };
   await bumpStep(member.id, 6);
-  return { ok: true };
+  // Server-side redirect so Next ends the React transition cleanly; if we
+  // returned { ok: true } and let the wizard call router.replace, the
+  // transition could stay pending through the dashboard render and leave
+  // the "Saving…" label visible past the actual save.
+  redirect(DEFAULT_REDIRECT_ROUTE);
 }
 
 // Skipping the final optional step still counts as "wizard done" — bump
@@ -330,7 +336,7 @@ export async function skipOnboardingFinish(): Promise<ActionResult> {
   const member = await getCurrentTeamMember();
   if (!member) return { ok: false, error: "Not signed in." };
   await bumpStep(member.id, 6);
-  return { ok: true };
+  redirect(DEFAULT_REDIRECT_ROUTE);
 }
 
 // Returning user wants to keep their existing password (admin reset

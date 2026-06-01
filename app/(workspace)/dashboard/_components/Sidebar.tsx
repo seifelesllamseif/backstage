@@ -75,6 +75,9 @@ interface SidebarProps {
   onSecondary: (v: View) => void
   showHints: boolean
   currentUserId: string
+  // When true, the bottom "Finish your profile" / "Take a tour" block hides
+  // from the sidebar; those entries move into the Settings panel instead.
+  onboardingComplete: boolean
 }
 
 export default function Sidebar({
@@ -89,7 +92,8 @@ export default function Sidebar({
   secondary,
   onSecondary,
   showHints,
-  currentUserId
+  currentUserId,
+  onboardingComplete
 }: SidebarProps) {
   const { t } = useDashTheme()
   const { open } = useContextMenu()
@@ -310,32 +314,34 @@ export default function Sidebar({
           />
         </div>
 
-        <div className={`mt-auto flex flex-col gap-0.5 border-t pt-3 ${t.border}`}>
-          <SidebarItem
-            icon={<UserCog className="size-3.5" />}
-            label="Finish your profile"
-            onClick={() => {
-              window.location.href = '/onboarding'
-            }}
-            hint={
-              showHints
-                ? 'Re-run the onboarding wizard. Already-filled steps offer Keep current to skip.'
-                : undefined
-            }
-          />
-          <SidebarItem
-            icon={<Compass className="size-3.5" />}
-            label="Take a tour"
-            onClick={() => {
-              window.dispatchEvent(new CustomEvent('dashboard:tour'))
-            }}
-            hint={
-              showHints
-                ? 'A quick 5-step walkthrough of the dashboard.'
-                : undefined
-            }
-          />
-        </div>
+        {!onboardingComplete && (
+          <div className={`mt-auto flex flex-col gap-0.5 border-t pt-3 ${t.border}`}>
+            <SidebarItem
+              icon={<UserCog className="size-3.5" />}
+              label="Finish your profile"
+              onClick={() => {
+                window.location.href = '/onboarding'
+              }}
+              hint={
+                showHints
+                  ? 'Re-run the onboarding wizard. Already-filled steps offer Keep current to skip.'
+                  : undefined
+              }
+            />
+            <SidebarItem
+              icon={<Compass className="size-3.5" />}
+              label="Take a tour"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('dashboard:tour'))
+              }}
+              hint={
+                showHints
+                  ? 'A quick 5-step walkthrough of the dashboard.'
+                  : undefined
+              }
+            />
+          </div>
+        )}
       </aside>
     </TooltipProvider>
   )

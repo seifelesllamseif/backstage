@@ -688,6 +688,7 @@ export type Database = {
       team_members: {
         Row: {
           access_tier: Database["public"]["Enums"]["access_tier"]
+          activity_status: Database["public"]["Enums"]["activity_status"]
           avatar_url: string | null
           bio: string | null
           company_id: string
@@ -698,6 +699,7 @@ export type Database = {
           headline: string | null
           id: string
           languages: string[]
+          last_seen_at: string | null
           onboarding_step: number
           profile_theme: string | null
           role_focus: string | null
@@ -712,6 +714,7 @@ export type Database = {
         }
         Insert: {
           access_tier?: Database["public"]["Enums"]["access_tier"]
+          activity_status?: Database["public"]["Enums"]["activity_status"]
           avatar_url?: string | null
           bio?: string | null
           company_id: string
@@ -722,6 +725,7 @@ export type Database = {
           headline?: string | null
           id: string
           languages?: string[]
+          last_seen_at?: string | null
           onboarding_step?: number
           profile_theme?: string | null
           role_focus?: string | null
@@ -736,6 +740,7 @@ export type Database = {
         }
         Update: {
           access_tier?: Database["public"]["Enums"]["access_tier"]
+          activity_status?: Database["public"]["Enums"]["activity_status"]
           avatar_url?: string | null
           bio?: string | null
           company_id?: string
@@ -746,6 +751,7 @@ export type Database = {
           headline?: string | null
           id?: string
           languages?: string[]
+          last_seen_at?: string | null
           onboarding_step?: number
           profile_theme?: string | null
           role_focus?: string | null
@@ -777,6 +783,7 @@ export type Database = {
     }
     Enums: {
       access_tier: "admin" | "lead" | "member"
+      activity_status: "active" | "away" | "on_vacation" | "left"
       external_ref_kind:
         | "issue"
         | "pr"
@@ -934,6 +941,7 @@ export const Constants = {
   public: {
     Enums: {
       access_tier: ["admin", "lead", "member"],
+      activity_status: ["active", "away", "on_vacation", "left"],
       external_ref_kind: [
         "issue",
         "pr",
@@ -948,7 +956,7 @@ export const Constants = {
         "bunny",
         "sentry",
         "gcloud",
-        "stripe"
+        "stripe",
       ],
       handoff_status: ["in_progress", "blocked", "ready_for_review", "done"],
       project_kind: ["standard", "operations"],

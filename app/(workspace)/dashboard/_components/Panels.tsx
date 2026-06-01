@@ -9,6 +9,7 @@ import {
   ArchiveRestore,
   Bell,
   Check,
+  Compass,
   ExternalLink,
   FileText,
   Flag,
@@ -2021,7 +2022,8 @@ export function SettingsPanel({
   wipLimit,
   setWipLimit,
   showHints,
-  setShowHints
+  setShowHints,
+  onboardingComplete
 }: {
   density: 'compact' | 'cozy'
   setDensity: (d: 'compact' | 'cozy') => void
@@ -2029,6 +2031,10 @@ export function SettingsPanel({
   setWipLimit: (n: number) => void
   showHints: boolean
   setShowHints: (b: boolean) => void
+  // When the member has finished onboarding, the sidebar drops its
+  // "Finish your profile" / "Take a tour" block; we surface the same two
+  // actions here so they stay accessible without crowding the nav.
+  onboardingComplete: boolean
 }) {
   const { t } = useDashTheme()
 
@@ -2036,6 +2042,29 @@ export function SettingsPanel({
     <div className="h-full overflow-y-auto p-6">
       <div className="flex flex-col gap-5">
         <h2 className={`text-lg font-medium ${t.text}`}>Workspace settings</h2>
+
+        {onboardingComplete && (
+          <Row label="Profile">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                onClick={() => {
+                  window.location.href = '/onboarding'
+                }}
+                className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition ${t.border} ${t.tab}`}
+              >
+                <UserCog className="size-3.5" /> Edit profile
+              </button>
+              <button
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('dashboard:tour'))
+                }}
+                className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition ${t.border} ${t.tab}`}
+              >
+                <Compass className="size-3.5" /> Take a tour
+              </button>
+            </div>
+          </Row>
+        )}
 
         <Row label="Card density">
           <ToggleGroup

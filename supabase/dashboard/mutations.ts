@@ -167,6 +167,7 @@ const CreateBulkInputSchema = z.object({
 
 export async function createDashboardTask(data: {
   title: string
+  description?: string | null
   status?: TaskStatus
   priority?: TaskPriority
   projectId: string
@@ -207,6 +208,7 @@ export async function createDashboardTask(data: {
       company_id: member.companyId,
       project_id: data.projectId,
       title: data.title,
+      description: data.description ?? null,
       status: data.status ?? 'backlog',
       priority: data.priority ?? 'none',
       ref,

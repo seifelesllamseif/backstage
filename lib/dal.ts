@@ -11,6 +11,7 @@ import {
 } from "@/routes";
 
 export type AccessTier = Database["public"]["Enums"]["access_tier"];
+export type ActivityStatus = Database["public"]["Enums"]["activity_status"];
 
 type TeamMemberRow = Database["public"]["Tables"]["team_members"]["Row"];
 
@@ -39,6 +40,8 @@ export interface TeamMember {
   workLinks: TeamMemberRow["work_links"];
   skills: TeamMemberRow["skills"];
   onboardingStep: number;
+  lastSeenAt: string | null;
+  activityStatus: ActivityStatus;
 }
 
 export function toTeamMember(row: TeamMemberRow): TeamMember {
@@ -65,6 +68,8 @@ export function toTeamMember(row: TeamMemberRow): TeamMember {
     workLinks: row.work_links,
     skills: row.skills,
     onboardingStep: row.onboarding_step,
+    lastSeenAt: row.last_seen_at,
+    activityStatus: row.activity_status,
   };
 }
 
@@ -126,3 +131,26 @@ export const requireOnboardingComplete = cache(async () => {
   }
   return member;
 });
+
+// Bumps last_seen_at on the caller's own row. Fired from the workspace layout
+// on every authenticated render. Self-mutation goes through the user-session
+// client, covered by the existing team_members_update_own policy.
+export async function touchLastSeen(memberId: string): Promise<void> {
+  const supabase = await createClient();
+  await supabase
+    .from("team_members")
+    .update({ last_seen_at: new Date().toISOString() })
+    .eq("id", memberId);
+}
+
+// Read-time derivation of presence. Stored activity_status stays 'active'
+// until manually changed (on_vacation, left), so we surface 'away' here based
+// on staleness of last_seen_at rather than writing it back.
+const AWAY_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function derivePresence(member: TeamMember): ActivityStatus {
+  if (member.activityStatus !== "active") return member.activityStatus;
+  if (!member.lastSeenAt) return "away";
+  const stale = Date.now() - new Date(member.lastSeenAt).getTime() > AWAY_AFTER_MS;
+  return stale ? "away" : "active";
+}

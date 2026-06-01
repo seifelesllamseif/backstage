@@ -3,8 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Check, Copy, Trash2, X } from 'lucide-react'
 import { STATUSES, TaskPriority, TaskStatus, PRIORITY_LABEL } from './status'
-import { BoardAssignee, BoardTask, TaskRelation } from './boardData'
-import RelationPicker from './RelationPicker'
+import { BoardAssignee, BoardTask } from './boardData'
 import StatusIcon from './StatusIcon'
 import PriorityIcon from './PriorityIcon'
 import { useDashTheme } from './theme'
@@ -35,8 +34,12 @@ interface NewTaskModalProps {
   // the caller.
   candidateTasks: { id: string; ref: string; title: string; status: TaskStatus }[]
   onClose: () => void
+  // Manual create carries an optional description alongside the core
+  // BoardTask shape; the dashboard plumbs it through to createDashboardTask.
   onCreate: (
-    task: Omit<BoardTask, 'id' | 'ref' | 'createdAt' | 'updatedAt'>
+    task: Omit<BoardTask, 'id' | 'ref' | 'createdAt' | 'updatedAt'> & {
+      description?: string | null
+    }
   ) => void
   onCreateBulk: (
     projectId: string,
@@ -55,6 +58,11 @@ interface NewTaskModalProps {
 }
 
 const PRIORITIES: TaskPriority[] = ['urgent', 'high', 'medium', 'low', 'none']
+
+// Common discipline tags surfaced first in the suggestion row. Match is
+// case-insensitive; the actual chip uses the label's stored casing. Edit
+// this list to retune which tags get priority placement.
+const PRIORITY_TAG_NAMES = ['frontend', 'backend', 'supabase', 'content']
 
 type Tab = 'manual' | 'ai'
 
@@ -139,7 +147,7 @@ export default function NewTaskModal({
             defaultPriority={defaultPriority}
             defaultDueDate={defaultDueDate}
             members={members}
-            candidateTasks={candidateTasks}
+            labels={labels}
             onClose={onClose}
             onCreate={onCreate}
           />
@@ -168,7 +176,7 @@ function ManualTab({
   defaultPriority,
   defaultDueDate,
   members,
-  candidateTasks,
+  labels,
   onClose,
   onCreate
 }: {
@@ -177,19 +185,17 @@ function ManualTab({
   defaultPriority?: TaskPriority
   defaultDueDate: string | null
   members: BoardAssignee[]
-  candidateTasks: {
-    id: string
-    ref: string
-    title: string
-    status: TaskStatus
-  }[]
+  labels: { id: string; name: string }[]
   onClose: () => void
   onCreate: (
-    task: Omit<BoardTask, 'id' | 'ref' | 'createdAt' | 'updatedAt'>
+    task: Omit<BoardTask, 'id' | 'ref' | 'createdAt' | 'updatedAt'> & {
+      description?: string | null
+    }
   ) => void
 }) {
   const { t } = useDashTheme()
   const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
   const [status, setStatus] = useState<TaskStatus>(defaultStatus)
   const [priority, setPriority] = useState<TaskPriority>(
     defaultPriority ?? 'medium'
@@ -197,36 +203,77 @@ function ManualTab({
   const [assigneeId, setAssigneeId] = useState<string | null>(
     defaultAssigneeId ?? null
   )
+  const [leadId, setLeadId] = useState<string | null>(null)
   const [due, setDue] = useState(defaultDueDate ?? '')
   const [tagsInput, setTagsInput] = useState('')
-  const [pendingRelations, setPendingRelations] = useState<TaskRelation[]>([])
 
   const reset = () => {
     setTitle('')
+    setDescription('')
     setStatus(defaultStatus)
     setPriority(defaultPriority ?? 'medium')
     setAssigneeId(defaultAssigneeId ?? null)
+    setLeadId(null)
     setDue(defaultDueDate ?? '')
     setTagsInput('')
-    setPendingRelations([])
+  }
+
+  const selectedTags = useMemo(
+    () =>
+      tagsInput
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    [tagsInput]
+  )
+  const selectedTagSet = useMemo(
+    () => new Set(selectedTags.map((s) => s.toLowerCase())),
+    [selectedTags]
+  )
+  // Split into (priority, rest). Priority chips lead the row; the rest stays
+  // alphabetical so the picker doesn't shuffle on every render.
+  const tagSuggestions = useMemo(() => {
+    const available = labels.filter(
+      (l) => !selectedTagSet.has(l.name.toLowerCase())
+    )
+    const priorityOrder = new Map(
+      PRIORITY_TAG_NAMES.map((name, i) => [name, i])
+    )
+    const priority = available
+      .filter((l) => priorityOrder.has(l.name.toLowerCase()))
+      .sort(
+        (a, b) =>
+          (priorityOrder.get(a.name.toLowerCase()) ?? 0) -
+          (priorityOrder.get(b.name.toLowerCase()) ?? 0)
+      )
+    const rest = available.filter(
+      (l) => !priorityOrder.has(l.name.toLowerCase())
+    )
+    return { priority, rest }
+  }, [labels, selectedTagSet])
+
+  const addTagSuggestion = (name: string) => {
+    setTagsInput((cur) => {
+      const trimmed = cur.trim()
+      if (!trimmed) return name
+      if (trimmed.endsWith(',')) return `${trimmed} ${name}`
+      return `${trimmed}, ${name}`
+    })
   }
 
   const submit = () => {
     if (!title.trim()) return
-    const tags = tagsInput
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
     onCreate({
       title: title.trim(),
+      description: description.trim() || null,
       status,
       priority,
       assignee: assigneeId
         ? members.find((m) => m.id === assigneeId)
         : undefined,
-      tags: tags.length > 0 ? tags : undefined,
-      due: due.trim() || undefined,
-      relations: pendingRelations.length > 0 ? pendingRelations : undefined
+      lead: leadId ? members.find((m) => m.id === leadId) : undefined,
+      tags: selectedTags.length > 0 ? selectedTags : undefined,
+      due: due.trim() || undefined
     })
     reset()
     onClose()
@@ -246,6 +293,8 @@ function ManualTab({
       />
 
       <textarea
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
         placeholder="Add a brief - what does the next person need?"
         className={`min-h-20 resize-none rounded-md border px-3 py-2 text-xs transition focus:border-zinc-400 focus:outline-none dark:focus:border-white/30 ${t.input}`}
       />
@@ -291,49 +340,71 @@ function ManualTab({
             ))}
           </select>
         </Field>
-        <Field label="Due">
-          <input
-            value={due}
-            onChange={(e) => setDue(e.target.value)}
-            placeholder="May 28"
+        <Field label="Lead">
+          <select
+            value={leadId ?? ''}
+            onChange={(e) => setLeadId(e.target.value || null)}
             className={`h-9 w-full rounded-md border px-2 text-xs focus:outline-none ${t.input}`}
-          />
+          >
+            <option value="">No lead</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
         </Field>
       </div>
 
-      <Field label="Tags (comma-separated)">
+      <Field label="Due">
         <input
-          value={tagsInput}
-          onChange={(e) => setTagsInput(e.target.value)}
-          placeholder="Audio, Marketing"
+          value={due}
+          onChange={(e) => setDue(e.target.value)}
+          placeholder="May 28"
           className={`h-9 w-full rounded-md border px-2 text-xs focus:outline-none ${t.input}`}
         />
       </Field>
 
-      <Field label="Relations">
-        <RelationPicker
-          relations={pendingRelations}
-          candidates={candidateTasks}
-          variant="spacious"
-          onAdd={(rel) =>
-            setPendingRelations((cur) => {
-              // Dedup on (kind, ref).
-              if (
-                cur.some((r) => r.kind === rel.kind && r.ref === rel.ref)
-              ) {
-                return cur
-              }
-              return [...cur, rel]
-            })
-          }
-          onRemove={(rel) =>
-            setPendingRelations((cur) =>
-              cur.filter(
-                (r) => !(r.kind === rel.kind && r.ref === rel.ref)
-              )
-            )
-          }
+      <Field label="Tags">
+        <input
+          value={tagsInput}
+          onChange={(e) => setTagsInput(e.target.value)}
+          placeholder="Type to add custom tags, comma-separated"
+          className={`h-9 w-full rounded-md border px-2 text-xs focus:outline-none ${t.input}`}
         />
+        {(tagSuggestions.priority.length > 0 ||
+          tagSuggestions.rest.length > 0) && (
+          <div className="mt-2 flex flex-col gap-1.5">
+            {tagSuggestions.priority.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {tagSuggestions.priority.map((l) => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    onClick={() => addTagSuggestion(l.name)}
+                    className={`rounded-md border px-2 py-0.5 text-[10px] font-medium transition ${t.btnActive}`}
+                  >
+                    + {l.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {tagSuggestions.rest.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {tagSuggestions.rest.map((l) => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    onClick={() => addTagSuggestion(l.name)}
+                    className={`rounded-md border px-1.5 py-0.5 text-[10px] transition ${t.tab}`}
+                  >
+                    + {l.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </Field>
 
       <div className="flex items-center justify-between pt-2">
