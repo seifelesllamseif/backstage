@@ -22,7 +22,12 @@ export function DashboardChrome() {
 
   const { data } = useQuery({
     queryKey: ['dashboardInitial', project ?? null],
-    queryFn: () => fetchInitial(project)
+    queryFn: () => fetchInitial(project),
+    // Poll while the tab is foregrounded so edits from teammates land
+    // without a manual refresh. Background tabs skip the poll and pick
+    // changes up on the existing window-focus refetch.
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false
   })
 
   if (!data) return <DashboardSkeleton />

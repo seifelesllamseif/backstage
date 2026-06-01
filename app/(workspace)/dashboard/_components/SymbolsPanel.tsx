@@ -20,7 +20,9 @@ import StatusIcon from './StatusIcon'
 import PriorityIcon from './PriorityIcon'
 import RelationIcon from './RelationIcon'
 import { useDashTheme } from './theme'
+import { getPresence, PRESENCE_LABEL, type Presence } from './presence'
 import type {
+  BoardAssignee,
   BoardTask,
   Sprint,
   ProjectExternalRef,
@@ -29,6 +31,30 @@ import type {
 } from './boardData'
 
 const PRIORITIES: TaskPriority[] = ['urgent', 'high', 'medium', 'low', 'none']
+const PRESENCES: Presence[] = ['online', 'today', 'away', 'on_vacation', 'left']
+
+// Mirrors RING_CLASS / DIM_CLASS from Avatar.tsx so the swatch in the
+// library renders the same hue + treatment as the real avatar ring.
+const PRESENCE_RING_CLASS: Record<Presence, string> = {
+  online: 'ring-emerald-500',
+  today: 'ring-amber-400/60',
+  away: 'ring-zinc-300 dark:ring-zinc-600',
+  on_vacation: 'ring-zinc-400/40',
+  left: 'ring-zinc-500/30'
+}
+
+const PRESENCE_DIM_CLASS: Partial<Record<Presence, string>> = {
+  on_vacation: 'opacity-50 grayscale',
+  left: 'opacity-30 grayscale'
+}
+
+const PRESENCE_DESC: Record<Presence, string> = {
+  online: 'Active in the last 5 minutes.',
+  today: 'Seen earlier today; likely still around.',
+  away: 'Not seen in a week, or marked Away.',
+  on_vacation: 'PTO. Not expected to respond.',
+  left: 'No longer on the team. Kept for history.'
+}
 const RELATIONS: RelationKind[] = [
   'triage',
   'blocked_by',
@@ -127,6 +153,7 @@ const LINK_KINDS: {
 interface SymbolsPanelProps {
   tasks: BoardTask[]
   sprints: Sprint[]
+  members: BoardAssignee[]
   refsByTask: Record<string, TaskExternalRef[]>
   refsByProject: Record<string, ProjectExternalRef[]>
   onFilterByStatus: (status: TaskStatus) => void
@@ -136,6 +163,7 @@ interface SymbolsPanelProps {
 export default function SymbolsPanel({
   tasks,
   sprints,
+  members,
   refsByTask,
   refsByProject,
   onFilterByStatus,
@@ -195,6 +223,18 @@ export default function SymbolsPanel({
     for (const sprint of sprints) c[sprint.status] = (c[sprint.status] ?? 0) + 1
     return c
   }, [sprints])
+
+  const presenceCounts = useMemo(() => {
+    const c: Record<Presence, number> = {
+      online: 0,
+      today: 0,
+      away: 0,
+      on_vacation: 0,
+      left: 0
+    }
+    for (const m of members) c[getPresence(m)] = (c[getPresence(m)] ?? 0) + 1
+    return c
+  }, [members])
 
   const linkCounts = useMemo(() => {
     const c: Record<TaskExternalRefKind, number> = {
@@ -305,6 +345,23 @@ export default function SymbolsPanel({
         </Section>
 
         <Section
+          title="Member presence"
+          hint="The ring around an avatar tells you how reachable a teammate is right now."
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {PRESENCES.map((p) => (
+              <SymbolCell
+                key={p}
+                icon={<PresenceSwatch presence={p} />}
+                label={PRESENCE_LABEL[p]}
+                description={PRESENCE_DESC[p]}
+                count={presenceCounts[p]}
+              />
+            ))}
+          </div>
+        </Section>
+
+        <Section
           title="Link kinds"
           hint="What we infer from a URL pasted into a task or project."
         >
@@ -401,6 +458,19 @@ function SymbolCell({
     )
   }
   return <div className={baseClass}>{inner}</div>
+}
+
+function PresenceSwatch({ presence }: { presence: Presence }) {
+  const ring = PRESENCE_RING_CLASS[presence]
+  const dim = PRESENCE_DIM_CLASS[presence] ?? ''
+  return (
+    <span
+      className={`flex size-5 items-center justify-center rounded-full bg-zinc-400 text-[8px] font-semibold text-white ring-1 ring-offset-1 ring-offset-transparent ${ring} ${dim}`}
+      aria-hidden
+    >
+      A
+    </span>
+  )
 }
 
 function SprintDot({

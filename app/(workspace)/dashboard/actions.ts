@@ -34,6 +34,7 @@ import {
   removeTaskExternalRef as removeTaskExternalRefImpl,
   removeTaskFromSprint as removeTaskFromSprintImpl,
   renameProject as renameProjectImpl,
+  saveHandoffDraft as saveHandoffDraftImpl,
   setProjectGithubRepo as setProjectGithubRepoImpl,
   submitHandoffForReview as submitHandoffForReviewImpl,
   toggleChecklistItem as toggleChecklistItemImpl,
@@ -42,6 +43,7 @@ import {
   fetchMemberPortfolio as fetchMemberPortfolioImpl,
   listTaskWatchers as listTaskWatchersImpl,
   removeTaskWatcher as removeTaskWatcherImpl,
+  updateMemberActivityStatus as updateMemberActivityStatusImpl,
   updateDashboardTaskAssignee as updateDashboardTaskAssigneeImpl,
   updateDashboardTaskDetails as updateDashboardTaskDetailsImpl,
   updateDashboardTaskLead as updateDashboardTaskLeadImpl,
@@ -260,6 +262,12 @@ export async function submitHandoffForReview(
   return submitHandoffForReviewImpl(...args)
 }
 
+export async function saveHandoffDraft(
+  ...args: Parameters<typeof saveHandoffDraftImpl>
+) {
+  return saveHandoffDraftImpl(...args)
+}
+
 export async function createProjectInPlace(
   ...args: Parameters<typeof createProjectInPlaceImpl>
 ) {
@@ -306,4 +314,10 @@ export async function listTaskWatchers(
   ...args: Parameters<typeof listTaskWatchersImpl>
 ) {
   return listTaskWatchersImpl(...args)
+}
+
+export async function updateMemberActivityStatus(
+  ...args: Parameters<typeof updateMemberActivityStatusImpl>
+) {
+  return updateMemberActivityStatusImpl(...args)
 }

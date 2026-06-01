@@ -62,6 +62,7 @@ export function mapMember(
     slug: member.slug ?? null,
     lastSeenAt: member.lastSeenAt,
     activityStatus: member.activityStatus,
+    timezone: member.timezone,
   };
 }
 

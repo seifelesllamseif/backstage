@@ -6,7 +6,12 @@ import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { VisuallyHidden } from 'radix-ui'
 import Avatar from './Avatar'
 import { useTeam } from './TeamContext'
-import { getPresence, PRESENCE_LABEL } from './presence'
+import {
+  getLocalTime,
+  getPresence,
+  isQuietHours,
+  PRESENCE_LABEL
+} from './presence'
 import { useDashTheme } from './theme'
 import { fetchMemberPortfolio } from '../actions'
 
@@ -91,6 +96,8 @@ export function PortfolioSheetProvider({
 
   const assignee = openId ? team.find((m) => m.id === openId) : null
   const presence = assignee ? getPresence(assignee) : null
+  const localTime = assignee ? getLocalTime(assignee) : null
+  const quiet = assignee ? isQuietHours(assignee) : null
 
   return (
     <PortfolioCtx.Provider value={{ open }}>
@@ -112,26 +119,64 @@ export function PortfolioSheetProvider({
 
           <div className="flex h-full flex-col overflow-y-auto">
             <div
-              className={`flex items-center gap-2.5 border-b px-4 py-3 ${t.border}`}
+              className={`flex flex-col gap-3 border-b px-5 py-4 ${t.border}`}
             >
-              {assignee && (
-                <Avatar user={assignee} size={40} showPresence />
-              )}
-              <div className="flex min-w-0 flex-1 flex-col">
-                <h2
-                  className={`truncate text-sm leading-tight font-medium ${t.text}`}
-                >
-                  {assignee?.name ?? '...'}
-                </h2>
-                {presence && (
-                  <span className={`text-[10px] ${t.textMuted}`}>
-                    {PRESENCE_LABEL[presence]}
-                  </span>
+              <div className="flex items-center gap-3">
+                {assignee && (
+                  <Avatar user={assignee} size={48} showPresence />
                 )}
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <h2
+                    className={`truncate text-sm leading-tight font-semibold ${t.text}`}
+                  >
+                    {assignee?.name ?? '...'}
+                  </h2>
+                  {data?.accessTier && (
+                    <span
+                      className={`text-[10px] tracking-wider uppercase ${t.textMuted}`}
+                    >
+                      {data.accessTier}
+                      {data.roleFocus ? ` · ${data.roleFocus}` : ''}
+                    </span>
+                  )}
+                </div>
               </div>
+              {(presence || localTime) && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {presence && (
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] ${t.tab}`}
+                    >
+                      <span
+                        className={`inline-block size-1.5 rounded-full ${
+                          presence === 'online'
+                            ? 'bg-emerald-500'
+                            : presence === 'today'
+                              ? 'bg-amber-400'
+                              : presence === 'away'
+                                ? 'bg-zinc-400'
+                                : 'bg-zinc-500'
+                        }`}
+                      />
+                      {PRESENCE_LABEL[presence]}
+                    </span>
+                  )}
+                  {localTime && (
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] tabular-nums ${
+                        quiet ? t.tab + ' italic' : t.tab
+                      }`}
+                      title={data?.timezone ?? undefined}
+                    >
+                      {localTime}
+                      {quiet ? ' · outside work hours' : ' local'}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
-            <div className="flex flex-col gap-3.5 px-4 py-4">
+            <div className="flex flex-col gap-4 px-5 py-4">
               {loading && (
                 <p className={`text-[11px] ${t.textMuted}`}>
                   Loading profile...
@@ -149,7 +194,7 @@ export function PortfolioSheetProvider({
                   )}
                   {data.bio && (
                     <p
-                      className={`text-[11px] leading-relaxed whitespace-pre-wrap ${t.text}`}
+                      className={`border-l-2 pl-3 text-[11px] leading-relaxed whitespace-pre-wrap ${t.border} ${t.textMuted}`}
                     >
                       {data.bio}
                     </p>
@@ -232,10 +277,10 @@ function Facts({
   portfolio: MemberPortfolio
   t: ReturnType<typeof useDashTheme>['t']
 }) {
+  // role + timezone live in the header chips now; the Facts list focuses
+  // on the longer-form context that doesn't fit a chip.
   const rows: { label: string; value: string }[] = []
-  if (portfolio.roleFocus) rows.push({ label: 'Focus', value: portfolio.roleFocus })
-  if (portfolio.timezone) rows.push({ label: 'Time zone', value: portfolio.timezone })
-  if (portfolio.workStyle) rows.push({ label: 'How they work', value: portfolio.workStyle })
+  if (portfolio.workStyle) rows.push({ label: 'Works best', value: portfolio.workStyle })
   if (portfolio.languages.length)
     rows.push({ label: 'Languages', value: portfolio.languages.join(', ') })
   if (rows.length === 0) return null

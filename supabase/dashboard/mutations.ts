@@ -917,6 +917,9 @@ export async function moveDashboardTask(
 export async function deleteDashboardTask(taskId: string) {
   const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
+  if (member.accessTier !== 'admin' && member.accessTier !== 'lead') {
+    return { error: 'Only admins and leads can delete tasks.' }
+  }
   const supabase = createAdminClient()
 
   await supabase.from('tasks').delete().eq('id', taskId).eq('company_id', member.companyId)
@@ -1007,6 +1010,44 @@ export async function addComment(taskId: string, body: string, mentions?: string
     })
     .select('*').single()
   if (error || !comment) return { error: error?.message ?? 'Comment failed.' }
+
+  // Mention = implicit watcher invite (Slice B follow-up). For every
+  // teammate the comment @-mentions, ensure they're recorded as a watcher
+  // so their dashboard pulls the task into view via the watcher union.
+  // Skipping cases that don't need an entry: the author themselves, the
+  // special 'team' target, the current assignee (already sees it), and
+  // admins / leads (they already see everything in the company).
+  const mentionMemberIds = (mentions ?? []).filter(
+    (id) => id && id !== 'team' && id !== member.id
+  )
+  if (mentionMemberIds.length > 0) {
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('assignee_id')
+      .eq('id', taskId)
+      .eq('company_id', member.companyId)
+      .maybeSingle()
+    const { data: candidates } = await supabase
+      .from('team_members')
+      .select('id, access_tier')
+      .eq('company_id', member.companyId)
+      .in('id', mentionMemberIds)
+    const toWatch = (candidates ?? []).filter(
+      (m) =>
+        m.access_tier === 'member' &&
+        m.id !== (task?.assignee_id ?? null)
+    )
+    if (toWatch.length > 0) {
+      await supabase.from('task_watchers').upsert(
+        toWatch.map((m) => ({
+          task_id: taskId,
+          member_id: m.id,
+          invited_by: member.id
+        })),
+        { onConflict: 'task_id,member_id', ignoreDuplicates: true }
+      )
+    }
+  }
 
   await logActivity(supabase, member.companyId, member.id, 'comment.added', 'task', taskId)
   revalidatePath('/dashboard')
@@ -1500,13 +1541,50 @@ export async function fetchTaskHandoff(taskId: string) {
   }
 }
 
-// Submit the handoff and send the task to review. The task only moves to
-// 'in_review' here - flipping it to 'done' is a separate approval action
-// that admins/leads do via the normal status change once they've checked
-// the handoff.
+// Save partial handoff progress without validation. Used by the "Save
+// draft" button so a user can fill the seven prompts across multiple
+// sittings instead of one go. Does NOT touch task status - the member
+// flips the column manually when they're ready.
+export async function saveHandoffDraft(
+  input: z.input<typeof SubmitHandoffInput>
+): Promise<{ error: string } | { ok: true }> {
+  const parsed = SubmitHandoffInput.safeParse(input)
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
+  const gate = await ensureTaskAccess(parsed.data.taskId, 'owner')
+  if ('error' in gate) return { error: gate.error }
+  const { member } = gate
+  const supabase = createAdminClient()
+
+  const { data: task } = await supabase
+    .from('tasks').select('id')
+    .eq('id', parsed.data.taskId).eq('company_id', member.companyId).maybeSingle()
+  if (!task) return { error: 'Task not found.' }
+
+  await supabase.from('handoffs').upsert({
+    company_id: member.companyId,
+    task_id: task.id,
+    from_member_id: member.id,
+    status: 'in_progress',
+    what_it_is: parsed.data.fields.whatItIs ?? null,
+    current_status: parsed.data.fields.currentStatus ?? null,
+    done_so_far: parsed.data.fields.doneSoFar ?? null,
+    still_left: parsed.data.fields.stillLeft ?? null,
+    file_links: parsed.data.fields.fileLinks ?? null,
+    gotchas: parsed.data.fields.gotchas ?? null,
+    who_to_ask: parsed.data.fields.whoToAsk ?? null,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'task_id' })
+
+  revalidatePath('/dashboard')
+  return { ok: true }
+}
+
+// Submit the handoff and mark it ready for review. Task status stays
+// where it is - the member flips the column themselves when they're
+// ready, which re-runs the gate and lets the task through cleanly.
 export async function submitHandoffForReview(
   input: z.input<typeof SubmitHandoffInput>
-): Promise<{ error: string; missing?: string[] } | { ok: true; statusResult: StatusChangeResult }> {
+): Promise<{ error: string; missing?: string[] } | { ok: true }> {
   const parsed = SubmitHandoffInput.safeParse(input)
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
   const gate = await ensureTaskAccess(parsed.data.taskId, 'owner')
@@ -1546,8 +1624,8 @@ export async function submitHandoffForReview(
     updated_at: new Date().toISOString()
   }, { onConflict: 'task_id' })
 
-  const statusResult = await updateDashboardTaskStatus(task.id, 'in_review')
-  return { ok: true, statusResult }
+  revalidatePath('/dashboard')
+  return { ok: true }
 }
 
 // ─── Project CRUD (used by Panels.tsx) ────────────────────────────────────
@@ -1676,6 +1754,43 @@ export async function fetchMemberPortfolio(memberId: string) {
         : []
     }
   }
+}
+
+// ─── Member presence override ─────────────────────────────────────────────
+// Admin / lead-only direct edit of another member's activity_status.
+// Used from the sidebar right-click menu to mark someone on vacation /
+// active / left without going through a full profile edit.
+const UpdateActivityInput = z.object({
+  memberId: z.string().uuid(),
+  status: z.enum(['active', 'away', 'on_vacation', 'left'])
+})
+
+export async function updateMemberActivityStatus(
+  input: z.input<typeof UpdateActivityInput>
+) {
+  const parsed = UpdateActivityInput.safeParse(input)
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
+  }
+  const viewer = await requireAccessTier(['admin', 'lead'])
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from('team_members')
+    .update({ activity_status: parsed.data.status })
+    .eq('id', parsed.data.memberId)
+    .eq('company_id', viewer.companyId)
+  if (error) return { error: error.message }
+  await logActivity(
+    supabase,
+    viewer.companyId,
+    viewer.id,
+    'member.activity_changed',
+    'member',
+    parsed.data.memberId,
+    { to: parsed.data.status }
+  )
+  revalidatePath('/dashboard')
+  return { ok: true }
 }
 
 // ─── Task watchers (Slice B: spectators) ──────────────────────────────────

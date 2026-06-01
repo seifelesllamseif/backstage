@@ -7,6 +7,7 @@ import {
   AtSign,
   Info,
   LayoutGrid,
+  MoreHorizontal,
   Star,
   Target,
   Users,
@@ -20,11 +21,22 @@ import {
 } from 'lucide-react'
 import { STATUSES, TaskStatus } from './status'
 import StatusIcon from './StatusIcon'
+import { useQueryClient } from '@tanstack/react-query'
 import { useTeam } from './TeamContext'
 import Avatar from './Avatar'
 import { startDashboardTour } from './DashboardTour'
-import { getPresence, PRESENCE_LABEL, presenceRank } from './presence'
+import {
+  getLocalTime,
+  getPresence,
+  isQuietHours,
+  PRESENCE_LABEL,
+  presenceRank
+} from './presence'
 import { usePortfolioSheet } from './PortfolioSheet'
+import { useQuickNoteSheet } from './QuickNoteSheet'
+import { updateMemberActivityStatus } from '../actions'
+import { toast } from 'sonner'
+import { MessageSquare, Plane, UserCheck, UserMinus } from 'lucide-react'
 import { useDashTheme } from './theme'
 import { useContextMenu } from './ContextMenu'
 import { useTaskActions } from './actions'
@@ -42,7 +54,8 @@ import {
 const HINTS = {
   all: 'Every task in your projects.',
   mine: 'Tasks assigned to you.',
-  inbox: 'Todo + In Review in the active sprint.',
+  inbox:
+    'Every task in the active sprint. Disabled when no sprint is current.',
   mentions: 'Tasks where someone @-mentioned you in a comment.',
   archive: 'Completed sprints and old tasks.',
   projects: 'Discover and switch to another project',
@@ -82,6 +95,12 @@ interface SidebarProps {
   // When true, the bottom "Finish your profile" / "Take a tour" block hides
   // from the sidebar; those entries move into the Settings panel instead.
   onboardingComplete: boolean
+  // Whether any sprint is currently marked 'current'. Drives the disabled
+  // state of the Active filter (which means "any task in the active sprint").
+  hasActiveSprint: boolean
+  // Notification-style badge for the Updates entry. Count of activity rows
+  // newer than the member's stored "seen" cursor.
+  updatesUnread: number
 }
 
 export default function Sidebar({
@@ -97,7 +116,9 @@ export default function Sidebar({
   onSecondary,
   showHints,
   currentUserId,
-  onboardingComplete
+  onboardingComplete,
+  hasActiveSprint,
+  updatesUnread
 }: SidebarProps) {
   const { t } = useDashTheme()
   const { open } = useContextMenu()
@@ -105,6 +126,10 @@ export default function Sidebar({
   const router = useRouter()
   const team = useTeam()
   const { open: openPortfolio } = usePortfolioSheet()
+  const { open: openQuickNote } = useQuickNoteSheet()
+  const queryClient = useQueryClient()
+  const viewerRole = team.find((m) => m.id === currentUserId)?.role
+  const viewerIsPlanner = viewerRole === 'admin' || viewerRole === 'lead'
   // Self first; remaining members ordered by how reachable they look right
   // now (online > active today > away > on vacation > left).
   const orderedTeam = [
@@ -118,12 +143,29 @@ export default function Sidebar({
       })
   ]
 
+  const setMemberPresence = (
+    memberId: string,
+    status: 'active' | 'on_vacation' | 'left'
+  ) => {
+    updateMemberActivityStatus({ memberId, status }).then((res) => {
+      if ('error' in res) {
+        toast.error(res.error)
+        return
+      }
+      toast.success('Presence updated.')
+      // Refetch fetchInitial so the sidebar avatar ring + presence label
+      // pick up the new activity_status without a manual reload.
+      queryClient.invalidateQueries({ queryKey: ['dashboardInitial'] })
+    })
+  }
+
   const memberMenu = (
     e: React.MouseEvent,
     memberId: string,
     memberName: string
   ) => {
     const isActive = assigneeFilter.includes(memberId)
+    const isSelf = memberId === currentUserId
     open(e, [
       {
         id: 'profile',
@@ -131,6 +173,17 @@ export default function Sidebar({
         icon: <Users className="size-3.5" />,
         onSelect: () => openPortfolio(memberId)
       },
+      // Slice C: drop a note. Hidden on self - you can't @-ping yourself.
+      ...(!isSelf
+        ? [
+            {
+              id: 'note',
+              label: 'Drop a note',
+              icon: <MessageSquare className="size-3.5" />,
+              onSelect: () => openQuickNote({ memberId })
+            }
+          ]
+        : []),
       {
         id: 'filter',
         label: isActive
@@ -145,7 +198,31 @@ export default function Sidebar({
         icon: <X className="size-3.5" />,
         disabled: assigneeFilter.length === 0,
         onSelect: () => a.clearAssigneeFilter()
-      }
+      },
+      // Presence override is admin / lead only. The server mutation gates
+      // this too, this just hides the affordance for members.
+      ...(viewerIsPlanner && !isSelf
+        ? [
+            {
+              id: 'mark-active',
+              label: 'Mark as active',
+              icon: <UserCheck className="size-3.5" />,
+              onSelect: () => setMemberPresence(memberId, 'active')
+            },
+            {
+              id: 'mark-vacation',
+              label: 'Mark on vacation',
+              icon: <Plane className="size-3.5" />,
+              onSelect: () => setMemberPresence(memberId, 'on_vacation')
+            },
+            {
+              id: 'mark-left',
+              label: 'Mark as left',
+              icon: <UserMinus className="size-3.5" />,
+              onSelect: () => setMemberPresence(memberId, 'left')
+            }
+          ]
+        : [])
     ])
   }
 
@@ -219,8 +296,9 @@ export default function Sidebar({
           <SidebarItem
             icon={<Target className="size-3.5" />}
             label="Active"
-            count={counts.inbox}
+            count={hasActiveSprint ? counts.inbox : undefined}
             active={secondary === 'inbox'}
+            disabled={!hasActiveSprint}
             onClick={() => onView('inbox')}
             hint={showHints ? HINTS.inbox : undefined}
           />
@@ -293,28 +371,59 @@ export default function Sidebar({
           {orderedTeam.map((m) => {
             const presence = getPresence(m)
             const isOut = presence === 'on_vacation' || presence === 'left'
+            const isSelf = m.id === currentUserId
+            // The local clock and the menu button share the top-right
+            // slot: clock by default, button on hover. Both are absolutely
+            // positioned so the member name owns the full row width.
+            const quiet = isSelf ? null : isQuietHours(m)
+            const localTime = isSelf ? null : getLocalTime(m)
             return (
-              <SidebarFilter
-                key={m.id}
-                active={assigneeFilter.includes(m.id)}
-                onClick={() => onToggleAssignee(m.id)}
-                onContextMenu={(e) => memberMenu(e, m.id, m.name)}
-              >
-                <Avatar user={m} size={20} showPresence />
-                <span
-                  className={`truncate ${isOut ? 'opacity-50' : ''}`}
-                  title={PRESENCE_LABEL[presence]}
+              <div key={m.id} className="group/member relative">
+                <SidebarFilter
+                  active={assigneeFilter.includes(m.id)}
+                  onClick={() => onToggleAssignee(m.id)}
+                  onContextMenu={(e) => memberMenu(e, m.id, m.name)}
                 >
-                  {m.name}
-                </span>
-                {isOut && (
+                  <Avatar user={m} size={20} showPresence />
                   <span
-                    className={`ml-auto shrink-0 text-[9px] tracking-wide uppercase ${t.textSubtle}`}
+                    className={`min-w-0 flex-1 truncate ${isOut ? 'opacity-50' : ''}`}
+                    title={PRESENCE_LABEL[presence]}
+                  >
+                    {m.name}
+                  </span>
+                </SidebarFilter>
+                {isOut ? (
+                  <span
+                    className={`pointer-events-none absolute top-1/2 right-1.5 -translate-y-1/2 text-[9px] tracking-wide uppercase ${t.textSubtle}`}
                   >
                     {presence === 'left' ? 'Left' : 'PTO'}
                   </span>
+                ) : (
+                  localTime && (
+                    <span
+                      className={`pointer-events-none absolute top-1/2 right-1.5 -translate-y-1/2 text-[10px] tabular-nums transition-opacity group-hover/member:opacity-0 ${t.textSubtle}`}
+                      title={
+                        quiet
+                          ? `${localTime} local in ${m.timezone}. Outside work hours.`
+                          : `${localTime} local in ${m.timezone}.`
+                      }
+                    >
+                      {localTime}
+                    </span>
+                  )
                 )}
-              </SidebarFilter>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    memberMenu(e, m.id, m.name)
+                  }}
+                  aria-label={`Open menu for ${m.name}`}
+                  className={`absolute top-1/2 right-1 flex size-5 -translate-y-1/2 items-center justify-center rounded transition opacity-0 group-hover/member:opacity-100 focus-visible:opacity-100 ${t.btn}`}
+                >
+                  <MoreHorizontal className="size-3" />
+                </button>
+              </div>
             )
           })}
         </div>
@@ -330,6 +439,7 @@ export default function Sidebar({
           <SidebarItem
             icon={<Bell className="size-3.5" />}
             label="Updates"
+            count={updatesUnread > 0 ? updatesUnread : undefined}
             active={secondary === 'updates'}
             onClick={() => onSecondary('updates')}
             hint={showHints ? HINTS.updates : undefined}
@@ -387,7 +497,8 @@ function SidebarItem({
   count,
   active,
   onClick,
-  hint
+  hint,
+  disabled
 }: {
   icon: React.ReactNode
   label: string
@@ -395,17 +506,21 @@ function SidebarItem({
   active?: boolean
   onClick?: () => void
   hint?: string
+  // When true, the button is greyed and clicks are swallowed. Used for
+  // Active when no sprint is currently 'current'.
+  disabled?: boolean
 }) {
   const { t } = useDashTheme()
   return (
     <div
       className={`group flex items-center rounded-md text-xs transition ${
         active ? t.btnActive : t.tab
-      }`}
+      } ${disabled ? 'pointer-events-none opacity-40' : ''}`}
     >
       <button
         onClick={onClick}
-        className="flex flex-1 items-center justify-between gap-2 px-2 py-1.5"
+        disabled={disabled}
+        className="flex flex-1 items-center justify-between gap-2 px-2 py-1.5 disabled:cursor-not-allowed"
       >
         <span className="flex items-center gap-2">
           {icon}

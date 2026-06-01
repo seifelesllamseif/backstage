@@ -29,8 +29,8 @@ const TEXT_SIZE: Record<number, string> = {
 // already carries `ring-2`, so each value just supplies the hue.
 const RING_CLASS: Record<ReturnType<typeof getPresence>, string> = {
   online: 'ring-emerald-500',
-  today: 'ring-zinc-300 dark:ring-zinc-600',
-  away: 'ring-amber-400/60',
+  today: 'ring-amber-400/60',
+  away: 'ring-zinc-300 dark:ring-zinc-600',
   on_vacation: 'ring-zinc-400/40',
   left: 'ring-zinc-500/30'
 }

@@ -16,6 +16,10 @@ interface MentionInputProps {
   // Existing @team chips in already-posted comments still render either
   // way - this only affects the suggestion dropdown.
   accessTier?: 'admin' | 'lead' | 'member'
+  // Member ids to rank at the top of the suggestion list, regardless of
+  // alphabetical order. Used by TaskDetail to surface the task's
+  // spectators first so the author can ping them with one keystroke.
+  prioritizedIds?: string[]
 }
 
 interface TriggerState {
@@ -119,17 +123,31 @@ function mentionColor(
 export default function MentionInput({
   onSubmit,
   placeholder = 'Leave a comment… type @ to mention',
-  accessTier
+  accessTier,
+  prioritizedIds
 }: MentionInputProps) {
   const { t } = useDashTheme()
   const team = useTeam()
   const targets = useMemo(() => {
     const built = buildMentionTargets(team)
-    if (accessTier === 'member') {
-      return built.filter((t) => t.id !== 'team')
-    }
-    return built
-  }, [team, accessTier])
+    const filtered =
+      accessTier === 'member'
+        ? built.filter((t) => t.id !== 'team')
+        : built
+    if (!prioritizedIds || prioritizedIds.length === 0) return filtered
+    const rank = new Map(prioritizedIds.map((id, i) => [id, i]))
+    // Stable sort: prioritized members lead the list in the order they were
+    // passed in. Everything else keeps its original order (alphabetical
+    // from the source) so the rest of the dropdown stays predictable.
+    return [...filtered].sort((a, b) => {
+      const ra = rank.get(a.id)
+      const rb = rank.get(b.id)
+      if (ra !== undefined && rb !== undefined) return ra - rb
+      if (ra !== undefined) return -1
+      if (rb !== undefined) return 1
+      return 0
+    })
+  }, [team, accessTier, prioritizedIds])
   const [value, setValue] = useState('')
   const [trigger, setTrigger] = useState<TriggerState>({
     active: false,

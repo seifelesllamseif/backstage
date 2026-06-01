@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Briefcase,
   Check,
@@ -193,6 +193,45 @@ export default function TaskDetail({
   const [assigneeOpen, setAssigneeOpen] = useState(false)
   const [leadOpen, setLeadOpen] = useState(false)
   const [askLeadOpen, setAskLeadOpen] = useState(false)
+
+  // Spectator state lives at the task-detail level so the @-mention input
+  // can rank them at the top of its dropdown. Auto-refreshes on
+  // comments.length so a mention that promotes someone to spectator
+  // (mutations.ts addComment) surfaces immediately. UUID guard skips the
+  // fetch for the synthetic temp id used during optimistic create.
+  const [spectators, setSpectators] = useState<WatcherRow[]>([])
+  const [spectatorsLoading, setSpectatorsLoading] = useState(false)
+  const refreshSpectators = async () => {
+    if (!task) return
+    if (!UUID_RE.test(task.id)) {
+      setSpectators([])
+      return
+    }
+    setSpectatorsLoading(true)
+    const res = await listTaskWatchers(task.id)
+    if ('error' in res) {
+      toast.error(res.error)
+      setSpectators([])
+    } else {
+      setSpectators(
+        res.watchers.map((w) => ({
+          memberId: w.memberId,
+          fullName: w.fullName,
+          avatarUrl: w.avatarUrl,
+          invitedAt: w.invitedAt
+        }))
+      )
+    }
+    setSpectatorsLoading(false)
+  }
+  useEffect(() => {
+    void refreshSpectators()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.id, comments.length])
+  const spectatorIds = useMemo(
+    () => spectators.map((s) => s.memberId),
+    [spectators]
+  )
   // Comment currently being edited (id) + its draft body. Only one
   // comment edits at a time in the drawer.
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -484,6 +523,9 @@ export default function TaskDetail({
           canInvite={canEditOwner}
           currentUserId={currentUserId}
           team={team}
+          watchers={spectators}
+          loading={spectatorsLoading}
+          onChanged={refreshSpectators}
         />
 
         <LinksSection
@@ -683,6 +725,7 @@ export default function TaskDetail({
         <div className={`border-t p-3 ${t.border}`}>
           <MentionInput
             accessTier={accessTier}
+            prioritizedIds={spectatorIds}
             onSubmit={(body, mentions) =>
               onAddComment(task.id, body, mentions)
             }
@@ -1611,12 +1654,18 @@ interface WatcherRow {
   invitedAt: string
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function WatchersSection({
   taskId,
   assigneeId,
   canInvite,
   currentUserId,
-  team
+  team,
+  watchers,
+  loading,
+  onChanged
 }: {
   taskId: string
   assigneeId: string | null
@@ -1625,36 +1674,15 @@ function WatchersSection({
   canInvite: boolean
   currentUserId: string
   team: BoardAssignee[]
+  // State + refresh callback are owned by TaskDetail so the @-mention
+  // input can share the list (prioritized at the top of the dropdown).
+  watchers: WatcherRow[]
+  loading: boolean
+  onChanged: () => Promise<void> | void
 }) {
   const { t } = useDashTheme()
-  const [watchers, setWatchers] = useState<WatcherRow[]>([])
-  const [loading, setLoading] = useState(true)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pending, setPending] = useState(false)
-
-  const refresh = async () => {
-    setLoading(true)
-    const res = await listTaskWatchers(taskId)
-    if ('error' in res) {
-      toast.error(res.error)
-      setWatchers([])
-    } else {
-      setWatchers(
-        res.watchers.map((w) => ({
-          memberId: w.memberId,
-          fullName: w.fullName,
-          avatarUrl: w.avatarUrl,
-          invitedAt: w.invitedAt
-        }))
-      )
-    }
-    setLoading(false)
-  }
-
-  useEffect(() => {
-    void refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId])
 
   const watcherIdSet = new Set(watchers.map((w) => w.memberId))
   const candidates = team.filter(
@@ -1668,8 +1696,8 @@ function WatchersSection({
         if ('error' in res) {
           toast.error(res.error)
         } else {
-          toast.success('Watcher added.')
-          void refresh()
+          toast.success('Spectator added.')
+          void onChanged()
         }
       })
       .finally(() => {
@@ -1683,7 +1711,7 @@ function WatchersSection({
     removeTaskWatcher({ taskId, memberId })
       .then((res) => {
         if ('error' in res) toast.error(res.error)
-        else void refresh()
+        else void onChanged()
       })
       .finally(() => setPending(false))
   }
@@ -1696,7 +1724,7 @@ function WatchersSection({
         <span
           className={`text-[10px] tracking-wider uppercase ${t.textMuted}`}
         >
-          Watchers
+          Spectators
         </span>
         {canInvite && (
           <div className="relative">
@@ -1734,7 +1762,7 @@ function WatchersSection({
       </div>
       {watchers.length === 0 ? (
         <p className={`text-[11px] italic ${t.textSubtle}`}>
-          No watchers yet.
+          No spectators yet.
         </p>
       ) : (
         <div className="flex flex-col gap-1">

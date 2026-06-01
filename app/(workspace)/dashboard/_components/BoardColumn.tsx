@@ -65,15 +65,19 @@ export default function BoardColumn({
         disabled: !statusId,
         onSelect: () => statusId && a.toggleStatusFilter(statusId)
       },
-      { id: 'sep', label: '', separator: true },
-      {
-        id: 'clear',
-        label: `Delete ${tasks.length} task${tasks.length === 1 ? '' : 's'} here`,
-        icon: <Trash2 className="size-3.5" />,
-        destructive: true,
-        disabled: tasks.length === 0,
-        onSelect: () => tasks.forEach((task) => a.remove(task.id))
-      }
+      ...(a.canDeleteTasks
+        ? [
+            { id: 'sep', label: '', separator: true as const },
+            {
+              id: 'clear',
+              label: `Delete ${tasks.length} task${tasks.length === 1 ? '' : 's'} here`,
+              icon: <Trash2 className="size-3.5" />,
+              destructive: true,
+              disabled: tasks.length === 0,
+              onSelect: () => tasks.forEach((task) => a.remove(task.id))
+            }
+          ]
+        : [])
     ])
   }
 

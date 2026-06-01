@@ -89,6 +89,7 @@ import { ContextMenuProvider, useContextMenu } from './ContextMenu'
 import { TaskActionsProvider } from './actions'
 import { TeamProvider } from './TeamContext'
 import { PortfolioSheetProvider } from './PortfolioSheet'
+import { QuickNoteSheetProvider } from './QuickNoteSheet'
 import { useDashboardSearchParams } from './useDashboardSearchParams'
 
 export type GroupBy = 'status' | 'assignee' | 'priority'
@@ -376,7 +377,12 @@ export default function DashboardShellWrapper(props: {
       <ContextMenuProvider>
         <TeamProvider members={props.initial.members}>
           <PortfolioSheetProvider>
-            <DashboardShellInner {...props} />
+            <QuickNoteSheetProvider
+              tasks={props.initial.tasks}
+              currentUserId={props.initial.currentMember.id}
+            >
+              <DashboardShellInner {...props} />
+            </QuickNoteSheetProvider>
           </PortfolioSheetProvider>
         </TeamProvider>
       </ContextMenuProvider>
@@ -696,16 +702,14 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     if (view === 'mine')
       list = list.filter((task) => task.assignee?.id === currentUserId)
     if (view === 'inbox') {
-      // "Sprint focus" view: actionable statuses in the active sprint(s).
-      // If no sprint is currently active, fall back to all actionable tasks
-      // so the view still shows something useful.
-      list = list.filter((task) => {
-        const actionable =
-          task.status === 'todo' || task.status === 'in_review'
-        if (!actionable) return false
-        if (activeSprintTaskIdSet === null) return true
-        return activeSprintTaskIdSet.has(task.id)
-      })
+      // "Active" view: every task in the currently-running sprint(s),
+      // regardless of status. When no sprint is active, the sidebar
+      // disables the entry so this branch effectively renders empty.
+      if (activeSprintTaskIdSet === null) {
+        list = []
+      } else {
+        list = list.filter((task) => activeSprintTaskIdSet.has(task.id))
+      }
     }
     if (view === 'mentions')
       list = list.filter((task) => mentionedTaskIds.has(task.id))
@@ -766,13 +770,11 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     all: visibleTasks.length,
     mine: visibleTasks.filter((task) => task.assignee?.id === currentUserId)
       .length,
-    inbox: visibleTasks.filter((task) => {
-      const actionable =
-        task.status === 'todo' || task.status === 'in_review'
-      if (!actionable) return false
-      if (activeSprintTaskIdSet === null) return true
-      return activeSprintTaskIdSet.has(task.id)
-    }).length,
+    inbox:
+      activeSprintTaskIdSet === null
+        ? 0
+        : visibleTasks.filter((task) => activeSprintTaskIdSet.has(task.id))
+            .length,
     mentions: visibleTasks.filter((task) => mentionedTaskIds.has(task.id))
       .length
   }
@@ -1782,6 +1784,48 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     return all.sort((a, b) => b.atRaw.localeCompare(a.atRaw))
   }, [activity, tasks])
 
+  // Notification-style unread counter for the sidebar Updates entry.
+  // We persist the timestamp of the most recent activity row the member
+  // has already seen; anything newer counts as unread until they open
+  // the Updates panel (which bumps the cursor forward).
+  const UPDATES_SEEN_KEY = 'dashboard.updates.seenAt'
+  const [updatesSeenAt, setUpdatesSeenAt] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      return window.localStorage.getItem(UPDATES_SEEN_KEY)
+    } catch {
+      return null
+    }
+  })
+
+  // First-visit primer: if we have no stored cursor, pin it at the current
+  // latest activity so the badge doesn't open at 50+ for an existing user.
+  useEffect(() => {
+    if (updatesSeenAt !== null) return
+    const latest = globalActivity[0]?.atRaw ?? null
+    if (!latest) return
+    try {
+      window.localStorage.setItem(UPDATES_SEEN_KEY, latest)
+    } catch {}
+    setUpdatesSeenAt(latest)
+  }, [updatesSeenAt, globalActivity])
+
+  // Mark seen whenever the user lands on the Updates view.
+  useEffect(() => {
+    if (view !== 'updates') return
+    const latest = globalActivity[0]?.atRaw ?? null
+    if (!latest || latest === updatesSeenAt) return
+    try {
+      window.localStorage.setItem(UPDATES_SEEN_KEY, latest)
+    } catch {}
+    setUpdatesSeenAt(latest)
+  }, [view, globalActivity, updatesSeenAt])
+
+  const updatesUnread = useMemo(() => {
+    if (!updatesSeenAt) return 0
+    return globalActivity.filter((a) => a.atRaw > updatesSeenAt).length
+  }, [globalActivity, updatesSeenAt])
+
   // Sort within each column: explicit sortOrder first (3b drag/drop),
   // createdAt as the fallback for rows that pre-date the migration.
   const byColumnOrder = (a: BoardTask, b: BoardTask) => {
@@ -2091,6 +2135,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               showHints={showHints}
               currentUserId={currentUserId}
               onboardingComplete={initial.currentMember.onboardingComplete}
+              hasActiveSprint={activeSprintTaskIdSet !== null}
+              updatesUnread={updatesUnread}
             />
           </div>
 
@@ -2130,6 +2176,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 showHints={showHints}
                 currentUserId={currentUserId}
                 onboardingComplete={initial.currentMember.onboardingComplete}
+                hasActiveSprint={activeSprintTaskIdSet !== null}
+                updatesUnread={updatesUnread}
               />
             </SheetContent>
           </Sheet>
@@ -2586,6 +2634,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 <SymbolsPanel
                   tasks={visibleTasks}
                   sprints={sprints}
+                  members={team}
                   refsByTask={externalRefs}
                   refsByProject={projectExternalRefs}
                   onFilterByStatus={(status) => {
@@ -2756,21 +2805,11 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           members={team}
           onClose={() => setHandoffTaskTarget(null)}
           onDone={(taskId) => {
-            // The server has already moved the task to Done. Apply the
-            // same local effect we would have if the gate had passed on
-            // the first try: flip status + log activity.
-            setTasks((cur) =>
-              cur.map((task) =>
-                task.id === taskId
-                  ? {
-                      ...task,
-                      status: 'done',
-                      updatedAt: new Date().toISOString()
-                    }
-                  : task
-              )
-            )
-            logActivityLocal(taskId, 'Status set to Done')
+            // Task status is intentionally not flipped here. The handoff
+            // is saved server-side; the member moves the card to
+            // In review themselves when they're ready, which re-runs the
+            // gate and lets it through cleanly.
+            logActivityLocal(taskId, 'Handoff sent to review')
           }}
         />
 

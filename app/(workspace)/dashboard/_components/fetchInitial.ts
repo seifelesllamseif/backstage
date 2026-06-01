@@ -97,11 +97,14 @@ export async function dashboardMetadata(
   projectParam: string | undefined
 ): Promise<{ title: string; description: string }> {
   if (!projectParam) {
-    return { title: 'All Projects · Verbivore', description: DASHBOARD_DESCRIPTION }
+    return {
+      title: 'All Projects · Verbivore',
+      description: DASHBOARD_DESCRIPTION
+    }
   }
   const projectName = await resolveProjectTitle(projectParam)
   return {
-    title: projectName ? `${projectName} · Verbivore` : 'Task Handoff · Verbivore',
+    title: projectName ? `${projectName} · Verbivore` : 'BackStage · Verbivore',
     description: DASHBOARD_DESCRIPTION
   }
 }

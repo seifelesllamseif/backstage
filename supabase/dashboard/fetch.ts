@@ -102,6 +102,9 @@ export interface DashboardMemberRow {
   // The UI derives the displayed badge from both via lib/presence.
   lastSeenAt: string | null
   activityStatus: Database['public']['Enums']['activity_status']
+  // IANA timezone (e.g. "Europe/Malta"). Used to flag teammates who are
+  // outside their work hours so we don't ping them at 11pm local.
+  timezone: string | null
 }
 
 export interface DashboardProjectRow {
@@ -324,7 +327,7 @@ export async function fetchDashboardData(
     supabase
       .from('team_members')
       .select(
-        'id, full_name, avatar_url, access_tier, slug, last_seen_at, activity_status'
+        'id, full_name, avatar_url, access_tier, slug, last_seen_at, activity_status, timezone'
       )
       .eq('company_id', member.companyId)
       .order('full_name', { ascending: true }),
@@ -601,7 +604,8 @@ export async function fetchDashboardData(
     accessTier: m.access_tier,
     slug: m.slug,
     lastSeenAt: m.last_seen_at,
-    activityStatus: m.activity_status
+    activityStatus: m.activity_status,
+    timezone: m.timezone
   }))
 
   const projects: DashboardProjectRow[] = (projectsRes.data ?? []).map((p) => ({

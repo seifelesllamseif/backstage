@@ -25,7 +25,11 @@ import {
   type HandoffFieldValues
 } from '@/lib/handoff'
 import { defaultExternalRefLabel, parseExternalRef } from '@/lib/externalRef'
-import { fetchTaskHandoff, submitHandoffForReview } from '../actions'
+import {
+  fetchTaskHandoff,
+  saveHandoffDraft,
+  submitHandoffForReview
+} from '../actions'
 import { useDashTheme } from './theme'
 import type {
   BoardAssignee,
@@ -196,6 +200,7 @@ export default function HandoffSheet({
   const [fields, setFields] = useState<FieldsState>(EMPTY_FIELDS)
   const [loading, setLoading] = useState(false)
   const [submitting, startSubmit] = useTransition()
+  const [savingDraft, startSaveDraft] = useTransition()
   const [missing, setMissing] = useState<Set<HandoffField>>(new Set())
   // Inline add-link state. Mirrors the LinksSection pattern in TaskDetail.
   const [addingLink, setAddingLink] = useState(false)
@@ -302,13 +307,31 @@ export default function HandoffSheet({
         }
         return
       }
-      if (!res.statusResult.ok) {
-        toast.error(res.statusResult.message)
-        return
-      }
-      toast.success(`${task.ref} sent to review.`)
+      // Task status is intentionally left untouched - the member moves
+      // the card to In review themselves once they're ready.
+      toast.success(`${task.ref} handoff ready. Move it to In review when you're set.`)
       clearDraft(task.id)
       onDone(task.id)
+      onClose()
+    })
+  }
+
+  const handleSaveDraft = () => {
+    if (!task) return
+    setMissing(new Set())
+    startSaveDraft(async () => {
+      const payload: Partial<Record<HandoffField, string>> = {}
+      for (const f of HANDOFF_FIELDS) payload[f] = fields[f].trim()
+      const res = await saveHandoffDraft({
+        taskId: task.id,
+        fields: payload
+      })
+      if ('error' in res) {
+        toast.error(res.error)
+        return
+      }
+      toast.success('Draft saved.')
+      clearDraft(task.id)
       onClose()
     })
   }
@@ -732,7 +755,7 @@ export default function HandoffSheet({
                   ? 'All seven prompts filled. Ready to send to review.'
                   : `${totalCount - filledCount} field${
                       totalCount - filledCount === 1 ? '' : 's'
-                    } to go before this can be sent to review.`}
+                    } to go before this can be sent to review. Save a draft anytime.`}
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -743,19 +766,34 @@ export default function HandoffSheet({
                   Cancel
                 </button>
                 <button
-                  type="submit"
-                  disabled={submitting || loading || !allFilled}
-                  className={`flex h-8 items-center gap-1.5 rounded-md px-3 text-xs transition disabled:opacity-50 ${t.accent}`}
+                  type="button"
+                  onClick={handleSaveDraft}
+                  disabled={savingDraft || submitting || loading}
+                  className={`flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs transition disabled:opacity-50 ${t.btn}`}
                 >
-                  {submitting ? (
+                  {savingDraft ? (
                     <>
                       <Loader2 className="size-3.5 animate-spin" />
                       Saving…
                     </>
                   ) : (
+                    'Save draft'
+                  )}
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting || savingDraft || loading || !allFilled}
+                  className={`flex h-8 items-center gap-1.5 rounded-md px-3 text-xs transition disabled:opacity-50 ${t.accent}`}
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="size-3.5 animate-spin" />
+                      Sending…
+                    </>
+                  ) : (
                     <>
                       <CheckCircle2 className="size-3.5" />
-                      Save & send to review
+                      Send to review
                     </>
                   )}
                 </button>

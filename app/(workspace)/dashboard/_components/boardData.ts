@@ -20,6 +20,8 @@ export interface BoardAssignee {
   // Consumers derive a display state via lib/presence.
   lastSeenAt?: string | null
   activityStatus?: 'active' | 'away' | 'on_vacation' | 'left'
+  // IANA timezone for the quiet-hours indicator.
+  timezone?: string | null
 }
 
 export interface TaskRelation {

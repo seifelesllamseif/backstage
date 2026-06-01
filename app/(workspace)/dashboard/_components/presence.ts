@@ -45,3 +45,50 @@ const PRESENCE_RANK: Record<Presence, number> = {
 export function presenceRank(member: BoardAssignee): number {
   return PRESENCE_RANK[getPresence(member)]
 }
+
+// Light-touch "are they outside work hours" check using the member's
+// stored IANA timezone. Returns null when we don't have enough info so
+// the UI can skip the badge. Work hours are 9-18 local time, Mon-Fri.
+// Bump or per-member configure later if it gets in the way.
+const WORK_START = 9
+const WORK_END = 18
+
+export function isQuietHours(member: BoardAssignee): boolean | null {
+  if (!member.timezone) return null
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: member.timezone,
+      hour: '2-digit',
+      hour12: false,
+      weekday: 'short'
+    })
+    const parts = fmt.formatToParts(new Date())
+    const hourStr = parts.find((p) => p.type === 'hour')?.value
+    const weekday = parts.find((p) => p.type === 'weekday')?.value
+    if (!hourStr || !weekday) return null
+    const hour = parseInt(hourStr, 10)
+    if (Number.isNaN(hour)) return null
+    if (weekday === 'Sat' || weekday === 'Sun') return true
+    return hour < WORK_START || hour >= WORK_END
+  } catch {
+    return null
+  }
+}
+
+// Short local-time chip ("11:45 PM") for the member's timezone. Used as
+// the self-explanatory companion to the quiet-hours flag so a reader can
+// tell at a glance why someone is "off". Returns null when no timezone
+// is on file.
+export function getLocalTime(member: BoardAssignee): string | null {
+  if (!member.timezone) return null
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: member.timezone,
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    }).format(new Date())
+  } catch {
+    return null
+  }
+}

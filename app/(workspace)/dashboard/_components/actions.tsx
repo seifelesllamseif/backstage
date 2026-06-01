@@ -21,6 +21,9 @@ export interface TaskActions {
   clearStatusFilter: () => void
   toggleAssigneeFilter: (id: string) => void
   clearAssigneeFilter: () => void
+  // Members can't hard-delete tasks; they can only flip status to
+  // canceled/duplicate. Admins + leads keep the delete actions.
+  canDeleteTasks: boolean
 }
 
 const TaskActionsContext = createContext<TaskActions | null>(null)

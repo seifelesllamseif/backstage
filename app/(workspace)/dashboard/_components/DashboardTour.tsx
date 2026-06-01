@@ -116,24 +116,36 @@ export function DashboardTour() {
     }
     window.addEventListener('dashboard:tour', handler)
 
-    // First-visit auto-trigger. Defer to after paint so the targets
-    // are mounted; do nothing if the user has seen it before.
-    let timer: number | undefined
+    // First-visit auto-trigger. The dashboard shell renders behind a
+    // skeleton until React Query resolves fetchInitial, so on a cold
+    // cache the sidebar can take a couple of seconds to paint. Poll
+    // until it appears (capped at MAX_WAIT_MS) instead of a single
+    // fixed-delay setTimeout that fired too early for new users.
+    let interval: number | undefined
     try {
       const seen = window.localStorage.getItem(STORAGE_KEY)
       if (!seen) {
-        timer = window.setTimeout(() => {
-          // Only auto-run if a target actually exists. Avoids a tour on
-          // an empty workspace where the first card selector misses.
-          if (!document.querySelector(selector('sidebar'))) return
-          makeDriver().drive()
-        }, 800)
+        const POLL_MS = 250
+        const MAX_WAIT_MS = 10_000
+        const startedAt = Date.now()
+        interval = window.setInterval(() => {
+          if (document.querySelector(selector('sidebar'))) {
+            window.clearInterval(interval)
+            interval = undefined
+            makeDriver().drive()
+            return
+          }
+          if (Date.now() - startedAt >= MAX_WAIT_MS) {
+            window.clearInterval(interval)
+            interval = undefined
+          }
+        }, POLL_MS)
       }
     } catch {}
 
     return () => {
       window.removeEventListener('dashboard:tour', handler)
-      if (timer) window.clearTimeout(timer)
+      if (interval) window.clearInterval(interval)
     }
   }, [])
 

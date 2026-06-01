@@ -178,14 +178,18 @@ export default function TaskCard({
         icon: <Filter className="size-3.5" />,
         onSelect: () => a.toggleStatusFilter(task.status)
       },
-      { id: 'sep2', label: '', separator: true },
-      {
-        id: 'delete',
-        label: 'Delete task',
-        icon: <Trash2 className="size-3.5" />,
-        destructive: true,
-        onSelect: () => a.remove(task.id)
-      }
+      ...(a.canDeleteTasks
+        ? [
+            { id: 'sep2', label: '', separator: true as const },
+            {
+              id: 'delete',
+              label: 'Delete task',
+              icon: <Trash2 className="size-3.5" />,
+              destructive: true,
+              onSelect: () => a.remove(task.id)
+            }
+          ]
+        : [])
     ])
   }
 
