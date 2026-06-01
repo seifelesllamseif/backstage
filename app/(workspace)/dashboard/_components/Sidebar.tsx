@@ -14,6 +14,7 @@ import {
   Folder,
   Shapes,
   Compass,
+  UserCog,
   Archive as ArchiveIcon
 } from 'lucide-react'
 import { STATUSES, TaskStatus } from './status'
@@ -309,7 +310,19 @@ export default function Sidebar({
           />
         </div>
 
-        <div className={`mt-auto border-t pt-3 ${t.border}`}>
+        <div className={`mt-auto flex flex-col gap-0.5 border-t pt-3 ${t.border}`}>
+          <SidebarItem
+            icon={<UserCog className="size-3.5" />}
+            label="Finish your profile"
+            onClick={() => {
+              window.location.href = '/onboarding'
+            }}
+            hint={
+              showHints
+                ? 'Re-run the onboarding wizard. Already-filled steps offer Keep current to skip.'
+                : undefined
+            }
+          />
           <SidebarItem
             icon={<Compass className="size-3.5" />}
             label="Take a tour"

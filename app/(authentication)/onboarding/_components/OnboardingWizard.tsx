@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import {
   skipOnboardingFinish,
   skipPasswordStep,
+  skipToStep,
   updateAbout,
   updateIdentity,
   updatePassword,
@@ -135,6 +136,17 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
     });
   }
 
+  // Bumps onboarding_step to (current + 1) without touching the data
+  // and advances the wizard. Reused on every step's 'Keep current ...'
+  // button when the member already filled that section.
+  function keepAndAdvance(nextStep: number) {
+    startTransition(async () => {
+      const r = await skipToStep(nextStep);
+      if (!r.ok) setError(r.error);
+      else advance();
+    });
+  }
+
   // Returning user heuristic: any populated profile state means they
   // were already in the app before. Surfaces a "Keep current password"
   // skip on step 0 instead of forcing them to set a new one.
@@ -143,6 +155,18 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
     initial.fullName.trim().length > 0 ||
     initial.bio.trim().length > 0 ||
     initial.contactEmail.trim().length > 0;
+
+  // Per-step 'already filled' flags. When true, we render a 'Keep
+  // current ...' skip alongside Continue so the member can re-run the
+  // wizard without re-entering everything. The avatar step has its own
+  // 'Continue without uploading' path so no flag here; the About step
+  // already exposes 'Skip and finish' for the same reason.
+  const identityFilled =
+    initial.fullName.trim().length > 0 || initial.bio.trim().length > 0;
+  const socialsFilled =
+    initial.socialLinkedin.trim().length > 0 ||
+    initial.socialInstagram.trim().length > 0 ||
+    initial.socialWhatsapp.trim().length > 0;
 
   function submitIdentity() {
     const fd = new FormData();
@@ -338,7 +362,16 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                 className="border-input bg-input/20 dark:bg-input/30 placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/30 w-full rounded-md border px-2 py-1 text-xs/relaxed outline-none focus-visible:ring-2"
               />
             </Field>
-            <Footer onBack={back} onNext={submitIdentity} nextLabel="Continue" pending={pending} />
+            <Footer
+              onBack={back}
+              onNext={submitIdentity}
+              nextLabel="Continue"
+              pending={pending}
+              skipLabel={identityFilled ? 'Keep current details' : undefined}
+              onSkip={
+                identityFilled ? () => keepAndAdvance(2) : undefined
+              }
+            />
           </FieldGroup>
         )}
 
@@ -428,7 +461,16 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                 placeholder="https://wa.me/..."
               />
             </Field>
-            <Footer onBack={back} onNext={submitSocials} nextLabel="Continue" pending={pending} />
+            <Footer
+              onBack={back}
+              onNext={submitSocials}
+              nextLabel="Continue"
+              pending={pending}
+              skipLabel={socialsFilled ? 'Keep current socials' : undefined}
+              onSkip={
+                socialsFilled ? () => keepAndAdvance(4) : undefined
+              }
+            />
           </FieldGroup>
         )}
 
@@ -536,21 +578,40 @@ function Footer({
   nextLabel,
   pending,
   nextDisabled,
+  skipLabel,
+  onSkip,
 }: {
   onBack: () => void;
   onNext: () => void;
   nextLabel: string;
   pending: boolean;
   nextDisabled?: boolean;
+  // Optional 'Keep current X' link. Rendered between Back and Next when
+  // provided. Used by re-runs of the wizard where the member already
+  // filled this step before.
+  skipLabel?: string;
+  onSkip?: () => void;
 }) {
   return (
     <div className="mt-2 flex items-center justify-between gap-2">
       <Button variant="ghost" onClick={onBack} disabled={pending}>
         Back
       </Button>
-      <Button onClick={onNext} disabled={pending || nextDisabled}>
-        {nextLabel}
-      </Button>
+      <div className="flex items-center gap-3">
+        {skipLabel && onSkip && (
+          <button
+            type="button"
+            onClick={onSkip}
+            disabled={pending}
+            className="text-muted-foreground hover:text-foreground text-xs underline-offset-2 hover:underline disabled:opacity-50"
+          >
+            {skipLabel}
+          </button>
+        )}
+        <Button onClick={onNext} disabled={pending || nextDisabled}>
+          {nextLabel}
+        </Button>
+      </div>
     </div>
   );
 }

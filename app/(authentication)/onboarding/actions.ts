@@ -264,3 +264,18 @@ export async function skipPasswordStep(): Promise<ActionResult> {
   await bumpStep(member.id, 1);
   return { ok: true };
 }
+
+// Generic "this step is already filled, keep what I have" advance.
+// Just bumps onboarding_step to `step` (capped at WIZARD_STEPS). Used by
+// the Identity / Avatar / Socials / About steps when the member is
+// re-running the wizard and doesn't want to re-enter data they already
+// have.
+export async function skipToStep(step: number): Promise<ActionResult> {
+  const member = await getCurrentTeamMember();
+  if (!member) return { ok: false, error: "Not signed in." };
+  if (!Number.isInteger(step) || step < 0 || step > 5) {
+    return { ok: false, error: "Invalid step." };
+  }
+  await bumpStep(member.id, step);
+  return { ok: true };
+}
