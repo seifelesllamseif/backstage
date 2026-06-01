@@ -6,6 +6,8 @@ import { notFound } from 'next/navigation'
 import { ArrowUpRight, CalendarDays, FolderKanban } from 'lucide-react'
 import { fetchTaskByRef } from '@/supabase/dashboard/fetchTaskByRef'
 
+/* eslint-disable @next/next/no-img-element */
+
 type Params = Promise<{ ref: string }>
 
 const MAX_DESC_CHARS = 160
@@ -199,20 +201,20 @@ function MemberCell({
       </span>
       {member ? (
         <div className="flex items-center gap-2.5">
-          <span className="relative inline-flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-zinc-200 align-middle text-[11px] font-semibold text-zinc-700 dark:bg-white/10 dark:text-zinc-200">
-            {member.avatarUrl ? (
-              <Image
-                src={member.avatarUrl}
-                alt={member.fullName}
-                fill
-                sizes="32px"
-                className="object-cover"
-                unoptimized
-              />
-            ) : (
-              initials(member.fullName)
-            )}
-          </span>
+          {member.avatarUrl ? (
+            <img
+              src={member.avatarUrl}
+              alt={member.fullName}
+              width={32}
+              height={32}
+              loading="lazy"
+              className="size-8 shrink-0 rounded-full object-cover align-middle"
+            />
+          ) : (
+            <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-zinc-200 align-middle text-[11px] font-semibold text-zinc-700 dark:bg-white/10 dark:text-zinc-200">
+              {initials(member.fullName)}
+            </span>
+          )}
           <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
             {member.fullName}
           </span>

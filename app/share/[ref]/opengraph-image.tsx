@@ -5,6 +5,18 @@ export const alt = 'Verbivore task share preview'
 export const size = { width: 1200, height: 630 }
 export const contentType = 'image/png'
 
+// Verbivore palette
+const BG_PAGE = '#FAFAF7'
+const BG_CARD = '#FFFFFF'
+const TEXT_PRIMARY = '#0E1414'
+const TEXT_MUTED = '#566868'
+const TEXT_SUBTLE = '#7A8B8B'
+const BORDER_SOFT = 'rgba(15, 20, 20, 0.08)'
+const ACCENT_TEAL = '#00A89E'
+const ACCENT_TEAL_TEXT = '#018A82'
+const ACCENT_TEAL_TINT = 'rgba(0, 168, 158, 0.12)'
+const ACCENT_AMBER_TINT = 'rgba(239, 159, 39, 0.16)'
+
 const STATUS_LABEL: Record<string, string> = {
   backlog: 'Backlog',
   unscoped: 'Unscoped',
@@ -17,25 +29,25 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 const STATUS_BG: Record<string, string> = {
-  backlog: '#2C3737',
-  unscoped: '#2C3737',
-  todo: '#EDE8DC',
-  in_progress: '#0369A1',
-  in_review: '#B45309',
-  done: '#047857',
-  canceled: '#52525B',
-  duplicate: '#52525B'
+  backlog: '#F4F4F5',
+  unscoped: '#F4F4F5',
+  todo: '#0E1414',
+  in_progress: '#E0F2FE',
+  in_review: '#FEF3C7',
+  done: '#D1FAE5',
+  canceled: '#F4F4F5',
+  duplicate: '#F4F4F5'
 }
 
 const STATUS_FG: Record<string, string> = {
-  backlog: '#EDE8DC',
-  unscoped: '#EDE8DC',
-  todo: '#0E1414',
-  in_progress: '#FFFFFF',
-  in_review: '#FFFFFF',
-  done: '#FFFFFF',
-  canceled: '#FFFFFF',
-  duplicate: '#FFFFFF'
+  backlog: '#3F3F46',
+  unscoped: '#3F3F46',
+  todo: '#FAFAF7',
+  in_progress: '#075985',
+  in_review: '#92400E',
+  done: '#065F46',
+  canceled: '#71717A',
+  duplicate: '#71717A'
 }
 
 function formatDate(iso: string): string {
@@ -73,8 +85,8 @@ export default async function OG({
             display: 'flex',
             width: '100%',
             height: '100%',
-            background: '#0E1414',
-            color: '#7A8B8B',
+            background: BG_PAGE,
+            color: TEXT_SUBTLE,
             alignItems: 'center',
             justifyContent: 'center',
             fontSize: 40,
@@ -97,26 +109,25 @@ export default async function OG({
           flexDirection: 'column',
           width: '100%',
           height: '100%',
-          background:
-            'linear-gradient(135deg, #0E1414 0%, #1A2424 55%, #22302F 100%)',
-          color: '#EDE8DC',
+          background: BG_PAGE,
+          color: TEXT_PRIMARY,
           padding: 72,
           fontFamily: 'system-ui, -apple-system, sans-serif',
           position: 'relative'
         }}
       >
-        {/* Verbivore teal accent corner */}
+        {/* Teal accent corner */}
         <div
           style={{
             display: 'flex',
             position: 'absolute',
             top: -120,
             right: -120,
-            width: 360,
-            height: 360,
+            width: 380,
+            height: 380,
             borderRadius: 9999,
-            background: 'rgba(0, 168, 158, 0.18)',
-            filter: 'blur(40px)'
+            background: ACCENT_TEAL_TINT,
+            filter: 'blur(60px)'
           }}
         />
         {/* Soft amber bottom accent */}
@@ -129,8 +140,8 @@ export default async function OG({
             width: 320,
             height: 320,
             borderRadius: 9999,
-            background: 'rgba(239, 159, 39, 0.10)',
-            filter: 'blur(50px)'
+            background: ACCENT_AMBER_TINT,
+            filter: 'blur(70px)'
           }}
         />
 
@@ -151,7 +162,7 @@ export default async function OG({
               fontWeight: 700,
               letterSpacing: '0.22em',
               textTransform: 'uppercase',
-              color: '#EDE8DC'
+              color: TEXT_PRIMARY
             }}
           >
             <div
@@ -160,7 +171,7 @@ export default async function OG({
                 width: 14,
                 height: 14,
                 borderRadius: 9999,
-                background: '#00A89E'
+                background: ACCENT_TEAL
               }}
             />
             VERBIVORE
@@ -171,7 +182,7 @@ export default async function OG({
               alignItems: 'center',
               gap: 16,
               fontSize: 22,
-              color: '#B5C0C0',
+              color: TEXT_MUTED,
               letterSpacing: '0.05em'
             }}
           >
@@ -181,19 +192,19 @@ export default async function OG({
                 alignItems: 'center',
                 padding: '8px 18px',
                 borderRadius: 9999,
-                background: 'rgba(0, 168, 158, 0.18)',
-                color: '#5DE1D6',
+                background: ACCENT_TEAL_TINT,
+                color: ACCENT_TEAL_TEXT,
                 fontWeight: 700,
                 letterSpacing: '0.12em'
               }}
             >
               {task.ref}
             </span>
-            <span style={{ color: '#B5C0C0' }}>{task.project.name}</span>
+            <span style={{ color: TEXT_MUTED }}>{task.project.name}</span>
             {task.dueDate && (
               <>
-                <span style={{ color: '#566868' }}>·</span>
-                <span style={{ color: '#B5C0C0' }}>
+                <span style={{ color: TEXT_SUBTLE }}>·</span>
+                <span style={{ color: TEXT_MUTED }}>
                   Due {formatDate(task.dueDate)}
                 </span>
               </>
@@ -218,7 +229,7 @@ export default async function OG({
               fontWeight: 700,
               lineHeight: 1.05,
               letterSpacing: '-0.025em',
-              color: '#EDE8DC'
+              color: TEXT_PRIMARY
             }}
           >
             {task.title}
@@ -230,7 +241,9 @@ export default async function OG({
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between'
+            justifyContent: 'space-between',
+            paddingTop: 24,
+            borderTop: `1px solid ${BORDER_SOFT}`
           }}
         >
           {task.assignee ? (
@@ -240,7 +253,7 @@ export default async function OG({
                 alignItems: 'center',
                 gap: 18,
                 fontSize: 24,
-                color: '#EDE8DC'
+                color: TEXT_PRIMARY
               }}
             >
               <div
@@ -253,7 +266,7 @@ export default async function OG({
                   borderRadius: 9999,
                   background:
                     'linear-gradient(135deg, #00A89E 0%, #018A82 100%)',
-                  color: '#EDE8DC',
+                  color: BG_CARD,
                   fontSize: 22,
                   fontWeight: 700,
                   letterSpacing: '0.02em'
@@ -270,13 +283,17 @@ export default async function OG({
                     fontSize: 12,
                     letterSpacing: '0.25em',
                     textTransform: 'uppercase',
-                    color: '#7A8B8B'
+                    color: TEXT_SUBTLE
                   }}
                 >
                   Assignee
                 </span>
                 <span
-                  style={{ display: 'flex', fontSize: 24, color: '#EDE8DC' }}
+                  style={{
+                    display: 'flex',
+                    fontSize: 24,
+                    color: TEXT_PRIMARY
+                  }}
                 >
                   {task.assignee.fullName}
                 </span>
@@ -287,7 +304,7 @@ export default async function OG({
               style={{
                 display: 'flex',
                 fontSize: 22,
-                color: '#566868',
+                color: TEXT_SUBTLE,
                 letterSpacing: '0.15em',
                 textTransform: 'uppercase'
               }}
@@ -303,8 +320,8 @@ export default async function OG({
               gap: 12,
               padding: '14px 26px',
               borderRadius: 9999,
-              background: STATUS_BG[task.status] ?? '#3F3F46',
-              color: STATUS_FG[task.status] ?? '#FFFFFF',
+              background: STATUS_BG[task.status] ?? '#F4F4F5',
+              color: STATUS_FG[task.status] ?? TEXT_PRIMARY,
               fontSize: 22,
               fontWeight: 600,
               letterSpacing: '0.04em'
@@ -316,7 +333,7 @@ export default async function OG({
                 width: 10,
                 height: 10,
                 borderRadius: 9999,
-                background: STATUS_FG[task.status] ?? '#FFFFFF',
+                background: STATUS_FG[task.status] ?? TEXT_PRIMARY,
                 opacity: 0.85
               }}
             />
