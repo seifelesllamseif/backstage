@@ -27,6 +27,10 @@ export type OnboardingInitial = {
   fullName: string;
   contactEmail: string;
   bio: string;
+  // Existing avatar URL when the member re-enters onboarding partway
+  // through (or replays the flow). Pre-populates the avatar step's
+  // preview so they don't have to re-upload to advance.
+  avatarUrl: string | null;
   socialLinkedin: string;
   socialInstagram: string;
   socialWhatsapp: string;
@@ -69,7 +73,12 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
   const [bio, setBio] = useState(initial.bio);
 
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  // Preload the existing avatar (if any) so the preview shows it and the
+  // member can advance without re-uploading. A fresh selection overrides
+  // the URL with the local object URL.
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(
+    initial.avatarUrl,
+  );
   const [uploading, setUploading] = useState(false);
 
   const [socialLinkedin, setSocialLinkedin] = useState(initial.socialLinkedin);
@@ -130,7 +139,14 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
   }
 
   async function submitAvatar() {
+    // No new file picked: the existing avatar (preloaded from
+    // initial.avatarUrl) is good enough to advance. Skip the upload
+    // round-trip entirely.
     if (!avatarFile) {
+      if (initial.avatarUrl) {
+        advance();
+        return;
+      }
       setError("Pick an image first.");
       return;
     }
@@ -310,7 +326,11 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
               <div className="flex-1">
                 <label className="border-input bg-input/20 hover:bg-input/40 flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-xs">
                   <Upload className="size-3.5" />
-                  {avatarFile ? avatarFile.name : "Choose an image"}
+                  {avatarFile
+                    ? avatarFile.name
+                    : initial.avatarUrl
+                      ? "Replace photo"
+                      : "Choose an image"}
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
@@ -318,21 +338,33 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                     onChange={(e) => {
                       const f = e.currentTarget.files?.[0] ?? null;
                       setAvatarFile(f);
-                      setAvatarPreview(f ? URL.createObjectURL(f) : null);
+                      // New pick wins; if cleared, fall back to the
+                      // existing avatar URL instead of going blank.
+                      setAvatarPreview(
+                        f ? URL.createObjectURL(f) : initial.avatarUrl,
+                      );
                     }}
                   />
                 </label>
                 <p className="text-muted-foreground mt-2 text-[10px]">
-                  Required to finish onboarding. Stored in the avatars bucket.
+                  {initial.avatarUrl
+                    ? "We've kept the one you uploaded. Replace it or continue with this."
+                    : "Required to finish onboarding. Stored in the avatars bucket."}
                 </p>
               </div>
             </div>
             <Footer
               onBack={back}
               onNext={submitAvatar}
-              nextLabel={uploading ? "Uploading…" : "Upload and continue"}
+              nextLabel={
+                uploading
+                  ? "Uploading…"
+                  : avatarFile
+                    ? "Upload and continue"
+                    : "Continue"
+              }
               pending={uploading || pending}
-              nextDisabled={!avatarFile}
+              nextDisabled={!avatarFile && !initial.avatarUrl}
             />
           </FieldGroup>
         )}

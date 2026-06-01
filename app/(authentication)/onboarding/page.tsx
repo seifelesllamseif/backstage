@@ -32,6 +32,7 @@ async function OnboardingContent() {
           fullName: member.fullName,
           contactEmail: member.contactEmail ?? "",
           bio: member.bio ?? "",
+          avatarUrl: member.avatarUrl ?? null,
           socialLinkedin: member.socialLinkedin ?? "",
           socialInstagram: member.socialInstagram ?? "",
           socialWhatsapp: member.socialWhatsapp ?? "",
