@@ -10,16 +10,16 @@
 //     stale-while-revalidate.
 //   - Everything else (API, Supabase, server actions): network only.
 
-const SHELL_CACHE = 'verbivore-shell-v1'
-const ASSET_CACHE = 'verbivore-assets-v1'
+const SHELL_CACHE = 'verbivore-shell-v2'
+const ASSET_CACHE = 'verbivore-assets-v2'
 
 // Pre-cache the minimum needed to render an offline shell. Keep this tiny;
 // every entry here is a forced download on install.
 const SHELL_URLS = [
   '/offline',
-  '/favicon.svg',
-  '/pwa-192x192.png',
-  '/pwa-512x512.png'
+  '/logos/favicon.svg',
+  '/logos/pwa-192x192.png',
+  '/logos/pwa-512x512.png'
 ]
 
 self.addEventListener('install', (event) => {
@@ -49,9 +49,6 @@ function isStaticAsset(url) {
   return (
     url.pathname.startsWith('/_next/static/') ||
     url.pathname.startsWith('/logos/') ||
-    /^\/(pwa-|maskable-|apple-touch-icon|shortcut-|screenshot-|favicon)/.test(
-      url.pathname
-    ) ||
     /\.(?:woff2?|ttf|otf|eot)$/.test(url.pathname)
   )
 }
