@@ -1,7 +1,6 @@
 import 'server-only'
 
 import { createAdminClient } from '@/supabase/admin'
-import { getCurrentTeamMember } from '@/lib/dal'
 import type { Database } from '@/supabase/types'
 
 type TaskStatus = Database['public']['Enums']['task_status']
@@ -29,15 +28,15 @@ export interface SharedTaskView {
   lead: SharedTaskMember | null
 }
 
-// Single-task lookup by ref (e.g. "LMSV-15"). Scoped to the caller's
-// company. Returns null when not found / not visible. Used by the
-// /dashboard/task/[ref] share page + its opengraph-image route.
+// Single-task lookup by ref (e.g. "LMSV-15"). PUBLIC by design: used by
+// the shareable /dashboard/task/[ref] view and its opengraph-image route,
+// so it resolves for any caller (no session required) including OG
+// crawlers. Refs are unique across the single-tenant company (each
+// project has its own prefix + seq), so no company filter is needed.
+// When Backstage goes multi-tenant, swap this for a tokenized share URL.
 export async function fetchTaskByRef(
   ref: string
 ): Promise<SharedTaskView | null> {
-  const member = await getCurrentTeamMember()
-  if (!member) return null
-
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('tasks')
@@ -51,7 +50,6 @@ export async function fetchTaskByRef(
     `
     )
     .eq('ref', ref)
-    .eq('company_id', member.companyId)
     .maybeSingle()
 
   if (error || !data) return null
