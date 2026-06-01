@@ -361,6 +361,35 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
     initial.socialInstagram.trim().length > 0 ||
     initial.socialWhatsapp.trim().length > 0
 
+  // Per-step 'isDirty' flags. Continue disables when the user hasn't
+  // changed anything from the initial server state. The skip button
+  // stays enabled in parallel, so a returning member who's happy with
+  // what they have can always advance via Keep current.
+  const initialWhatsappPhone = (() => {
+    const m = initial.socialWhatsapp.match(/wa\.me\/(\d+)/i)
+    return m?.[1] ?? ''
+  })()
+  const identityDirty =
+    fullName !== initial.fullName ||
+    contactEmail !== initial.contactEmail ||
+    bio !== initial.bio
+  const socialsDirty =
+    socialLinkedin !== initial.socialLinkedin ||
+    socialInstagram !== initial.socialInstagram ||
+    whatsappPhone !== initialWhatsappPhone
+  const aboutBasicsDirty =
+    roleFocus !== initial.roleFocus ||
+    timezone !== (initial.timezone || guessTimezone()) ||
+    workStyle !== initial.workStyle ||
+    headline !== initial.headline ||
+    JSON.stringify(languages) !==
+      JSON.stringify(
+        initial.languages.length ? initial.languages : ['English']
+      )
+  const aboutWorkDirty =
+    JSON.stringify(workLinks) !== JSON.stringify(initial.workLinks) ||
+    JSON.stringify(skills) !== JSON.stringify(initial.skills)
+
   function submitIdentity() {
     const fd = new FormData()
     fd.set('fullName', fullName)
@@ -691,6 +720,7 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                     onNext={submitIdentity}
                     nextLabel="Continue"
                     pending={pending}
+                    nextDisabled={!identityDirty}
                     skipLabel={
                       identityFilled ? 'Keep current details' : undefined
                     }
@@ -880,6 +910,7 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                     onNext={submitSocials}
                     nextLabel="Continue"
                     pending={pending}
+                    nextDisabled={!socialsDirty}
                     skipLabel={
                       socialsFilled ? 'Keep current socials' : undefined
                     }
@@ -953,6 +984,7 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                     onNext={submitAboutBasics}
                     nextLabel="Continue"
                     pending={pending}
+                    nextDisabled={!aboutBasicsDirty}
                   />
                 </FieldGroup>
               )}
@@ -988,7 +1020,7 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                       </Button>
                       <Button
                         onClick={() => submitAboutWork(false)}
-                        disabled={pending}
+                        disabled={pending || !aboutWorkDirty}
                       >
                         {pending ? 'Saving…' : 'Save and finish'}
                       </Button>
