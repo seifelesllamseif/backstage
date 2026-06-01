@@ -238,7 +238,15 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
     return m?.[1] ?? ''
   })
 
-  const [roleFocus, setRoleFocus] = useState(initial.roleFocus)
+  // Role accepts multiple values (e.g. 'Frontend' + 'Design'). Stored
+  // as a comma-separated string in role_focus so no schema migration
+  // is needed; split on mount, join before saving.
+  const [roleFocus, setRoleFocus] = useState<string[]>(() =>
+    initial.roleFocus
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  )
   const [timezone, setTimezone] = useState(initial.timezone || guessTimezone())
   const [workStyle, setWorkStyle] = useState(initial.workStyle)
   const [languages, setLanguages] = useState<string[]>(
@@ -377,8 +385,12 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
     socialLinkedin !== initial.socialLinkedin ||
     socialInstagram !== initial.socialInstagram ||
     whatsappPhone !== initialWhatsappPhone
+  const initialRoles = initial.roleFocus
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
   const aboutBasicsDirty =
-    roleFocus !== initial.roleFocus ||
+    JSON.stringify(roleFocus) !== JSON.stringify(initialRoles) ||
     timezone !== (initial.timezone || guessTimezone()) ||
     workStyle !== initial.workStyle ||
     headline !== initial.headline ||
@@ -483,7 +495,9 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
   function submitAboutBasics() {
     startTransition(async () => {
       const r = await updateAboutBasics({
-        roleFocus,
+        // Join multi-role array into the comma-separated string the
+        // server schema expects; max 80 chars enforced server-side.
+        roleFocus: roleFocus.map((s) => s.trim()).filter(Boolean).join(', '),
         timezone,
         workStyle,
         languages: languages.map((s) => s.trim()).filter(Boolean),
@@ -922,17 +936,14 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
               {step === 4 && (
                 <FieldGroup className="gap-4">
                   <Field>
-                    <FieldLabel htmlFor="roleFocus">Role / focus</FieldLabel>
-                    <Input
-                      id="roleFocus"
+                    <FieldLabel>Role / focus</FieldLabel>
+                    <ChipsPicker
                       value={roleFocus}
-                      onChange={(e) => setRoleFocus(e.currentTarget.value)}
-                      placeholder="Frontend, Transcription, Cybersecurity…"
-                    />
-                    <SuggestionChips
-                      items={ROLE_SUGGESTIONS}
-                      selected={[roleFocus]}
-                      onPick={(s) => setRoleFocus(s)}
+                      onChange={setRoleFocus}
+                      suggestions={ROLE_SUGGESTIONS}
+                      placeholder="Add a role…"
+                      morePlaceholder="Add another role…"
+                      collapsedCount={10}
                     />
                   </Field>
                   <Field>
@@ -963,10 +974,13 @@ export function OnboardingWizard({ initial }: { initial: OnboardingInitial }) {
                     />
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="langs">Languages</FieldLabel>
-                    <LanguagesPicker
+                    <FieldLabel>Languages</FieldLabel>
+                    <ChipsPicker
                       value={languages}
                       onChange={setLanguages}
+                      suggestions={LANGUAGE_SUGGESTIONS}
+                      placeholder="Add a language…"
+                      morePlaceholder="Add another…"
                     />
                   </Field>
                   <Field>
@@ -1321,22 +1335,28 @@ function CompactRatingScale({
   )
 }
 
-// Multi-select pill list with a free-text input for custom values. Used
-// by the Languages field on step 4. Selected languages render as
-// removable pills; tapping a suggestion adds it; the input adds a
-// custom one on Enter / comma.
-function LanguagesPicker({
+// Multi-select pill list with a free-text input for custom values.
+// Selected items render as removable pills; tapping a suggestion adds
+// it; the input adds a custom one on Enter / comma. Used by the Role
+// and Languages fields on step 4.
+function ChipsPicker({
   value,
-  onChange
+  onChange,
+  suggestions,
+  placeholder = 'Add one…',
+  morePlaceholder = 'Add another…',
+  collapsedCount = 10
 }: {
   value: string[]
   onChange: (next: string[]) => void
+  suggestions: readonly string[]
+  placeholder?: string
+  morePlaceholder?: string
+  collapsedCount?: number
 }) {
   const [draft, setDraft] = useState('')
   const lower = new Set(value.map((v) => v.toLowerCase()))
-  const available = LANGUAGE_SUGGESTIONS.filter(
-    (s) => !lower.has(s.toLowerCase())
-  )
+  const available = suggestions.filter((s) => !lower.has(s.toLowerCase()))
   const addOne = (raw: string) => {
     const v = raw.trim()
     if (!v || lower.has(v.toLowerCase())) {
@@ -1351,11 +1371,11 @@ function LanguagesPicker({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="border-input bg-input/20 focus-within:border-ring focus-within:ring-ring/30 flex flex-wrap items-center gap-1.5 rounded-md border px-2 py-1.5 focus-within:ring-2">
         {value.map((v) => (
           <span
             key={v}
-            className="bg-input/40 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]"
+            className="bg-input/60 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]"
           >
             {v}
             <button
@@ -1380,8 +1400,8 @@ function LanguagesPicker({
             }
           }}
           onBlur={() => draft.trim() && addOne(draft)}
-          placeholder={value.length === 0 ? 'Add a language…' : 'Add another…'}
-          className="placeholder:text-muted-foreground flex-1 min-w-32 bg-transparent text-xs outline-none"
+          placeholder={value.length === 0 ? placeholder : morePlaceholder}
+          className="placeholder:text-muted-foreground min-w-32 flex-1 bg-transparent text-xs outline-none"
         />
       </div>
       {available.length > 0 && (
@@ -1389,7 +1409,7 @@ function LanguagesPicker({
           items={available}
           selected={[]}
           onPick={(s) => addOne(s)}
-          collapsedCount={10}
+          collapsedCount={collapsedCount}
         />
       )}
     </div>
