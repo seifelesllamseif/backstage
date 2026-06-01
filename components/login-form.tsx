@@ -79,12 +79,21 @@ export function LoginForm({
         transition={{ delay: 0.15, duration: 0.4 }}
       >
         <Image
-          src="/logo.png"
+          src="/logos/verbivore-logo-horizontal.svg"
           alt="Verbivore"
           width={240}
           height={80}
           priority
-          className="h-14 w-auto"
+          className="block h-14 w-auto dark:hidden"
+        />
+        <Image
+          src="/logos/verbivore-logo-horizontal-white.svg"
+          alt=""
+          aria-hidden
+          width={240}
+          height={80}
+          priority
+          className="hidden h-14 w-auto dark:block"
         />
         <p className="text-muted-foreground text-base">Welcome back! :)</p>
       </motion.div>
