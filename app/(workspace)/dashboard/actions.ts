@@ -47,6 +47,7 @@ import {
   savePushSubscription as savePushSubscriptionImpl,
   deletePushSubscription as deletePushSubscriptionImpl,
   fetchPushPublicKey as fetchPushPublicKeyImpl,
+  sendSelfTestPush as sendSelfTestPushImpl,
   updateDashboardTaskAssignee as updateDashboardTaskAssigneeImpl,
   updateDashboardTaskDetails as updateDashboardTaskDetailsImpl,
   updateDashboardTaskLead as updateDashboardTaskLeadImpl,
@@ -341,4 +342,10 @@ export async function fetchPushPublicKey(
   ...args: Parameters<typeof fetchPushPublicKeyImpl>
 ) {
   return fetchPushPublicKeyImpl(...args)
+}
+
+export async function sendSelfTestPush(
+  ...args: Parameters<typeof sendSelfTestPushImpl>
+) {
+  return sendSelfTestPushImpl(...args)
 }

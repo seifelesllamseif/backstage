@@ -1865,6 +1865,21 @@ export async function fetchPushPublicKey() {
   return { publicKey: await getVapidPublicKey() }
 }
 
+// Diagnostic: pushes a test notification to every subscription belonging
+// to the caller. Bypasses the self-skip that normally protects trigger
+// actions so it can be invoked from the Settings toggle.
+export async function sendSelfTestPush() {
+  const me = await getCurrentTeamMember()
+  if (!me) return { error: 'Not signed in.' }
+  const result = await sendPushToMember(me.id, {
+    title: 'Test notification',
+    body: 'If you can see this, push delivery to this device works.',
+    url: '/dashboard',
+    tag: 'self-test'
+  })
+  return result
+}
+
 // ─── Member presence override ─────────────────────────────────────────────
 // Admin / lead-only direct edit of another member's activity_status.
 // Used from the sidebar right-click menu to mark someone on vacation /

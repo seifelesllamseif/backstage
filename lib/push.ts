@@ -119,10 +119,18 @@ export async function sendPushToMember(
       .delete()
       .in('endpoint', goneEndpoints)
   }
-  // Best-effort timestamp; ignore failure.
-  void supabase
-    .from('push_subscriptions')
-    .update({ last_used_at: new Date().toISOString() })
-    .eq('member_id', memberId)
+  // Best-effort timestamp. Must be awaited or the Supabase JS query never
+  // actually executes (the builder is lazy). Errors are swallowed so a
+  // telemetry hiccup never blocks the trigger path.
+  if (sent > 0) {
+    await supabase
+      .from('push_subscriptions')
+      .update({ last_used_at: new Date().toISOString() })
+      .eq('member_id', memberId)
+      .then(
+        () => undefined,
+        () => undefined
+      )
+  }
   return { sent, pruned: goneEndpoints.length, failed }
 }

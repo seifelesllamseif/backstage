@@ -38,6 +38,7 @@ import Avatar from './Avatar'
 import { startDashboardTour } from './DashboardTour'
 import { usePushSubscription } from './usePushSubscription'
 import { useInstallPrompt } from './useInstallPrompt'
+import { sendSelfTestPush } from '../actions'
 import {
   GithubIcon,
   FigmaIcon,
@@ -2119,6 +2120,26 @@ export function SettingsPanel({
             </button>
           )}
         </Row>
+
+        {push.subscribed && (
+          <Row label="Test notification">
+            <button
+              onClick={async () => {
+                const res = await sendSelfTestPush()
+                if ('error' in res) {
+                  toast.error(res.error)
+                  return
+                }
+                toast.success(
+                  `Sent ${res.sent} · pruned ${res.pruned} · failed ${res.failed}`
+                )
+              }}
+              className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-[11px] transition ${t.border} ${t.tab}`}
+            >
+              Send to my devices
+            </button>
+          </Row>
+        )}
 
         {onboardingComplete && (
           <Row label="Profile">
