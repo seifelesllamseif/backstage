@@ -159,6 +159,7 @@ export function useDashboardSearchParams(
     '/dashboard/updates',
     '/dashboard/symbols',
     '/dashboard/settings',
+    '/dashboard/team',
     '/dashboard/archive'
   ])
   const resolveDest = useCallback(

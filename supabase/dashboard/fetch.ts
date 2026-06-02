@@ -188,6 +188,7 @@ export interface DashboardData {
     fullName: string
     accessTier: AccessTier
     onboardingComplete: boolean
+    isOwner: boolean
   }
 }
 
@@ -215,6 +216,15 @@ export async function fetchDashboardData(
   // code via getCurrentTeamMember() above and .eq('company_id', ...) filters
   // on every query. See supabase/admin.ts for the rationale.
   const supabase = createAdminClient()
+
+  // Owner-of-company lookup. Drives the isOwner flag on currentMember
+  // (used by the team management page to unlock owner-only powers).
+  const { data: ownerRow } = await supabase
+    .from('companies')
+    .select('owner_id')
+    .eq('id', member.companyId)
+    .maybeSingle()
+  const ownerId = ownerRow?.owner_id ?? null
 
   // Admins and leads see everything in the company. Members see only "their
   // projects" - projects where they have >=1 assigned task OR where they're
@@ -695,7 +705,8 @@ export async function fetchDashboardData(
       // Wizard bumps onboarding_step to 6 when the last step ("Your work")
       // saves or is skipped. Used by the dashboard to hide the sidebar
       // "Finish your profile" entry and move it into Settings.
-      onboardingComplete: member.onboardingStep >= 6
+      onboardingComplete: member.onboardingStep >= 6,
+      isOwner: ownerId === member.id
     }
   }
 }

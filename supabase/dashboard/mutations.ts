@@ -5,6 +5,9 @@ import { z } from 'zod'
 import { createAdminClient } from '@/supabase/admin'
 import { getCurrentTeamMember, requireAccessTier } from '@/lib/dal'
 import { getVapidPublicKey, sendPushToMember } from '@/lib/push'
+import { absoluteUrl, resolveMemberEmail, sendEmail } from '@/lib/email/send'
+import { buildUnsubscribeUrl } from '@/lib/email/unsubscribe'
+import { assignmentEmail, mentionEmail } from '@/lib/email/templates'
 import { parseExternalRef } from '@/lib/externalRef'
 import { scrapeDocTitle } from '@/lib/scrapeDocTitle'
 import { countMissingFields, isHandoffComplete, HANDOFF_FIELDS } from '@/lib/handoff'
@@ -616,7 +619,7 @@ export async function updateDashboardTaskAssignee(taskId: string, assigneeId: st
       to: assigneeId,
       toName
     })
-    // Ping the new assignee (never yourself).
+    // Ping the new assignee (never yourself) via web-push + email.
     if (assigneeId && assigneeId !== member.id) {
       const { data: t } = await supabase
         .from('tasks').select('ref, title').eq('id', taskId).maybeSingle()
@@ -627,6 +630,43 @@ export async function updateDashboardTaskAssignee(taskId: string, assigneeId: st
           url: `/share/${t.ref}`,
           tag: `task:${t.ref}`
         }).catch(() => undefined)
+
+        const [{ data: recipient }, { data: pref }] = await Promise.all([
+          supabase
+            .from('team_members')
+            .select('full_name, contact_email, email')
+            .eq('id', assigneeId)
+            .maybeSingle(),
+          supabase
+            .from('notification_email_prefs')
+            .select('assigned')
+            .eq('member_id', assigneeId)
+            .maybeSingle()
+        ])
+        const allowed = pref?.assigned !== false
+        const to =
+          recipient &&
+          ((recipient.contact_email && recipient.contact_email.trim()) ||
+            recipient.email)
+        if (allowed && recipient && to) {
+          const unsubscribeUrl = await buildUnsubscribeUrl(assigneeId)
+          const { subject, html, text } = assignmentEmail({
+            recipientName: recipient.full_name,
+            assignerName: member.fullName,
+            taskRef: t.ref,
+            taskTitle: t.title ?? '',
+            taskUrl: absoluteUrl(`/share/${t.ref}`),
+            unsubscribeUrl
+          })
+          await sendEmail({
+            to,
+            subject,
+            html,
+            text,
+            unsubscribeUrl,
+            tag: 'assignment'
+          }).catch(() => undefined)
+        }
       }
     }
   }
@@ -1076,9 +1116,9 @@ export async function addComment(taskId: string, body: string, mentions?: string
     }
   }
 
-  // Fan out web-push to mentioned members (best-effort, never block the
-  // comment). The mention list is already deduped client-side; we still
-  // drop the author and the 'team' target to avoid self-pings.
+  // Fan out web-push + email to mentioned members (best-effort, never
+  // block the comment). The mention list is already deduped client-side;
+  // we still drop the author and the 'team' target to avoid self-pings.
   if (mentionMemberIds.length > 0) {
     const { data: taskRow } = await supabase
       .from('tasks')
@@ -1087,15 +1127,56 @@ export async function addComment(taskId: string, body: string, mentions?: string
       .maybeSingle()
     if (taskRow?.ref) {
       const trimmedBody = body.length > 140 ? `${body.slice(0, 137)}...` : body
+      const taskUrl = absoluteUrl(`/share/${taskRow.ref}`)
+      const [{ data: recipients }, { data: prefs }] = await Promise.all([
+        supabase
+          .from('team_members')
+          .select('id, full_name, contact_email, email')
+          .in('id', mentionMemberIds),
+        supabase
+          .from('notification_email_prefs')
+          .select('member_id, mentions')
+          .in('member_id', mentionMemberIds)
+      ])
+      const prefMap = new Map(
+        (prefs ?? []).map((p) => [p.member_id, p.mentions])
+      )
+      const recipMap = new Map((recipients ?? []).map((r) => [r.id, r]))
+
       await Promise.all(
-        mentionMemberIds.map((id) =>
-          sendPushToMember(id, {
+        mentionMemberIds.map(async (id) => {
+          await sendPushToMember(id, {
             title: `${member.fullName} mentioned you on ${taskRow.ref}`,
             body: trimmedBody,
             url: `/share/${taskRow.ref}`,
             tag: `task:${taskRow.ref}`
           }).catch(() => undefined)
-        )
+
+          const allowed = prefMap.get(id) !== false
+          if (!allowed) return
+          const r = recipMap.get(id)
+          if (!r) return
+          const to = (r.contact_email && r.contact_email.trim()) || r.email
+          if (!to) return
+          const unsubscribeUrl = await buildUnsubscribeUrl(id)
+          const { subject, html, text } = mentionEmail({
+            recipientName: r.full_name,
+            authorName: member.fullName,
+            taskRef: taskRow.ref!,
+            taskTitle: taskRow.title ?? '',
+            commentBody: body,
+            taskUrl,
+            unsubscribeUrl
+          })
+          await sendEmail({
+            to,
+            subject,
+            html,
+            text,
+            unsubscribeUrl,
+            tag: 'mention'
+          }).catch(() => undefined)
+        })
       )
     }
   }

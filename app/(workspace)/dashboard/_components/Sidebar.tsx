@@ -21,7 +21,6 @@ import {
 } from 'lucide-react'
 import { STATUSES, TaskStatus } from './status'
 import StatusIcon from './StatusIcon'
-import { useQueryClient } from '@tanstack/react-query'
 import { useTeam } from './TeamContext'
 import Avatar from './Avatar'
 import { startDashboardTour } from './DashboardTour'
@@ -34,9 +33,12 @@ import {
 } from './presence'
 import { usePortfolioSheet } from './PortfolioSheet'
 import { useQuickNoteSheet } from './QuickNoteSheet'
-import { updateMemberActivityStatus } from '../actions'
-import { toast } from 'sonner'
-import { MessageSquare, Plane, UserCheck, UserMinus } from 'lucide-react'
+import { useMeetingRequestSheet } from './MeetingRequestSheet'
+import { useMeetingsSheet } from './MeetingsSheet'
+import {
+  CalendarPlus,
+  MessageSquare
+} from 'lucide-react'
 import { useDashTheme } from './theme'
 import { useContextMenu } from './ContextMenu'
 import { useTaskActions } from './actions'
@@ -74,6 +76,7 @@ type View =
   | 'updates'
   | 'settings'
   | 'symbols'
+  | 'team'
   | 'archive'
 
 interface SidebarProps {
@@ -95,6 +98,10 @@ interface SidebarProps {
   // When true, the bottom "Finish your profile" / "Take a tour" block hides
   // from the sidebar; those entries move into the Settings panel instead.
   onboardingComplete: boolean
+  // Drives visibility of the Team entry. Owner + admins + leads see it;
+  // members never do.
+  currentAccessTier: 'admin' | 'lead' | 'member'
+  currentIsOwner: boolean
   // Whether any sprint is currently marked 'current'. Drives the disabled
   // state of the Active filter (which means "any task in the active sprint").
   hasActiveSprint: boolean
@@ -117,6 +124,8 @@ export default function Sidebar({
   showHints,
   currentUserId,
   onboardingComplete,
+  currentAccessTier,
+  currentIsOwner,
   hasActiveSprint,
   updatesUnread
 }: SidebarProps) {
@@ -127,9 +136,10 @@ export default function Sidebar({
   const team = useTeam()
   const { open: openPortfolio } = usePortfolioSheet()
   const { open: openQuickNote } = useQuickNoteSheet()
-  const queryClient = useQueryClient()
-  const viewerRole = team.find((m) => m.id === currentUserId)?.role
-  const viewerIsPlanner = viewerRole === 'admin' || viewerRole === 'lead'
+  const { open: openMeetingRequest } = useMeetingRequestSheet()
+  const meetings = useMeetingsSheet()
+  const meetingsBadge =
+    meetings.pendingApprovalCount + meetings.awaitingPickCount
   // Self first; remaining members ordered by how reachable they look right
   // now (online > active today > away > on vacation > left).
   const orderedTeam = [
@@ -142,22 +152,6 @@ export default function Sidebar({
         return a.name.localeCompare(b.name)
       })
   ]
-
-  const setMemberPresence = (
-    memberId: string,
-    status: 'active' | 'on_vacation' | 'left'
-  ) => {
-    updateMemberActivityStatus({ memberId, status }).then((res) => {
-      if ('error' in res) {
-        toast.error(res.error)
-        return
-      }
-      toast.success('Presence updated.')
-      // Refetch fetchInitial so the sidebar avatar ring + presence label
-      // pick up the new activity_status without a manual reload.
-      queryClient.invalidateQueries({ queryKey: ['dashboardInitial'] })
-    })
-  }
 
   const memberMenu = (
     e: React.MouseEvent,
@@ -181,6 +175,12 @@ export default function Sidebar({
               label: 'Drop a note',
               icon: <MessageSquare className="size-3.5" />,
               onSelect: () => openQuickNote({ memberId })
+            },
+            {
+              id: 'meeting',
+              label: 'Request meeting',
+              icon: <CalendarPlus className="size-3.5" />,
+              onSelect: () => openMeetingRequest({ memberId })
             }
           ]
         : []),
@@ -198,31 +198,7 @@ export default function Sidebar({
         icon: <X className="size-3.5" />,
         disabled: assigneeFilter.length === 0,
         onSelect: () => a.clearAssigneeFilter()
-      },
-      // Presence override is admin / lead only. The server mutation gates
-      // this too, this just hides the affordance for members.
-      ...(viewerIsPlanner && !isSelf
-        ? [
-            {
-              id: 'mark-active',
-              label: 'Mark as active',
-              icon: <UserCheck className="size-3.5" />,
-              onSelect: () => setMemberPresence(memberId, 'active')
-            },
-            {
-              id: 'mark-vacation',
-              label: 'Mark on vacation',
-              icon: <Plane className="size-3.5" />,
-              onSelect: () => setMemberPresence(memberId, 'on_vacation')
-            },
-            {
-              id: 'mark-left',
-              label: 'Mark as left',
-              icon: <UserMinus className="size-3.5" />,
-              onSelect: () => setMemberPresence(memberId, 'left')
-            }
-          ]
-        : [])
+      }
     ])
   }
 
@@ -445,12 +421,38 @@ export default function Sidebar({
             hint={showHints ? HINTS.updates : undefined}
           />
           <SidebarItem
+            icon={<CalendarPlus className="size-3.5" />}
+            label="Meetings"
+            count={meetingsBadge > 0 ? meetingsBadge : undefined}
+            onClick={() => meetings.open()}
+            hint={
+              showHints
+                ? 'Request and approve meetings with teammates. Approved requests get a Google Meet link.'
+                : undefined
+            }
+          />
+          <SidebarItem
             icon={<Shapes className="size-3.5" />}
             label="Symbols"
             active={secondary === 'symbols'}
             onClick={() => onSecondary('symbols')}
             hint={showHints ? HINTS.symbols : undefined}
           />
+          {(currentIsOwner ||
+            currentAccessTier === 'admin' ||
+            currentAccessTier === 'lead') && (
+            <SidebarItem
+              icon={<Users className="size-3.5" />}
+              label="Team"
+              active={secondary === 'team'}
+              onClick={() => onSecondary('team')}
+              hint={
+                showHints
+                  ? 'Invite, remove, and manage roles for everyone in the workspace.'
+                  : undefined
+              }
+            />
+          )}
           <SidebarItem
             icon={<Settings className="size-3.5" />}
             label="Settings"

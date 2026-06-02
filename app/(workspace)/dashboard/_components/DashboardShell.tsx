@@ -71,6 +71,7 @@ import NewTaskModal from './NewTaskModal'
 import Timeline from './Timeline'
 import FilterPanel from './FilterPanel'
 import { ProjectsPanel, SettingsPanel, UpdatesPanel } from './Panels'
+import { TeamPanel } from './TeamPanel'
 import SprintsPanel from './SprintsPanel'
 import SprintHero from './SprintHero'
 import HandoffSheet from './HandoffSheet'
@@ -90,6 +91,8 @@ import { TaskActionsProvider } from './actions'
 import { TeamProvider } from './TeamContext'
 import { PortfolioSheetProvider } from './PortfolioSheet'
 import { QuickNoteSheetProvider } from './QuickNoteSheet'
+import { MeetingRequestSheetProvider } from './MeetingRequestSheet'
+import { MeetingsSheetProvider } from './MeetingsSheet'
 import { useDashboardSearchParams } from './useDashboardSearchParams'
 
 export type GroupBy = 'status' | 'assignee' | 'priority'
@@ -102,6 +105,7 @@ export type View =
   | 'updates'
   | 'settings'
   | 'symbols'
+  | 'team'
   | 'archive'
 
 export interface DashboardInitial {
@@ -129,6 +133,7 @@ export interface DashboardInitial {
     fullName: string
     accessTier: 'admin' | 'lead' | 'member'
     onboardingComplete: boolean
+    isOwner: boolean
   }
   currentProjectId: string | null
   defaultProjectId: string | null
@@ -182,6 +187,7 @@ const PANEL_VIEWS = [
   'updates',
   'settings',
   'symbols',
+  'team',
   'archive'
 ] as const
 type PanelView = (typeof PANEL_VIEWS)[number]
@@ -223,6 +229,7 @@ function viewTitle(
     if (view === 'updates') return 'Updates'
     if (view === 'symbols') return 'Symbol library'
     if (view === 'settings') return 'Workspace settings'
+    if (view === 'team') return 'Team'
     if (view === 'archive') return 'Archive'
     return 'All tasks'
   })()
@@ -381,7 +388,14 @@ export default function DashboardShellWrapper(props: {
               tasks={props.initial.tasks}
               currentUserId={props.initial.currentMember.id}
             >
-              <DashboardShellInner {...props} />
+              <MeetingRequestSheetProvider>
+                <MeetingsSheetProvider
+                  currentUserId={props.initial.currentMember.id}
+                  accessTier={props.initial.currentMember.accessTier}
+                >
+                  <DashboardShellInner {...props} />
+                </MeetingsSheetProvider>
+              </MeetingRequestSheetProvider>
             </QuickNoteSheetProvider>
           </PortfolioSheetProvider>
         </TeamProvider>
@@ -2001,6 +2015,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         return 'Symbols'
       case 'settings':
         return 'Settings'
+      case 'team':
+        return 'Team'
       case 'archive':
         return 'Archive'
       case 'all':
@@ -2118,6 +2134,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 view === 'updates' ||
                 view === 'settings' ||
                 view === 'symbols' ||
+                view === 'team' ||
                 view === 'archive'
                   ? 'all'
                   : view
@@ -2135,6 +2152,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               showHints={showHints}
               currentUserId={currentUserId}
               onboardingComplete={initial.currentMember.onboardingComplete}
+              currentAccessTier={initial.currentMember.accessTier}
+              currentIsOwner={initial.currentMember.isOwner}
               hasActiveSprint={activeSprintTaskIdSet !== null}
               updatesUnread={updatesUnread}
             />
@@ -2153,6 +2172,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   view === 'updates' ||
                   view === 'settings' ||
                   view === 'symbols' ||
+                  view === 'team' ||
                   view === 'archive'
                     ? 'all'
                     : view
@@ -2176,6 +2196,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 showHints={showHints}
                 currentUserId={currentUserId}
                 onboardingComplete={initial.currentMember.onboardingComplete}
+                currentAccessTier={initial.currentMember.accessTier}
+                currentIsOwner={initial.currentMember.isOwner}
                 hasActiveSprint={activeSprintTaskIdSet !== null}
                 updatesUnread={updatesUnread}
               />
@@ -2675,6 +2697,15 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   onChangePriority={updatePriority}
                   onChangeAssignee={updateAssignee}
                   onAddComment={addComment}
+                />
+              )}
+              {view === 'team' && (
+                <TeamPanel
+                  actor={{
+                    id: initial.currentMember.id,
+                    accessTier: initial.currentMember.accessTier,
+                    isOwner: initial.currentMember.isOwner
+                  }}
                 />
               )}
               {view === 'settings' && (

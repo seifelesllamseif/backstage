@@ -9,6 +9,31 @@
 // ./types.
 
 import { fetchDashboardData as fetchDashboardDataImpl } from '@/supabase/dashboard/fetch'
+import {
+  getMyEmailPrefs as getMyEmailPrefsImpl,
+  updateMyEmailPrefs as updateMyEmailPrefsImpl,
+} from '@/supabase/dashboard/emailPrefs'
+import {
+  approveMeetingRequest as approveMeetingRequestImpl,
+  cancelMeetingRequest as cancelMeetingRequestImpl,
+  createMeetingRequest as createMeetingRequestImpl,
+  declineMeetingRequest as declineMeetingRequestImpl,
+  listMyMeetingRequests as listMyMeetingRequestsImpl,
+  listPendingApprovals as listPendingApprovalsImpl,
+  pickMeetingSlot as pickMeetingSlotImpl,
+  pickMeetingTime as pickMeetingTimeImpl,
+  rejectMeetingRequest as rejectMeetingRequestImpl,
+} from '@/supabase/dashboard/meetings'
+import {
+  cancelInvite as cancelInviteImpl,
+  changeAccessTier as changeAccessTierImpl,
+  inviteMember as inviteMemberImpl,
+  listTeamRoster as listTeamRosterImpl,
+  reinstateMember as reinstateMemberImpl,
+  setMemberPresence as setMemberPresenceImpl,
+  softRemoveMember as softRemoveMemberImpl,
+  updateMemberProfileByAdmin as updateMemberProfileByAdminImpl,
+} from '@/supabase/dashboard/team'
 import { fetchInitial as fetchInitialImpl } from './_components/fetchInitial'
 import {
   addChecklistItem as addChecklistItemImpl,
@@ -348,4 +373,118 @@ export async function sendSelfTestPush(
   ...args: Parameters<typeof sendSelfTestPushImpl>
 ) {
   return sendSelfTestPushImpl(...args)
+}
+
+export async function getMyEmailPrefs(
+  ...args: Parameters<typeof getMyEmailPrefsImpl>
+) {
+  return getMyEmailPrefsImpl(...args)
+}
+
+export async function updateMyEmailPrefs(
+  ...args: Parameters<typeof updateMyEmailPrefsImpl>
+) {
+  return updateMyEmailPrefsImpl(...args)
+}
+
+export async function createMeetingRequest(
+  ...args: Parameters<typeof createMeetingRequestImpl>
+) {
+  return createMeetingRequestImpl(...args)
+}
+
+export async function listMyMeetingRequests(
+  ...args: Parameters<typeof listMyMeetingRequestsImpl>
+) {
+  return listMyMeetingRequestsImpl(...args)
+}
+
+export async function listPendingApprovals(
+  ...args: Parameters<typeof listPendingApprovalsImpl>
+) {
+  return listPendingApprovalsImpl(...args)
+}
+
+export async function approveMeetingRequest(
+  ...args: Parameters<typeof approveMeetingRequestImpl>
+) {
+  return approveMeetingRequestImpl(...args)
+}
+
+export async function rejectMeetingRequest(
+  ...args: Parameters<typeof rejectMeetingRequestImpl>
+) {
+  return rejectMeetingRequestImpl(...args)
+}
+
+export async function pickMeetingTime(
+  ...args: Parameters<typeof pickMeetingTimeImpl>
+) {
+  return pickMeetingTimeImpl(...args)
+}
+
+export async function pickMeetingSlot(
+  ...args: Parameters<typeof pickMeetingSlotImpl>
+) {
+  return pickMeetingSlotImpl(...args)
+}
+
+export async function declineMeetingRequest(
+  ...args: Parameters<typeof declineMeetingRequestImpl>
+) {
+  return declineMeetingRequestImpl(...args)
+}
+
+export async function cancelMeetingRequest(
+  ...args: Parameters<typeof cancelMeetingRequestImpl>
+) {
+  return cancelMeetingRequestImpl(...args)
+}
+
+export async function listTeamRoster(
+  ...args: Parameters<typeof listTeamRosterImpl>
+) {
+  return listTeamRosterImpl(...args)
+}
+
+export async function inviteMember(
+  ...args: Parameters<typeof inviteMemberImpl>
+) {
+  return inviteMemberImpl(...args)
+}
+
+export async function cancelInvite(
+  ...args: Parameters<typeof cancelInviteImpl>
+) {
+  return cancelInviteImpl(...args)
+}
+
+export async function softRemoveMember(
+  ...args: Parameters<typeof softRemoveMemberImpl>
+) {
+  return softRemoveMemberImpl(...args)
+}
+
+export async function reinstateMember(
+  ...args: Parameters<typeof reinstateMemberImpl>
+) {
+  return reinstateMemberImpl(...args)
+}
+
+export async function changeAccessTier(
+  ...args: Parameters<typeof changeAccessTierImpl>
+) {
+  return changeAccessTierImpl(...args)
+}
+
+export async function updateMemberProfileByAdmin(
+  ...args: Parameters<typeof updateMemberProfileByAdminImpl>
+) {
+  return updateMemberProfileByAdminImpl(...args)
+}
+
+export async function setMemberPresence(
+  ...args: Parameters<typeof setMemberPresenceImpl>
+) {
+  return setMemberPresenceImpl(...args)
 }

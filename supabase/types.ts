@@ -88,21 +88,32 @@ export type Database = {
           created_at: string
           id: string
           name: string
+          owner_id: string | null
           slug: string
         }
         Insert: {
           created_at?: string
           id?: string
           name: string
+          owner_id?: string | null
           slug: string
         }
         Update: {
           created_at?: string
           id?: string
           name?: string
+          owner_id?: string | null
           slug?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "companies_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       handoffs: {
         Row: {
@@ -212,6 +223,139 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      meeting_requests: {
+        Row: {
+          agenda: string | null
+          approved_at: string | null
+          approved_by_id: string | null
+          calendar_event_id: string | null
+          company_id: string
+          created_at: string
+          decline_reason: string | null
+          duration_min: number
+          id: string
+          meet_link: string | null
+          mode: string
+          proposed_date: string | null
+          rejection_reason: string | null
+          requestee_id: string
+          requester_id: string
+          selected_slot_index: number | null
+          selected_starts_at: string | null
+          slots: Json | null
+          status: Database["public"]["Enums"]["meeting_request_status"]
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          agenda?: string | null
+          approved_at?: string | null
+          approved_by_id?: string | null
+          calendar_event_id?: string | null
+          company_id: string
+          created_at?: string
+          decline_reason?: string | null
+          duration_min?: number
+          id?: string
+          meet_link?: string | null
+          mode?: string
+          proposed_date?: string | null
+          rejection_reason?: string | null
+          requestee_id: string
+          requester_id: string
+          selected_slot_index?: number | null
+          selected_starts_at?: string | null
+          slots?: Json | null
+          status?: Database["public"]["Enums"]["meeting_request_status"]
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          agenda?: string | null
+          approved_at?: string | null
+          approved_by_id?: string | null
+          calendar_event_id?: string | null
+          company_id?: string
+          created_at?: string
+          decline_reason?: string | null
+          duration_min?: number
+          id?: string
+          meet_link?: string | null
+          mode?: string
+          proposed_date?: string | null
+          rejection_reason?: string | null
+          requestee_id?: string
+          requester_id?: string
+          selected_slot_index?: number | null
+          selected_starts_at?: string | null
+          slots?: Json | null
+          status?: Database["public"]["Enums"]["meeting_request_status"]
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meeting_requests_approved_by_id_fkey"
+            columns: ["approved_by_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_requests_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_requests_requestee_id_fkey"
+            columns: ["requestee_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_requests_requester_id_fkey"
+            columns: ["requester_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notification_email_prefs: {
+        Row: {
+          assigned: boolean
+          meetings: boolean
+          member_id: string
+          mentions: boolean
+          updated_at: string
+        }
+        Insert: {
+          assigned?: boolean
+          meetings?: boolean
+          member_id: string
+          mentions?: boolean
+          updated_at?: string
+        }
+        Update: {
+          assigned?: boolean
+          meetings?: boolean
+          member_id?: string
+          mentions?: boolean
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_email_prefs_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: true
+            referencedRelation: "team_members"
             referencedColumns: ["id"]
           },
         ]
@@ -784,6 +928,63 @@ export type Database = {
           },
         ]
       }
+      team_invites: {
+        Row: {
+          accepted_at: string | null
+          access_tier: Database["public"]["Enums"]["access_tier"]
+          company_id: string
+          contact_email: string
+          email: string
+          expires_at: string
+          full_name: string
+          id: string
+          invited_at: string
+          invited_by: string | null
+          token: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          access_tier?: Database["public"]["Enums"]["access_tier"]
+          company_id: string
+          contact_email: string
+          email: string
+          expires_at?: string
+          full_name: string
+          id?: string
+          invited_at?: string
+          invited_by?: string | null
+          token: string
+        }
+        Update: {
+          accepted_at?: string | null
+          access_tier?: Database["public"]["Enums"]["access_tier"]
+          company_id?: string
+          contact_email?: string
+          email?: string
+          expires_at?: string
+          full_name?: string
+          id?: string
+          invited_at?: string
+          invited_by?: string | null
+          token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_invites_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_invites_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       team_members: {
         Row: {
           access_tier: Database["public"]["Enums"]["access_tier"]
@@ -899,6 +1100,14 @@ export type Database = {
         | "gcloud"
         | "stripe"
       handoff_status: "in_progress" | "blocked" | "ready_for_review" | "done"
+      meeting_request_status:
+        | "pending"
+        | "approved"
+        | "rejected"
+        | "declined"
+        | "scheduled"
+        | "canceled"
+        | "completed"
       project_kind: "standard" | "operations"
       relation_kind: "blocked_by" | "blocks" | "parent" | "sub_issue" | "triage"
       sprint_status: "completed" | "current" | "upcoming"
@@ -1058,6 +1267,15 @@ export const Constants = {
         "stripe",
       ],
       handoff_status: ["in_progress", "blocked", "ready_for_review", "done"],
+      meeting_request_status: [
+        "pending",
+        "approved",
+        "rejected",
+        "declined",
+        "scheduled",
+        "canceled",
+        "completed",
+      ],
       project_kind: ["standard", "operations"],
       relation_kind: ["blocked_by", "blocks", "parent", "sub_issue", "triage"],
       sprint_status: ["completed", "current", "upcoming"],

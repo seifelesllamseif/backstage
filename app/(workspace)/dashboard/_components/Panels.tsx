@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -38,7 +38,11 @@ import Avatar from './Avatar'
 import { startDashboardTour } from './DashboardTour'
 import { usePushSubscription } from './usePushSubscription'
 import { useInstallPrompt } from './useInstallPrompt'
-import { sendSelfTestPush } from '../actions'
+import {
+  getMyEmailPrefs,
+  sendSelfTestPush,
+  updateMyEmailPrefs
+} from '../actions'
 import {
   GithubIcon,
   FigmaIcon,
@@ -2141,6 +2145,8 @@ export function SettingsPanel({
           </Row>
         )}
 
+        <EmailNotifications />
+
         {onboardingComplete && (
           <Row label="Profile">
             <button
@@ -2208,6 +2214,82 @@ export function SettingsPanel({
 
       </div>
     </div>
+  )
+}
+
+function EmailNotifications() {
+  const { t } = useDashTheme()
+  const [prefs, setPrefs] = useState<{
+    mentions: boolean
+    assigned: boolean
+    meetings: boolean
+  } | null>(null)
+  const [saving, setSaving] = useState<null | 'mentions' | 'assigned' | 'meetings'>(
+    null
+  )
+
+  useEffect(() => {
+    let alive = true
+    getMyEmailPrefs().then((res) => {
+      if (!alive) return
+      if ('prefs' in res) setPrefs(res.prefs)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  async function toggle(key: 'mentions' | 'assigned' | 'meetings') {
+    if (!prefs) return
+    const next = !prefs[key]
+    setPrefs({ ...prefs, [key]: next })
+    setSaving(key)
+    const res = await updateMyEmailPrefs({ [key]: next })
+    if ('error' in res) {
+      toast.error(res.error)
+      setPrefs({ ...prefs })
+    } else {
+      setPrefs(res.prefs)
+    }
+    setSaving(null)
+  }
+
+  const rows: Array<{
+    key: 'mentions' | 'assigned' | 'meetings'
+    label: string
+  }> = [
+    { key: 'mentions', label: 'Email on mention' },
+    { key: 'assigned', label: 'Email when assigned a task' },
+    { key: 'meetings', label: 'Email for meeting requests' }
+  ]
+
+  return (
+    <>
+      {rows.map((row) => {
+        const on = prefs?.[row.key] ?? true
+        const isSaving = saving === row.key
+        return (
+          <Row key={row.key} label={row.label}>
+            <button
+              onClick={() => toggle(row.key)}
+              aria-pressed={on}
+              disabled={prefs === null || isSaving}
+              className={`relative h-6 w-11 rounded-full border transition disabled:opacity-50 ${
+                on
+                  ? 'border-teal-500 bg-teal-500'
+                  : t.surfaceMuted + ' ' + t.border
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 size-4 rounded-full bg-white transition-transform ${
+                  on ? 'translate-x-5' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </Row>
+        )
+      })}
+    </>
   )
 }
 
