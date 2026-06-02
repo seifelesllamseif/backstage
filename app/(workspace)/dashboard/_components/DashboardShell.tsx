@@ -2717,6 +2717,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   showHints={showHints}
                   setShowHints={setShowHints}
                   onboardingComplete={initial.currentMember.onboardingComplete}
+                  accessTier={initial.currentMember.accessTier}
                 />
               )}
             </main>

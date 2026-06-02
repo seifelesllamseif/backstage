@@ -115,6 +115,60 @@ export type Database = {
           },
         ]
       }
+      google_oauth_tokens: {
+        Row: {
+          access_token: string
+          company_id: string
+          connected_at: string
+          expires_at: string
+          google_email: string | null
+          last_used_at: string | null
+          member_id: string
+          refresh_token: string
+          scope: string
+          updated_at: string
+        }
+        Insert: {
+          access_token: string
+          company_id: string
+          connected_at?: string
+          expires_at: string
+          google_email?: string | null
+          last_used_at?: string | null
+          member_id: string
+          refresh_token: string
+          scope: string
+          updated_at?: string
+        }
+        Update: {
+          access_token?: string
+          company_id?: string
+          connected_at?: string
+          expires_at?: string
+          google_email?: string | null
+          last_used_at?: string | null
+          member_id?: string
+          refresh_token?: string
+          scope?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "google_oauth_tokens_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "google_oauth_tokens_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       handoffs: {
         Row: {
           company_id: string

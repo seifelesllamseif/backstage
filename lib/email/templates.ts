@@ -286,6 +286,73 @@ export function meetingApprovedEmail(
   return { subject, html, text }
 }
 
+export interface MeetingScheduledEmailInput {
+  recipientName: string
+  counterpartyName: string
+  title: string
+  agenda?: string | null
+  durationMin: number
+  startsAt: string
+  meetLink: string | null
+  calendarEventLink?: string | null
+  recipientTimezone?: string | null
+  unsubscribeUrl?: string
+}
+
+export function meetingScheduledEmail(
+  input: MeetingScheduledEmailInput
+): { subject: string; html: string; text: string } {
+  const d = new Date(input.startsAt)
+  const opts: Intl.DateTimeFormatOptions = {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: input.recipientTimezone ?? undefined,
+    timeZoneName: 'short'
+  }
+  const whenLabel = Number.isNaN(d.getTime())
+    ? input.startsAt
+    : new Intl.DateTimeFormat('en-US', opts).format(d)
+  const subject = `Meeting scheduled: ${input.title}`
+  const meetCta = input.meetLink
+    ? `<p style="margin:20px 0"><a href="${escape(input.meetLink)}" style="background:#0f766e;color:#fff;text-decoration:none;padding:10px 16px;border-radius:6px;display:inline-block">Join Google Meet</a></p>`
+    : ''
+  const agendaHtml = input.agenda
+    ? `<p style="margin:0 0 12px;color:#444"><strong>Agenda:</strong> ${input.agenda.replace(/</g, '&lt;')}</p>`
+    : ''
+  const calendarLine = input.calendarEventLink
+    ? `<p style="margin:0 0 12px"><a href="${escape(input.calendarEventLink)}" style="color:#0f766e">View on Google Calendar</a></p>`
+    : ''
+  const html = shell({
+    preheader: `Meeting with ${input.counterpartyName} on ${whenLabel}`,
+    bodyHtml:
+      `<p style="margin:0 0 8px">Hi ${escape(input.recipientName.split(' ')[0] || input.recipientName)},</p>` +
+      `<p style="margin:0 0 12px">Your meeting with <strong>${escape(input.counterpartyName)}</strong> is booked.</p>` +
+      `<p style="margin:0 0 12px"><strong>Title:</strong> ${escape(input.title)}</p>` +
+      agendaHtml +
+      `<p style="margin:0 0 12px"><strong>When:</strong> ${escape(whenLabel)} (${input.durationMin} min)</p>` +
+      meetCta +
+      calendarLine,
+    unsubscribeUrl: input.unsubscribeUrl
+  })
+  const text = [
+    `Hi ${input.recipientName.split(' ')[0] || input.recipientName},`,
+    '',
+    `Your meeting with ${input.counterpartyName} is booked.`,
+    `Title: ${input.title}`,
+    input.agenda ? `Agenda: ${input.agenda}` : '',
+    `When: ${whenLabel} (${input.durationMin} min)`,
+    input.meetLink ? `Join: ${input.meetLink}` : '',
+    input.calendarEventLink ? `Calendar: ${input.calendarEventLink}` : '',
+    input.unsubscribeUrl ? `\nUnsubscribe: ${input.unsubscribeUrl}` : ''
+  ]
+    .filter(Boolean)
+    .join('\n')
+  return { subject, html, text }
+}
+
 export interface MeetingDeclinedEmailInput {
   recipientName: string
   declinerName: string

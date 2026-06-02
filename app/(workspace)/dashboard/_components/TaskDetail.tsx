@@ -232,6 +232,12 @@ export default function TaskDetail({
     () => spectators.map((s) => s.memberId),
     [spectators]
   )
+  // Spectators / watchers are explicitly invited to engage on a task.
+  // The server gate (ensureTaskAccess 'commenter' kind in mutations.ts)
+  // already allows them to post; this widens the UI gate to match so
+  // they don't see "Only the assignee can comment" after being invited.
+  const isSpectator = spectatorIds.includes(currentUserId)
+  const canComment = canEditOwner || isSpectator
   // Comment currently being edited (id) + its draft body. Only one
   // comment edits at a time in the drawer.
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -721,7 +727,7 @@ export default function TaskDetail({
         </div>
       </div>
 
-      {canEditOwner ? (
+      {canComment ? (
         <div className={`border-t p-3 ${t.border}`}>
           <MentionInput
             accessTier={accessTier}
@@ -735,7 +741,7 @@ export default function TaskDetail({
         <div
           className={`border-t px-3 py-2 text-[11px] italic ${t.border} ${t.textSubtle}`}
         >
-          Only the assignee can comment on this task.
+          You don't have permission to comment on this task.
         </div>
       )}
 

@@ -19,11 +19,21 @@ export const authRoutes: string[] = ['/login']
  */
 export const protectedRoutes: string[] = [
   '/dashboard',
-  '/cockpit',
   '/projects',
   '/profile',
   '/onboarding'
 ]
+
+/**
+ * Routes that require staff-level access (owner | admin | lead).
+ * Authentication is checked by proxy.ts; the tier check has to happen
+ * on the server inside the route itself (we don't put access_tier in
+ * Supabase claims). Pages in this list should call `redirect(DEFAULT_REDIRECT_ROUTE)`
+ * when the actor fails `canSeeTeamPage` so plain members never see the
+ * "Not allowed" empty state.
+ * @type {string[]}
+ */
+export const staffOnlyRoutes: string[] = ['/dashboard/team']
 
 /**
  * The base route of the API application:
@@ -85,6 +95,16 @@ export function isAuthRoute(pathname: string): boolean {
  */
 export function isPublicRoute(pathname: string): boolean {
   return publicRoutes.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
+  )
+}
+
+/**
+ * Returns true if `pathname` is gated to owner / admin / lead.
+ * Pages call this themselves (proxy can't see tier without custom claims).
+ */
+export function isStaffOnlyRoute(pathname: string): boolean {
+  return staffOnlyRoutes.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)
   )
 }

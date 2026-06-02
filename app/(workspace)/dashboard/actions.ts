@@ -14,6 +14,10 @@ import {
   updateMyEmailPrefs as updateMyEmailPrefsImpl,
 } from '@/supabase/dashboard/emailPrefs'
 import {
+  disconnectGoogle as disconnectGoogleImpl,
+  getGoogleConnectionStatus as getGoogleConnectionStatusImpl,
+} from '@/supabase/dashboard/googleConnection'
+import {
   approveMeetingRequest as approveMeetingRequestImpl,
   cancelMeetingRequest as cancelMeetingRequestImpl,
   createMeetingRequest as createMeetingRequestImpl,
@@ -385,6 +389,18 @@ export async function updateMyEmailPrefs(
   ...args: Parameters<typeof updateMyEmailPrefsImpl>
 ) {
   return updateMyEmailPrefsImpl(...args)
+}
+
+export async function getGoogleConnectionStatus(
+  ...args: Parameters<typeof getGoogleConnectionStatusImpl>
+) {
+  return getGoogleConnectionStatusImpl(...args)
+}
+
+export async function disconnectGoogle(
+  ...args: Parameters<typeof disconnectGoogleImpl>
+) {
+  return disconnectGoogleImpl(...args)
 }
 
 export async function createMeetingRequest(

@@ -9,8 +9,10 @@ import { buildUnsubscribeUrl } from '@/lib/email/unsubscribe'
 import {
   meetingApprovedEmail,
   meetingDeclinedOrRejectedEmail,
-  meetingRequestSubmittedEmail
+  meetingRequestSubmittedEmail,
+  meetingScheduledEmail
 } from '@/lib/email/templates'
+import { createCalendarEventWithMeet } from '@/lib/google/calendar'
 import type { Database, Json, TablesInsert } from '@/supabase/types'
 
 // Meeting-request server actions. Service-role only (the dashboard talks
@@ -333,8 +335,12 @@ export async function pickMeetingTime(
   if (error || !data) {
     return { error: error?.message ?? 'Could not save time pick.' }
   }
+  const finalized = await finalizeSchedule(
+    member.companyId,
+    rowToRequest(data as RawMeetingRow)
+  )
   revalidatePath('/dashboard')
-  return { request: rowToRequest(data as RawMeetingRow) }
+  return { request: finalized }
 }
 
 // pick_slot mode: requestee picks one of the proposed slot indices.
@@ -383,8 +389,12 @@ export async function pickMeetingSlot(
   if (error || !data) {
     return { error: error?.message ?? 'Could not save slot pick.' }
   }
+  const finalized = await finalizeSchedule(
+    member.companyId,
+    rowToRequest(data as RawMeetingRow)
+  )
   revalidatePath('/dashboard')
-  return { request: rowToRequest(data as RawMeetingRow) }
+  return { request: finalized }
 }
 
 export async function declineMeetingRequest(
@@ -442,6 +452,108 @@ export async function cancelMeetingRequest(
   }
   revalidatePath('/dashboard')
   return { request: rowToRequest(data as RawMeetingRow) }
+}
+
+// ─── Calendar event + scheduled email ────────────────────────────────────
+
+// Called right after a meeting flips to 'scheduled'. Best-effort:
+//   - if the workspace has Google connected, create a Calendar event
+//     with a Meet link and persist event_id + meet_link.
+//   - then email both parties the booking with the Meet link.
+// If Google isn't connected, we skip the calendar step; both parties
+// still get an email confirming the time without a join link.
+async function finalizeSchedule(
+  companyId: string,
+  request: MeetingRequest
+): Promise<MeetingRequest> {
+  if (!request.selectedStartsAt) return request
+  const supabase = createAdminClient()
+
+  const { data: parties } = await supabase
+    .from('team_members')
+    .select('id, full_name, contact_email, email, timezone')
+    .in('id', [request.requesterId, request.requesteeId])
+  const requester = parties?.find((p) => p.id === request.requesterId)
+  const requestee = parties?.find((p) => p.id === request.requesteeId)
+  const requesterEmail =
+    requester && ((requester.contact_email && requester.contact_email.trim()) || requester.email)
+  const requesteeEmail =
+    requestee && ((requestee.contact_email && requestee.contact_email.trim()) || requestee.email)
+
+  let eventId: string | null = null
+  let meetLink: string | null = null
+  let calendarHtmlLink: string | null = null
+
+  if (requesterEmail && requesteeEmail) {
+    const result = await createCalendarEventWithMeet({
+      companyId,
+      startsAt: new Date(request.selectedStartsAt),
+      durationMin: request.durationMin,
+      title: request.title,
+      description: request.agenda,
+      attendeeEmails: [requesterEmail, requesteeEmail]
+    }).catch((err) => ({ error: String(err).slice(0, 200) }))
+
+    if (!('error' in result)) {
+      eventId = result.eventId
+      meetLink = result.meetLink
+      calendarHtmlLink = result.htmlLink
+      await supabase
+        .from('meeting_requests')
+        .update({
+          calendar_event_id: eventId,
+          meet_link: meetLink,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', request.id)
+    } else {
+      console.warn('[meetings] calendar event skipped:', result.error)
+    }
+  }
+
+  // Fetch pref rows for both parties in a single round-trip.
+  const { data: prefs } = await supabase
+    .from('notification_email_prefs')
+    .select('member_id, meetings')
+    .in('member_id', [request.requesterId, request.requesteeId])
+  const prefMap = new Map((prefs ?? []).map((p) => [p.member_id, p.meetings]))
+
+  await Promise.all(
+    [
+      { side: 'requester' as const, party: requester, email: requesterEmail, counter: request.requesteeName },
+      { side: 'requestee' as const, party: requestee, email: requesteeEmail, counter: request.requesterName }
+    ].map(async (p) => {
+      if (!p.party || !p.email) return
+      if (prefMap.get(p.party.id) === false) return
+      const unsubscribeUrl = await buildUnsubscribeUrl(p.party.id)
+      const { subject, html, text } = meetingScheduledEmail({
+        recipientName: p.party.full_name,
+        counterpartyName: p.counter,
+        title: request.title,
+        agenda: request.agenda,
+        durationMin: request.durationMin,
+        startsAt: request.selectedStartsAt!,
+        meetLink,
+        calendarEventLink: calendarHtmlLink,
+        recipientTimezone: p.party.timezone,
+        unsubscribeUrl
+      })
+      await sendEmail({
+        to: p.email,
+        subject,
+        html,
+        text,
+        unsubscribeUrl,
+        tag: 'meeting_scheduled'
+      }).catch(() => undefined)
+    })
+  )
+
+  return {
+    ...request,
+    calendarEventId: eventId,
+    meetLink
+  }
 }
 
 // ─── Email fan-outs (best-effort, never block) ───────────────────────────

@@ -39,6 +39,8 @@ import { startDashboardTour } from './DashboardTour'
 import { usePushSubscription } from './usePushSubscription'
 import { useInstallPrompt } from './useInstallPrompt'
 import {
+  disconnectGoogle,
+  getGoogleConnectionStatus,
   getMyEmailPrefs,
   sendSelfTestPush,
   updateMyEmailPrefs
@@ -2048,7 +2050,8 @@ export function SettingsPanel({
   setWipLimit,
   showHints,
   setShowHints,
-  onboardingComplete
+  onboardingComplete,
+  accessTier
 }: {
   density: 'compact' | 'cozy'
   setDensity: (d: 'compact' | 'cozy') => void
@@ -2060,6 +2063,8 @@ export function SettingsPanel({
   // "Finish your profile" / "Take a tour" block; we surface the same two
   // actions here so they stay accessible without crowding the nav.
   onboardingComplete: boolean
+  // Admin-only sections (Google Calendar connect) gate on this.
+  accessTier: 'admin' | 'lead' | 'member'
 }) {
   const { t } = useDashTheme()
   const router = useRouter()
@@ -2146,6 +2151,8 @@ export function SettingsPanel({
         )}
 
         <EmailNotifications />
+
+        {accessTier === 'admin' && <GoogleCalendarConnection />}
 
         {onboardingComplete && (
           <Row label="Profile">
@@ -2290,6 +2297,110 @@ function EmailNotifications() {
         )
       })}
     </>
+  )
+}
+
+function GoogleCalendarConnection() {
+  const { t } = useDashTheme()
+  const [status, setStatus] = useState<
+    | null
+    | {
+        configured: boolean
+        connected: boolean
+        connectedAt: string | null
+        lastUsedAt: string | null
+        googleEmail: string | null
+        connectedByName: string | null
+      }
+  >(null)
+  const [busy, startBusy] = useTransition()
+
+  async function refresh() {
+    const res = await getGoogleConnectionStatus()
+    if (res && !('error' in res)) {
+      setStatus(res)
+    }
+  }
+
+  useEffect(() => {
+    refresh()
+    // Pick up the ?google=... callback param. We do this once on mount;
+    // the callback route redirects back to /dashboard/settings with one
+    // of: connected | admin_only | bad_state | <error message>.
+    if (typeof window === 'undefined') return
+    const sp = new URLSearchParams(window.location.search)
+    const flag = sp.get('google')
+    if (flag) {
+      if (flag === 'connected') {
+        toast.success('Google Calendar connected.')
+      } else if (flag === 'admin_only') {
+        toast.error('Only an admin can connect the workspace calendar.')
+      } else if (flag === 'bad_state' || flag === 'state_mismatch') {
+        toast.error('Link expired. Try connecting again.')
+      } else if (flag !== 'missing_params' && flag !== 'not_signed_in') {
+        toast.error(`Google: ${decodeURIComponent(flag)}`)
+      }
+      sp.delete('google')
+      const qs = sp.toString()
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${qs ? `?${qs}` : ''}`
+      )
+    }
+  }, [])
+
+  function disconnect() {
+    startBusy(async () => {
+      const res = await disconnectGoogle()
+      if ('error' in res) {
+        toast.error(res.error)
+        return
+      }
+      toast.success('Disconnected.')
+      refresh()
+    })
+  }
+
+  if (!status) return null
+  if (!status.configured) {
+    return (
+      <Row label="Google Calendar">
+        <span className={`text-[11px] ${t.textMuted}`}>
+          Not configured. Server is missing GOOGLE_CLIENT_ID / SECRET.
+        </span>
+      </Row>
+    )
+  }
+  if (!status.connected) {
+    return (
+      <Row label="Google Calendar">
+        <a
+          href="/api/google/oauth/start"
+          className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-[11px] transition ${t.border} ${t.tab}`}
+        >
+          Connect
+        </a>
+      </Row>
+    )
+  }
+  return (
+    <Row label="Google Calendar">
+      <div className="flex items-center gap-2">
+        <span className={`text-[11px] ${t.textMuted}`}>
+          {status.googleEmail
+            ? `Connected as ${status.googleEmail}`
+            : `Connected by ${status.connectedByName ?? 'someone'}`}
+        </span>
+        <button
+          onClick={disconnect}
+          disabled={busy}
+          className={`h-7 rounded-md border px-2 text-[11px] disabled:opacity-40 ${t.btn}`}
+        >
+          Disconnect
+        </button>
+      </div>
+    </Row>
   )
 }
 

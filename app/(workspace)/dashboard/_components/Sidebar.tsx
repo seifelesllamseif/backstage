@@ -141,11 +141,15 @@ export default function Sidebar({
   const meetingsBadge =
     meetings.pendingApprovalCount + meetings.awaitingPickCount
   // Self first; remaining members ordered by how reachable they look right
-  // now (online > active today > away > on vacation > left).
+  // now (online > active today > away > on vacation). Soft-removed members
+  // (activity_status='left') drop off the sidebar entirely - they only
+  // appear on the Team page so admins can reinstate them.
   const orderedTeam = [
     ...team.filter((m) => m.id === currentUserId),
     ...team
-      .filter((m) => m.id !== currentUserId)
+      .filter(
+        (m) => m.id !== currentUserId && m.activityStatus !== 'left'
+      )
       .sort((a, b) => {
         const dr = presenceRank(a) - presenceRank(b)
         if (dr !== 0) return dr

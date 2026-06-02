@@ -127,6 +127,15 @@ export const requireOnboardingComplete = cache(async () => {
   if (!member) {
     redirect(DEFAULT_LOGIN_ROUTE);
   }
+  // Soft-removed members (activity_status='left') must not see the
+  // workspace. We bounce them through /api/auth/signout, which runs
+  // in a route handler that CAN clear auth cookies (server components
+  // can't, see supabase/server.ts setAll). Trying to signOut() inline
+  // here silently fails, the proxy keeps seeing them as authed, and
+  // they get bounced between /login and /dashboard in a refresh loop.
+  if (member.activityStatus === "left") {
+    redirect("/api/auth/signout?reason=left");
+  }
   if (!member.avatarUrl) {
     redirect(ONBOARDING_ROUTE);
   }

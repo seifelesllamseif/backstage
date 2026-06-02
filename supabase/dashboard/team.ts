@@ -373,6 +373,36 @@ export async function cancelInvite(
 const PRESENCE_VALUES = ['active', 'on_vacation', 'left'] as const
 type PresenceValue = (typeof PRESENCE_VALUES)[number]
 
+// Soft-removing a member must also kill their sessions. Without this
+// they stay signed in - their cookie remains valid until expiry. We
+// revoke refresh tokens (signOut global) so the next access-token
+// refresh fails, and ban the auth user so they can't re-sign-in. The
+// workspace layout has a complementary check that bounces 'left'
+// members within the current access-token window. Unbanning happens
+// inside applyPresence when the target is moving away from 'left'.
+async function applyAuthSideEffectsForPresence(
+  memberId: string,
+  next: PresenceValue,
+  prev: PresenceValue | null
+): Promise<void> {
+  const supabase = createAdminClient()
+  if (next === 'left') {
+    await supabase.auth.admin.signOut(memberId, 'global').catch(() => undefined)
+    // ban_duration accepts a Go duration string; ~114 years is "forever
+    // for our purposes". Reinstate clears it back to 'none'.
+    await supabase.auth.admin
+      .updateUserById(memberId, { ban_duration: '1000000h' })
+      .catch(() => undefined)
+    return
+  }
+  // Reinstating: only bother unbanning if they were left before.
+  if (prev === 'left') {
+    await supabase.auth.admin
+      .updateUserById(memberId, { ban_duration: 'none' })
+      .catch(() => undefined)
+  }
+}
+
 export async function setMemberPresence(input: {
   memberId: string
   status: PresenceValue
@@ -394,12 +424,30 @@ export async function setMemberPresence(input: {
   if (!canSoftRemove(actor, target)) return { error: 'Not allowed.' }
 
   const supabase = createAdminClient()
+  // Read prior status to know whether to unban on reinstate.
+  const { data: prevRow } = await supabase
+    .from('team_members')
+    .select('activity_status')
+    .eq('id', input.memberId)
+    .eq('company_id', me.companyId)
+    .maybeSingle()
+  const prevStatus = (prevRow?.activity_status ?? null) as
+    | PresenceValue
+    | 'away'
+    | null
+
   const { error } = await supabase
     .from('team_members')
     .update({ activity_status: input.status })
     .eq('id', input.memberId)
     .eq('company_id', me.companyId)
   if (error) return { error: error.message }
+
+  await applyAuthSideEffectsForPresence(
+    input.memberId,
+    input.status,
+    prevStatus === 'away' ? 'active' : prevStatus
+  )
 
   revalidatePath('/dashboard/team')
   revalidatePath('/dashboard')
@@ -426,6 +474,8 @@ export async function softRemoveMember(
     .eq('company_id', me.companyId)
   if (error) return { error: error.message }
 
+  await applyAuthSideEffectsForPresence(memberId, 'left', null)
+
   revalidatePath('/dashboard/team')
   revalidatePath('/dashboard')
   return { ok: true }
@@ -450,6 +500,8 @@ export async function reinstateMember(
     .eq('id', memberId)
     .eq('company_id', me.companyId)
   if (error) return { error: error.message }
+
+  await applyAuthSideEffectsForPresence(memberId, 'active', 'left')
 
   revalidatePath('/dashboard/team')
   revalidatePath('/dashboard')

@@ -474,16 +474,23 @@ export function TeamPanel({ actor }: { actor: Actor }) {
             accessTier: m.accessTier,
             isOwner: m.isOwner
           }
+          const isLeft = m.activityStatus === 'left'
           const canEdit = canEditProfile(actor, target)
-          const canDelete = canSoftRemove(actor, target)
-          if (!canEdit && !canDelete) return null
+          // Same underlying gate (canActOn). The split here is by current
+          // row state: deleted rows show Reinstate, others show Delete.
+          const canActPresence = canSoftRemove(actor, target)
+          const canDelete = canActPresence && !isLeft
+          const canReinstateRow = canActPresence && isLeft
+          if (!canEdit && !canDelete && !canReinstateRow) return null
           return (
             <div className="flex justify-end">
               <RowActionsMenu
                 canEdit={canEdit}
                 canDelete={canDelete}
+                canReinstate={canReinstateRow}
                 onEdit={() => setEditing(m)}
                 onDelete={() => setDeleteConfirm(m)}
+                onReinstate={() => onChangePresence(m, 'active')}
               />
             </div>
           )
@@ -843,13 +850,17 @@ export function TeamPanel({ actor }: { actor: Actor }) {
 function RowActionsMenu({
   canEdit,
   canDelete,
+  canReinstate,
   onEdit,
-  onDelete
+  onDelete,
+  onReinstate
 }: {
   canEdit: boolean
   canDelete: boolean
+  canReinstate: boolean
   onEdit: () => void
   onDelete: () => void
+  onReinstate: () => void
 }) {
   const { t } = useDashTheme()
   const [open, setOpen] = useState(false)
@@ -897,6 +908,19 @@ function RowActionsMenu({
             >
               <Pencil className="size-3.5" />
               Edit
+            </button>
+          )}
+          {canReinstate && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false)
+                onReinstate()
+              }}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-emerald-700 transition hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+            >
+              <UserCheck className="size-3.5" />
+              Reinstate
             </button>
           )}
           {canDelete && (
