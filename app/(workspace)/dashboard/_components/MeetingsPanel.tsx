@@ -182,14 +182,35 @@ export function MeetingsPanel({
     return meetingItems.filter((m) => keys.has(m.bucketDay)).length
   }, [meetingItems, anchor])
 
-  const scheduledCount = meetingItems.filter((m) => m.status === 'scheduled').length
-  const awaitingPickCount = meetingItems.filter(
+  // Stats come from the raw query union, NOT meetingItems. The
+  // calendar grid (meetingItems) drops rows that have no bucketDay -
+  // e.g. pending slots-mode meetings whose proposedDate is null
+  // because the requester offered specific times instead of a day -
+  // but those still need to count towards "Pending approval" etc.
+  const statRows = useMemo(() => {
+    const seen = new Set<string>()
+    const out: { id: string; status: string; requesterId: string; attendees: { id: string }[] }[] = []
+    for (const r of [...(pendingQuery.data ?? []), ...(mineQuery.data ?? [])]) {
+      if (seen.has(r.id)) continue
+      seen.add(r.id)
+      out.push({
+        id: r.id,
+        status: r.status,
+        requesterId: r.requesterId,
+        attendees: r.attendees.map((a) => ({ id: a.id }))
+      })
+    }
+    return out
+  }, [pendingQuery.data, mineQuery.data])
+
+  const scheduledCount = statRows.filter((m) => m.status === 'scheduled').length
+  const awaitingPickCount = statRows.filter(
     (m) =>
       m.status === 'approved' &&
       m.attendees.length === 1 &&
       m.attendees[0]?.id === currentUserId
   ).length
-  const pendingCount = meetingItems.filter((m) => m.status === 'pending').length
+  const pendingCount = statRows.filter((m) => m.status === 'pending').length
   // Meetings where I was a participant, status still 'scheduled', and
   // the scheduled end-time is already past. Drives the new "Awaiting
   // your review" stat card and the inbox section.

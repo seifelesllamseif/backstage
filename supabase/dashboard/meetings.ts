@@ -1122,13 +1122,20 @@ export interface SharedMeeting {
     | 'scheduled'
     | 'canceled'
     | 'completed'
+  mode: 'day' | 'slots'
   durationMin: number
   proposedDate: string | null
   selectedStartsAt: string | null
+  slots: string[] | null
   meetLink: string | null
   requesterName: string
   requesterAvatarUrl: string | null
   attendees: { fullName: string; avatarUrl: string | null }[]
+  goal: string | null
+  context: string | null
+  questions: string | null
+  preRead: string | null
+  agenda: string | null
 }
 
 const SHARE_VISIBLE_STATUSES = ['pending', 'approved', 'scheduled', 'completed']
@@ -1141,7 +1148,7 @@ export async function fetchMeetingForShare(
   const { data } = await supabase
     .from('meeting_requests')
     .select(
-      `id, title, status, duration_min, proposed_date, selected_starts_at, meet_link,
+      `id, title, status, mode, duration_min, proposed_date, selected_starts_at, slots, meet_link, goal, context, questions, pre_read, agenda,
        requester:team_members!meeting_requests_requester_id_fkey(full_name, avatar_url),
        meeting_attendees(member:team_members(full_name, avatar_url))`
     )
@@ -1163,13 +1170,20 @@ export async function fetchMeetingForShare(
     id: data.id,
     title: data.title,
     status: data.status,
+    mode: (data.mode === 'slots' ? 'slots' : 'day') as 'day' | 'slots',
     durationMin: data.duration_min,
     proposedDate: data.proposed_date,
     selectedStartsAt: data.selected_starts_at,
+    slots: Array.isArray(data.slots) ? (data.slots as string[]) : null,
     meetLink: data.status === 'scheduled' ? data.meet_link : null,
     requesterName: requester?.full_name ?? 'Someone',
     requesterAvatarUrl: requester?.avatar_url ?? null,
-    attendees
+    attendees,
+    goal: data.goal,
+    context: data.context,
+    questions: data.questions,
+    preRead: data.pre_read,
+    agenda: data.agenda
   }
 }
 

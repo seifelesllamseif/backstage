@@ -161,6 +161,25 @@ const STATUS_LABEL: Record<MeetingRequestRow['status'], string> = {
   completed: 'Completed'
 }
 
+// Same status, different reading depending on which side the viewer is
+// on. 'approved' for the requester means "the other side has to pick,"
+// for the attendee means "you have to pick."
+function statusLabelFor(
+  req: MeetingRequestRow,
+  viewerId: string
+): string {
+  if (req.status === 'approved' && req.attendees.length === 1) {
+    if (req.requesterId === viewerId) {
+      const attendee = req.attendees[0]?.fullName ?? 'requestee'
+      return `Approved - waiting on ${attendee.split(/\s+/)[0]}`
+    }
+    if (isAttendeeOf(req, viewerId)) {
+      return 'Approved - pick a time'
+    }
+  }
+  return STATUS_LABEL[req.status]
+}
+
 function fmtDate(dateIso: string, viewerTz: string | null): string {
   // dateIso is YYYY-MM-DD with no zone attached. Parse as local-noon
   // and format in the viewer's zone so the weekday doesn't shift across
@@ -275,6 +294,11 @@ export function MeetingsSheetProvider({
 
   function invalidate() {
     queryClient.invalidateQueries({ queryKey: ['meetingRequests'] })
+    // A card action almost always empties the focused section
+    // (approve removes from pending, pick removes from awaiting, etc).
+    // Clearing focus afterwards lets the user see where the meeting
+    // actually landed instead of staring at an empty filtered list.
+    setFocus(null)
   }
 
   return (
@@ -567,6 +591,109 @@ function CardShell({
   )
 }
 
+// Native <details> disclosure. Closed state: a one-line summary of the
+// goal with a subtle chevron at the end. Open state: a soft-bg panel
+// with a 2-column "key | value" grid (labels left, content right) so
+// the eye can scan straight down. Pre-read renders as a chip row, not
+// bullets. Hidden when every brief field is empty.
+function BriefPreview({
+  request,
+  includeAgenda = false
+}: {
+  request: MeetingRequestRow
+  includeAgenda?: boolean
+}) {
+  const { t } = useDashTheme()
+  const goal = request.goal?.trim() || null
+  const context = request.context?.trim() || null
+  const questions = request.questions?.trim() || null
+  const agenda = includeAgenda ? request.agenda?.trim() || null : null
+  const preReadLinks = (request.preRead ?? '')
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const hasMore =
+    Boolean(context) ||
+    Boolean(questions) ||
+    Boolean(agenda) ||
+    preReadLinks.length > 0
+  if (!goal && !hasMore) return null
+
+  const summary = (
+    <span
+      className={`min-w-0 flex-1 truncate text-[11px] leading-snug ${t.text}`}
+      title={goal ?? undefined}
+    >
+      {goal ?? <span className={t.textMuted}>No goal set</span>}
+    </span>
+  )
+
+  if (!hasMore) {
+    return <div className="mb-2 flex items-center gap-1.5">{summary}</div>
+  }
+
+  return (
+    <details className="group mb-2">
+      <summary
+        className={`flex cursor-pointer list-none items-center gap-1.5 rounded-md py-0.5 outline-none [&::-webkit-details-marker]:hidden`}
+      >
+        {summary}
+        <span
+          className={`inline-flex size-4 shrink-0 items-center justify-center rounded-full text-[10px] transition group-open:rotate-180 ${t.textMuted}`}
+          aria-hidden
+        >
+          ▾
+        </span>
+      </summary>
+      <div
+        className={`mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 rounded-md border p-2.5 text-[11px] leading-snug ${t.border} ${t.surfaceMuted}`}
+      >
+        {context && <BriefRow label="Context" body={context} />}
+        {questions && <BriefRow label="Questions" body={questions} />}
+        {agenda && <BriefRow label="Internal" body={agenda} />}
+        {preReadLinks.length > 0 && (
+          <>
+            <span
+              className={`pt-0.5 text-[9px] tracking-wider uppercase ${t.textMuted}`}
+            >
+              Pre-read
+            </span>
+            <ul className="flex min-w-0 flex-col gap-0.5">
+              {preReadLinks.map((url, i) => (
+                <li key={`${url}-${i}`} className="min-w-0">
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className={`block truncate text-[11px] hover:underline ${t.text}`}
+                    title={url}
+                  >
+                    {url.replace(/^https?:\/\//, '')}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+    </details>
+  )
+}
+
+function BriefRow({ label, body }: { label: string; body: string }) {
+  const { t } = useDashTheme()
+  return (
+    <>
+      <span
+        className={`pt-0.5 text-[9px] tracking-wider uppercase ${t.textMuted}`}
+      >
+        {label}
+      </span>
+      <span className={`min-w-0 whitespace-pre-wrap ${t.text}`}>{body}</span>
+    </>
+  )
+}
+
 function ProposedSummary({
   request,
   viewerTz
@@ -611,15 +738,40 @@ function PendingApprovalCard({
   onResolved: () => void
 }) {
   const { t } = useDashTheme()
+  const queryClient = useQueryClient()
   const [busy, startBusy] = useTransition()
   const [rejecting, setRejecting] = useState(false)
   const [reason, setReason] = useState('')
 
   function approve() {
+    // Optimistic: drop from pending queue; flip status in mine if the
+    // approver also participates. 1:1 → 'approved' (awaiting pick),
+    // group → 'scheduled' (admin approve locks the time).
+    const nextStatus: MeetingRequestRow['status'] =
+      request.attendees.length >= 2 ? 'scheduled' : 'approved'
+    queryClient.setQueryData<MeetingRequestRow[]>(
+      ['meetingRequests', 'pending'],
+      (old) => (old ?? []).filter((r) => r.id !== request.id)
+    )
+    queryClient.setQueryData<MeetingRequestRow[]>(
+      ['meetingRequests', 'mine'],
+      (old) => {
+        const list = old ?? []
+        const exists = list.some((r) => r.id === request.id)
+        if (exists) {
+          return list.map((r) =>
+            r.id === request.id ? { ...r, status: nextStatus } : r
+          )
+        }
+        return list
+      }
+    )
     startBusy(async () => {
       const res = await approveMeetingRequest(request.id)
       if ('error' in res) {
         toast.error(res.error)
+        // Server rejected the action - re-sync from source of truth.
+        queryClient.invalidateQueries({ queryKey: ['meetingRequests'] })
         return
       }
       toast.success('Approved.')
@@ -632,10 +784,21 @@ function PendingApprovalCard({
       setRejecting(true)
       return
     }
+    // Optimistic: rejected meetings drop out of every active list, so
+    // just remove from pending and from mine.
+    queryClient.setQueryData<MeetingRequestRow[]>(
+      ['meetingRequests', 'pending'],
+      (old) => (old ?? []).filter((r) => r.id !== request.id)
+    )
+    queryClient.setQueryData<MeetingRequestRow[]>(
+      ['meetingRequests', 'mine'],
+      (old) => (old ?? []).filter((r) => r.id !== request.id)
+    )
     startBusy(async () => {
       const res = await rejectMeetingRequest(request.id, reason)
       if ('error' in res) {
         toast.error(res.error)
+        queryClient.invalidateQueries({ queryKey: ['meetingRequests'] })
         return
       }
       toast.success('Rejected.')
@@ -654,9 +817,7 @@ function PendingApprovalCard({
           </p>
         </div>
       </div>
-      {request.agenda && (
-        <p className={`mb-2 text-[11px] ${t.textMuted}`}>{request.agenda}</p>
-      )}
+      <BriefPreview request={request} includeAgenda />
       <ProposedSummary request={request} viewerTz={viewerTz} />
       {rejecting && (
         <textarea
@@ -668,33 +829,36 @@ function PendingApprovalCard({
           className={`mb-2 w-full resize-none rounded-md border px-2 py-1.5 text-[11px] ${t.input}`}
         />
       )}
-      <div className="flex items-center justify-end gap-1.5">
-        {rejecting && (
+      <div className="flex items-center justify-between gap-2">
+        <ShareButtons request={request} />
+        <div className="flex items-center gap-1.5">
+          {rejecting && (
+            <button
+              onClick={() => setRejecting(false)}
+              disabled={busy}
+              className={`h-7 rounded-md border px-2 text-[11px] ${t.btn}`}
+            >
+              Back
+            </button>
+          )}
           <button
-            onClick={() => setRejecting(false)}
+            onClick={reject}
             disabled={busy}
-            className={`h-7 rounded-md border px-2 text-[11px] ${t.btn}`}
+            className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] disabled:opacity-40 ${t.border} ${t.btn}`}
           >
-            Back
+            <XIcon className="size-3" />
+            {rejecting ? 'Confirm reject' : 'Reject'}
           </button>
-        )}
-        <button
-          onClick={reject}
-          disabled={busy}
-          className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] disabled:opacity-40 ${t.border} ${t.btn}`}
-        >
-          <XIcon className="size-3" />
-          {rejecting ? 'Confirm reject' : 'Reject'}
-        </button>
-        {!rejecting && (
-          <button
-            onClick={approve}
-            disabled={busy}
-            className={`inline-flex h-7 items-center gap-1 rounded-md bg-teal-600 px-2 text-[11px] text-white disabled:opacity-40 hover:bg-teal-700`}
-          >
-            <Check className="size-3" /> Approve
-          </button>
-        )}
+          {!rejecting && (
+            <button
+              onClick={approve}
+              disabled={busy}
+              className={`inline-flex h-7 items-center gap-1 rounded-md bg-teal-600 px-2 text-[11px] text-white disabled:opacity-40 hover:bg-teal-700`}
+            >
+              <Check className="size-3" /> Approve
+            </button>
+          )}
+        </div>
       </div>
     </CardShell>
   )
@@ -727,18 +891,41 @@ function PickCard({
       timeZoneName: 'short'
     })
   }
+  const queryClient = useQueryClient()
   const [busy, startBusy] = useTransition()
   const [declining, setDeclining] = useState(false)
   const [reason, setReason] = useState('')
   const [timeStr, setTimeStr] = useState<string>('10:00')
 
+  // Picking flips the meeting from 'approved' (awaiting pick) into
+  // 'scheduled' with selected_starts_at populated. Same shape for both
+  // mode='day' (pickMeetingTime) and mode='slots' (pickMeetingSlot).
+  function applyPickOptimistic(startsAtIso: string, slotIndex: number | null) {
+    queryClient.setQueryData<MeetingRequestRow[]>(
+      ['meetingRequests', 'mine'],
+      (old) =>
+        (old ?? []).map((r) =>
+          r.id === request.id
+            ? {
+                ...r,
+                status: 'scheduled',
+                selectedStartsAt: startsAtIso,
+                selectedSlotIndex: slotIndex
+              }
+            : r
+        )
+    )
+  }
+
   function pickDayTime() {
     if (!timeStr || !request.proposedDate) return
     const startsAt = combineDateTime(request.proposedDate, timeStr)
+    applyPickOptimistic(startsAt, null)
     startBusy(async () => {
       const res = await pickMeetingTime(request.id, startsAt)
       if ('error' in res) {
         toast.error(res.error)
+        queryClient.invalidateQueries({ queryKey: ['meetingRequests'] })
         return
       }
       toast.success(
@@ -749,10 +936,13 @@ function PickCard({
   }
 
   function pickSlot(slotIndex: number) {
+    const slot = request.slots?.[slotIndex]
+    if (slot) applyPickOptimistic(slot, slotIndex)
     startBusy(async () => {
       const res = await pickMeetingSlot(request.id, slotIndex)
       if ('error' in res) {
         toast.error(res.error)
+        queryClient.invalidateQueries({ queryKey: ['meetingRequests'] })
         return
       }
       toast.success(
@@ -767,10 +957,15 @@ function PickCard({
       setDeclining(true)
       return
     }
+    queryClient.setQueryData<MeetingRequestRow[]>(
+      ['meetingRequests', 'mine'],
+      (old) => (old ?? []).filter((r) => r.id !== request.id)
+    )
     startBusy(async () => {
       const res = await declineMeetingRequest(request.id, reason)
       if ('error' in res) {
         toast.error(res.error)
+        queryClient.invalidateQueries({ queryKey: ['meetingRequests'] })
         return
       }
       toast.success('Declined.')
@@ -784,9 +979,7 @@ function PickCard({
       <p className={`mb-2 text-[10px] ${t.textMuted}`}>
         From {request.requesterName} · {request.durationMin} min
       </p>
-      {request.agenda && (
-        <p className={`mb-2 text-[11px] ${t.textMuted}`}>{request.agenda}</p>
-      )}
+      <BriefPreview request={request} />
 
       {request.mode === 'day' && request.proposedDate ? (
         <>
@@ -878,6 +1071,7 @@ function RequestStatusCard({
   onResolved: () => void
 }) {
   const { t } = useDashTheme()
+  const queryClient = useQueryClient()
   const [busy, startBusy] = useTransition()
   const [rescheduling, setRescheduling] = useState(false)
   const isRequester = request.requesterId === currentUserId
@@ -894,10 +1088,19 @@ function RequestStatusCard({
       request.status === 'scheduled')
 
   function cancel() {
+    queryClient.setQueryData<MeetingRequestRow[]>(
+      ['meetingRequests', 'mine'],
+      (old) => (old ?? []).filter((r) => r.id !== request.id)
+    )
+    queryClient.setQueryData<MeetingRequestRow[]>(
+      ['meetingRequests', 'pending'],
+      (old) => (old ?? []).filter((r) => r.id !== request.id)
+    )
     startBusy(async () => {
       const res = await cancelMeetingRequest(request.id)
       if ('error' in res) {
         toast.error(res.error)
+        queryClient.invalidateQueries({ queryKey: ['meetingRequests'] })
         return
       }
       toast.success('Canceled.')
@@ -920,7 +1123,7 @@ function RequestStatusCard({
       <div className="mb-1 flex items-start justify-between gap-2">
         <p className={`text-xs font-medium ${t.text}`}>{request.title}</p>
         <span className={`text-[10px] ${t.textMuted}`}>
-          {STATUS_LABEL[request.status]}
+          {statusLabelFor(request, currentUserId)}
         </span>
       </div>
       <p className={`mb-1 text-[10px] ${t.textMuted}`}>
@@ -928,12 +1131,13 @@ function RequestStatusCard({
         {request.durationMin} min
       </p>
       {showScheduled ? (
-        <p className={`mb-1 text-[11px] ${t.text}`}>
+        <p className={`mb-2 text-[11px] ${t.text}`}>
           {fmtDateTime(request.selectedStartsAt!, viewerTz)}
         </p>
       ) : (
         <ProposedSummary request={request} viewerTz={viewerTz} />
       )}
+      <BriefPreview request={request} includeAgenda />
       {request.meetLink && !isMeetingOver(request) && (
         <a
           href={request.meetLink}

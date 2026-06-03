@@ -157,6 +157,70 @@ async function SharedMeetingContent({ params }: { params: Params }) {
               avatarUrl={meeting.attendees[0]?.avatarUrl ?? null}
             />
           </div>
+
+          {(meeting.goal ||
+            meeting.context ||
+            meeting.questions ||
+            meeting.agenda) && (
+            <div className="flex flex-col gap-3 border-t border-zinc-200/70 pt-6 dark:border-white/10">
+              {meeting.goal && (
+                <BriefBlock label="Goal" body={meeting.goal} />
+              )}
+              {meeting.context && (
+                <BriefBlock label="Context" body={meeting.context} />
+              )}
+              {meeting.questions && (
+                <BriefBlock label="Questions" body={meeting.questions} />
+              )}
+              {meeting.agenda && (
+                <BriefBlock label="Agenda" body={meeting.agenda} />
+              )}
+            </div>
+          )}
+
+          {meeting.mode === 'slots' &&
+            meeting.slots &&
+            meeting.slots.length > 0 &&
+            !meeting.selectedStartsAt && (
+              <div className="flex flex-col gap-2 border-t border-zinc-200/70 pt-6 dark:border-white/10">
+                <span className="text-[10px] tracking-[0.22em] uppercase text-zinc-500 dark:text-zinc-400">
+                  Proposed slots
+                </span>
+                <ul className="flex flex-col gap-1.5">
+                  {meeting.slots.map((iso) => (
+                    <li
+                      key={iso}
+                      className="text-sm tabular-nums text-zinc-700 dark:text-zinc-200"
+                    >
+                      {formatSlotLabel(iso)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+          {meeting.preRead && (
+            <div className="flex flex-col gap-2 border-t border-zinc-200/70 pt-6 dark:border-white/10">
+              <span className="text-[10px] tracking-[0.22em] uppercase text-zinc-500 dark:text-zinc-400">
+                Pre-read
+              </span>
+              <ul className="flex flex-col gap-1.5">
+                {splitPreReadLinks(meeting.preRead).map((url, i) => (
+                  <li key={`${url}-${i}`} className="flex items-center gap-1.5">
+                    <ArrowUpRight className="size-3 shrink-0 text-zinc-400 dark:text-zinc-500" />
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="truncate text-sm text-[#018A82] hover:underline dark:text-[#3EE0D5]"
+                    >
+                      {url}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </article>
 
         <footer className="flex items-center justify-center gap-1.5 text-[11px] tracking-[0.18em] uppercase text-zinc-400 dark:text-zinc-600">
@@ -181,6 +245,43 @@ function BackgroundDecor() {
       />
     </>
   )
+}
+
+function BriefBlock({ label, body }: { label: string; body: string }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[10px] tracking-[0.22em] uppercase text-zinc-500 dark:text-zinc-400">
+        {label}
+      </span>
+      <p className="text-sm leading-relaxed whitespace-pre-wrap text-zinc-700 dark:text-zinc-200">
+        {body}
+      </p>
+    </div>
+  )
+}
+
+function splitPreReadLinks(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+function formatSlotLabel(iso: string): string {
+  try {
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return iso
+    return d.toLocaleString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    })
+  } catch {
+    return iso
+  }
 }
 
 function MemberCell({
