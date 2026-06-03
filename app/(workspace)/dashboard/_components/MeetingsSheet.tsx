@@ -169,6 +169,66 @@ function isMeetingOver(req: MeetingRequestRow): boolean {
   return ends < Date.now()
 }
 
+// Cheap ticker so cards re-render at most once a minute - enough to
+// flip the "Starts in 18m" chip down to 17m / 16m / Live now without
+// the cost of a per-second interval.
+function useMinuteTick(): number {
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((t) => t + 1), 30_000)
+    return () => window.clearInterval(id)
+  }, [])
+  return tick
+}
+
+type MeetingTimingChip = {
+  label: string
+  tone: 'live' | 'soon' | 'upcoming'
+}
+
+// Returns a short, human label for "when is this meeting?" relative to
+// now. Null when the meeting hasn't been picked or has ended (the card
+// already shows "This meeting has ended" for the ended case).
+function meetingTimingChip(req: MeetingRequestRow): MeetingTimingChip | null {
+  if (!req.selectedStartsAt) return null
+  const start = new Date(req.selectedStartsAt).getTime()
+  if (Number.isNaN(start)) return null
+  const end = start + req.durationMin * 60_000
+  const now = Date.now()
+  if (now >= start && now <= end) return { label: 'Live now', tone: 'live' }
+  if (now > end) return null
+  const minutes = Math.round((start - now) / 60_000)
+  if (minutes <= 60)
+    return { label: `Starts in ${Math.max(minutes, 1)}m`, tone: 'soon' }
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  if (hours < 12)
+    return {
+      label: mins > 0 ? `Starts in ${hours}h ${mins}m` : `Starts in ${hours}h`,
+      tone: 'upcoming'
+    }
+  // Past 12h out, switch to day-relative phrasing so 47h doesn't read
+  // worse than "tomorrow".
+  const startDate = new Date(start)
+  const nowDate = new Date(now)
+  const dayDiff = Math.round(
+    (new Date(
+      startDate.getFullYear(),
+      startDate.getMonth(),
+      startDate.getDate()
+    ).getTime() -
+      new Date(
+        nowDate.getFullYear(),
+        nowDate.getMonth(),
+        nowDate.getDate()
+      ).getTime()) /
+      86_400_000
+  )
+  if (dayDiff === 0) return { label: `Starts in ${hours}h`, tone: 'upcoming' }
+  if (dayDiff === 1) return { label: 'Starts tomorrow', tone: 'upcoming' }
+  return { label: `Starts in ${dayDiff} days`, tone: 'upcoming' }
+}
+
 const STATUS_LABEL: Record<MeetingRequestRow['status'], string> = {
   pending: 'Pending approval',
   approved: 'Approved - pick a time',
@@ -1148,6 +1208,9 @@ function RequestStatusCard({
   const queryClient = useQueryClient()
   const [busy, startBusy] = useTransition()
   const [rescheduling, setRescheduling] = useState(false)
+  // Tick so the timing chip re-renders ("Starts in 18m" → "Live now")
+  // without waiting for a refetch.
+  useMinuteTick()
   const isRequester = request.requesterId === currentUserId
   const isParticipant = isRequester || isAttendeeOf(request, currentUserId)
   const canCancel =
@@ -1235,14 +1298,39 @@ function RequestStatusCard({
       )}
       <BriefPreview request={request} includeAgenda />
       {request.meetLink && !isMeetingOver(request) && (
-        <a
-          href={request.meetLink}
-          target="_blank"
-          rel="noreferrer"
-          className={`mb-1 inline-block text-[11px] text-teal-600 hover:underline`}
-        >
-          Join Google Meet
-        </a>
+        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+          {(() => {
+            const chip = meetingTimingChip(request)
+            if (!chip) return null
+            const tone =
+              chip.tone === 'live'
+                ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-700'
+                : chip.tone === 'soon'
+                  ? 'border-teal-500/40 bg-teal-500/15 text-teal-700'
+                  : `${t.border} ${t.textMuted}`
+            return (
+              <span
+                className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium tabular-nums ${tone}`}
+              >
+                {chip.tone === 'live' && (
+                  <span className="relative flex size-1.5">
+                    <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+                  </span>
+                )}
+                {chip.label}
+              </span>
+            )
+          })()}
+          <a
+            href={request.meetLink}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-6 items-center gap-1 rounded-full bg-teal-600 px-2.5 text-[10px] font-medium text-white transition hover:bg-teal-700"
+          >
+            Join Google Meet
+          </a>
+        </div>
       )}
       {isMeetingOver(request) && request.status === 'scheduled' && (
         <p className={`text-[10px] italic ${t.textSubtle}`}>
