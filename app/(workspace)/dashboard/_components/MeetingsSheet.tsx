@@ -16,6 +16,7 @@ import {
   Calendar,
   Check,
   Copy,
+  Mail,
   MessageCircle,
   Plus,
   X as XIcon
@@ -36,8 +37,25 @@ import {
   pickMeetingTime,
   rejectMeetingRequest,
   rescheduleMeetingRequest,
+  resendMeetingNotification,
   submitMeetingReview
 } from '../actions'
+
+// Surfaces partial email-fanout failures as a follow-up toast so the
+// user knows when Resend swallowed a notification.
+type EmailStatus = {
+  sent: number
+  failures: { memberId: string; reason: string }[]
+}
+function notifyEmailStatus(emailStatus: EmailStatus | undefined): void {
+  if (!emailStatus || emailStatus.failures.length === 0) return
+  const count = emailStatus.failures.length
+  const reason = emailStatus.failures[0]?.reason ?? 'unknown'
+  toast.warning(
+    `Action saved, but ${count} email${count === 1 ? '' : 's'} failed to send (${reason}).`,
+    { description: 'Use "Resend email" on the card to try again.' }
+  )
+}
 
 // Single sheet that surfaces meeting-request state, scoped to the
 // current viewer's role:
@@ -775,6 +793,7 @@ function PendingApprovalCard({
         return
       }
       toast.success('Approved.')
+      notifyEmailStatus(res.emailStatus)
       onResolved()
     })
   }
@@ -802,6 +821,7 @@ function PendingApprovalCard({
         return
       }
       toast.success('Rejected.')
+      notifyEmailStatus(res.emailStatus)
       onResolved()
     })
   }
@@ -830,7 +850,10 @@ function PendingApprovalCard({
         />
       )}
       <div className="flex items-center justify-between gap-2">
-        <ShareButtons request={request} />
+        <div className="flex flex-wrap items-center gap-1">
+          <ShareButtons request={request} />
+          <ResendButton request={request} />
+        </div>
         <div className="flex items-center gap-1.5">
           {rejecting && (
             <button
@@ -931,6 +954,7 @@ function PickCard({
       toast.success(
         'Time booked. Calendar invite goes out once the scheduler is connected.'
       )
+      notifyEmailStatus(res.emailStatus)
       onResolved()
     })
   }
@@ -948,6 +972,7 @@ function PickCard({
       toast.success(
         'Slot booked. Calendar invite goes out once the scheduler is connected.'
       )
+      notifyEmailStatus(res.emailStatus)
       onResolved()
     })
   }
@@ -969,6 +994,7 @@ function PickCard({
         return
       }
       toast.success('Declined.')
+      notifyEmailStatus(res.emailStatus)
       onResolved()
     })
   }
@@ -982,49 +1008,97 @@ function PickCard({
       <BriefPreview request={request} />
 
       {request.mode === 'day' && request.proposedDate ? (
-        <>
-          <p className={`mb-2 text-[11px] ${t.text}`}>
-            Day: <strong>{fmtDate(request.proposedDate, viewerTz)}</strong>
-          </p>
-          <div className="mb-2 flex items-center gap-2">
-            <span className={`text-[10px] ${t.textMuted}`}>Time</span>
-            <input
-              type="time"
-              value={timeStr}
-              onChange={(e) => setTimeStr(e.target.value)}
-              step={900}
-              className={`h-8 flex-1 rounded-md border px-2 text-xs ${t.input}`}
-            />
-            <button
-              onClick={pickDayTime}
-              disabled={busy || !timeStr}
-              className={`inline-flex h-8 items-center gap-1 rounded-md bg-teal-600 px-2.5 text-[11px] text-white disabled:opacity-40 hover:bg-teal-700`}
-            >
-              <Check className="size-3" /> Pick
-            </button>
-          </div>
-        </>
-      ) : (
-        <div className="mb-2 flex flex-col gap-1">
-          {(request.slots ?? []).map((s, i) => (
-            <button
-              key={i}
-              onClick={() => pickSlot(i)}
-              disabled={busy}
-              className={`flex items-center justify-between rounded-md border px-2 py-1.5 text-[11px] transition disabled:opacity-40 hover:bg-teal-500/10 ${t.border} ${t.text}`}
-            >
-              <div className="flex flex-col items-start">
-                <span>{fmtDateTime(s, viewerTz)}</span>
-                {requesterPreview(s) && (
-                  <span className={`text-[9px] ${t.textSubtle}`}>
-                    requester: {requesterPreview(s)}
-                  </span>
-                )}
+        (() => {
+          // End-of-day: the proposed_date is just YYYY-MM-DD; treat the
+          // day as "past" once the local 23:59:59 has passed.
+          const dayPast =
+            new Date(`${request.proposedDate}T23:59:59`).getTime() < Date.now()
+          if (dayPast) {
+            return (
+              <div
+                className={`mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700`}
+              >
+                Proposed day ({fmtDate(request.proposedDate, viewerTz)}) has
+                passed. Ask {request.requesterName.split(/\s+/)[0]} to
+                reschedule.
               </div>
-              <span className={`text-[9px] ${t.textMuted}`}>Pick</span>
-            </button>
-          ))}
-        </div>
+            )
+          }
+          return (
+            <>
+              <p className={`mb-2 text-[11px] ${t.text}`}>
+                Day: <strong>{fmtDate(request.proposedDate, viewerTz)}</strong>
+              </p>
+              <div className="mb-2 flex items-center gap-2">
+                <span className={`text-[10px] ${t.textMuted}`}>Time</span>
+                <input
+                  type="time"
+                  value={timeStr}
+                  onChange={(e) => setTimeStr(e.target.value)}
+                  step={900}
+                  className={`h-8 flex-1 rounded-md border px-2 text-xs ${t.input}`}
+                />
+                <button
+                  onClick={pickDayTime}
+                  disabled={busy || !timeStr}
+                  className={`inline-flex h-8 items-center gap-1 rounded-md bg-teal-600 px-2.5 text-[11px] text-white disabled:opacity-40 hover:bg-teal-700`}
+                >
+                  <Check className="size-3" /> Pick
+                </button>
+              </div>
+            </>
+          )
+        })()
+      ) : (
+        (() => {
+          const slotsList = request.slots ?? []
+          const now = Date.now()
+          const slotPast = (iso: string) =>
+            new Date(iso).getTime() < now
+          const allPast =
+            slotsList.length > 0 && slotsList.every(slotPast)
+          if (allPast) {
+            return (
+              <div
+                className={`mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700`}
+              >
+                All proposed slots have passed. Ask{' '}
+                {request.requesterName.split(/\s+/)[0]} to reschedule.
+              </div>
+            )
+          }
+          return (
+            <div className="mb-2 flex flex-col gap-1">
+              {slotsList.map((s, i) => {
+                const past = slotPast(s)
+                return (
+                  <button
+                    key={i}
+                    onClick={() => pickSlot(i)}
+                    disabled={busy || past}
+                    className={`flex items-center justify-between rounded-md border px-2 py-1.5 text-[11px] transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-teal-500/10 ${t.border} ${t.text}`}
+                  >
+                    <div className="flex flex-col items-start">
+                      <span className={past ? 'line-through' : ''}>
+                        {fmtDateTime(s, viewerTz)}
+                      </span>
+                      {!past && requesterPreview(s) && (
+                        <span className={`text-[9px] ${t.textSubtle}`}>
+                          requester: {requesterPreview(s)}
+                        </span>
+                      )}
+                    </div>
+                    <span
+                      className={`text-[9px] ${past ? 'text-amber-600' : t.textMuted}`}
+                    >
+                      {past ? 'slot passed' : 'Pick'}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )
+        })()
       )}
 
       {declining && (
@@ -1104,6 +1178,7 @@ function RequestStatusCard({
         return
       }
       toast.success('Canceled.')
+      notifyEmailStatus(res.emailStatus)
       onResolved()
     })
   }
@@ -1118,13 +1193,34 @@ function RequestStatusCard({
   const showScheduled =
     request.status === 'scheduled' && request.selectedStartsAt
 
+  // Detect stale proposals: meeting is still awaiting a pick but every
+  // proposed slot / proposed day is already in the past. Requester
+  // can't expect the requestee to time-travel; surface a reschedule
+  // nudge instead of pretending the meeting is healthy.
+  const slotsList = request.slots ?? []
+  const allSlotsPast =
+    request.status === 'pending' || request.status === 'approved'
+      ? request.mode === 'slots'
+        ? slotsList.length > 0 &&
+          slotsList.every((s) => new Date(s).getTime() < Date.now())
+        : request.mode === 'day' && request.proposedDate
+          ? new Date(`${request.proposedDate}T23:59:59`).getTime() < Date.now()
+          : false
+      : false
+
   return (
     <CardShell>
       <div className="mb-1 flex items-start justify-between gap-2">
         <p className={`text-xs font-medium ${t.text}`}>{request.title}</p>
-        <span className={`text-[10px] ${t.textMuted}`}>
-          {statusLabelFor(request, currentUserId)}
-        </span>
+        {allSlotsPast ? (
+          <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+            All slots passed - reschedule?
+          </span>
+        ) : (
+          <span className={`text-[10px] ${t.textMuted}`}>
+            {statusLabelFor(request, currentUserId)}
+          </span>
+        )}
       </div>
       <p className={`mb-1 text-[10px] ${t.textMuted}`}>
         {isRequester ? 'With' : 'From'} {counterpartyName} ·{' '}
@@ -1185,13 +1281,20 @@ function RequestStatusCard({
         </div>
       )}
       <div className="mt-2 flex items-center justify-between gap-2">
-        <ShareButtons request={request} />
+        <div className="flex flex-wrap items-center gap-1">
+          <ShareButtons request={request} />
+          <ResendButton request={request} />
+        </div>
         <div className="flex items-center gap-1.5">
           {canReschedule && !rescheduling && (
             <button
               onClick={() => setRescheduling(true)}
               disabled={busy}
-              className={`h-7 rounded-md border px-2 text-[11px] disabled:opacity-40 ${t.btn}`}
+              className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] disabled:opacity-40 ${
+                allSlotsPast
+                  ? 'border-amber-500/40 bg-amber-500/15 font-medium text-amber-700 hover:bg-amber-500/25'
+                  : t.btn
+              }`}
             >
               Reschedule
             </button>
@@ -1603,6 +1706,57 @@ function RescheduleForm({
         </button>
       </div>
     </div>
+  )
+}
+
+// Manual email re-fire. Surfaces a small "Resend email" button on the
+// card so the user can recover when Resend silently dropped a
+// notification. Only shown for statuses that have a meaningful email
+// to send (pending / approved / scheduled).
+function ResendButton({ request }: { request: MeetingRequestRow }) {
+  const { t } = useDashTheme()
+  const [busy, startBusy] = useTransition()
+  const visible =
+    request.status === 'pending' ||
+    request.status === 'approved' ||
+    request.status === 'scheduled'
+  if (!visible) return null
+  const label =
+    request.status === 'pending'
+      ? 'Re-send to approvers'
+      : request.status === 'approved'
+        ? 'Re-send pick-a-time email'
+        : 'Re-send scheduled email'
+  function resend() {
+    startBusy(async () => {
+      const res = await resendMeetingNotification(request.id)
+      if ('error' in res) {
+        toast.error(res.error)
+        return
+      }
+      if (res.emailStatus.failures.length > 0) {
+        notifyEmailStatus(res.emailStatus)
+        return
+      }
+      if (res.emailStatus.sent === 0) {
+        toast.info('No recipients (everyone has opted out or has no email).')
+        return
+      }
+      toast.success(
+        `Email re-sent (${res.emailStatus.sent} recipient${res.emailStatus.sent === 1 ? '' : 's'}).`
+      )
+    })
+  }
+  return (
+    <button
+      type="button"
+      onClick={resend}
+      disabled={busy}
+      title={label}
+      className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[10px] disabled:opacity-50 ${t.border} ${t.btn}`}
+    >
+      <Mail className="size-3" /> {busy ? 'Sending...' : 'Resend email'}
+    </button>
   )
 }
 

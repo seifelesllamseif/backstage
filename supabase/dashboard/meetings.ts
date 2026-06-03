@@ -237,7 +237,7 @@ async function fetchMeetingForGate(
 
 export async function createMeetingRequest(
   raw: z.input<typeof CreateMeetingInput>
-): Promise<{ request: MeetingRequest } | { error: string }> {
+): Promise<{ request: MeetingRequest; emailStatus?: EmailFanoutResult } | { error: string }> {
   const parsed = CreateMeetingInput.safeParse(raw)
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
@@ -326,7 +326,7 @@ export async function createMeetingRequest(
     .single()
   const request = rowToRequest(full as RawMeetingRow)
 
-  await fanOutApprovalEmails(member.companyId, request)
+  const emailStatus = await fanOutApprovalEmails(member.companyId, request)
   await logActivity(
     supabase,
     member.companyId,
@@ -337,7 +337,7 @@ export async function createMeetingRequest(
     { title: input.title }
   )
   revalidatePath('/dashboard')
-  return { request }
+  return { request, emailStatus }
 }
 
 // ─── List ────────────────────────────────────────────────────────────────
@@ -398,7 +398,7 @@ export async function listPendingApprovals(): Promise<
 
 export async function approveMeetingRequest(
   meetingId: string
-): Promise<{ request: MeetingRequest } | { error: string }> {
+): Promise<{ request: MeetingRequest; emailStatus?: EmailFanoutResult } | { error: string }> {
   const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
   if (member.accessTier !== 'admin' && member.accessTier !== 'lead') {
@@ -433,10 +433,13 @@ export async function approveMeetingRequest(
     return { error: error?.message ?? 'Request already handled or missing.' }
   }
   let request = rowToRequest(data as RawMeetingRow)
+  let emailStatus: EmailFanoutResult
   if (isGroup) {
-    request = await finalizeSchedule(member.companyId, request)
+    const finalized = await finalizeSchedule(member.companyId, request)
+    request = finalized.request
+    emailStatus = finalized.emailStatus
   } else {
-    await sendApprovedEmailToAttendees(request)
+    emailStatus = await sendApprovedEmailToAttendees(request)
   }
   await logActivity(
     supabase,
@@ -448,13 +451,13 @@ export async function approveMeetingRequest(
     { title: request.title }
   )
   revalidatePath('/dashboard')
-  return { request }
+  return { request, emailStatus }
 }
 
 export async function rejectMeetingRequest(
   meetingId: string,
   reason?: string
-): Promise<{ request: MeetingRequest } | { error: string }> {
+): Promise<{ request: MeetingRequest; emailStatus?: EmailFanoutResult } | { error: string }> {
   const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
   if (member.accessTier !== 'admin' && member.accessTier !== 'lead') {
@@ -480,7 +483,12 @@ export async function rejectMeetingRequest(
     return { error: error?.message ?? 'Request already handled or missing.' }
   }
   const request = rowToRequest(data as RawMeetingRow)
-  await sendDeclinedOrRejectedEmail(request, 'Rejected', member.fullName, trimmed)
+  const emailStatus = await sendDeclinedOrRejectedEmail(
+    request,
+    'Rejected',
+    member.fullName,
+    trimmed
+  )
   await logActivity(
     supabase,
     member.companyId,
@@ -491,7 +499,7 @@ export async function rejectMeetingRequest(
     { title: request.title, reason: trimmed }
   )
   revalidatePath('/dashboard')
-  return { request }
+  return { request, emailStatus }
 }
 
 // ─── Attendee pick time / pick slot / decline (1:1 only) ─────────────────
@@ -506,7 +514,7 @@ function isAttendee(
 export async function pickMeetingTime(
   meetingId: string,
   startsAt: string
-): Promise<{ request: MeetingRequest } | { error: string }> {
+): Promise<{ request: MeetingRequest; emailStatus?: EmailFanoutResult } | { error: string }> {
   const parsed = ISO_DATETIME.safeParse(startsAt)
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid datetime.' }
@@ -552,7 +560,7 @@ export async function pickMeetingTime(
     .update({ picked_at: parsed.data })
     .eq('meeting_id', meetingId)
     .eq('member_id', member.id)
-  const finalized = await finalizeSchedule(
+  const { request: finalized, emailStatus } = await finalizeSchedule(
     member.companyId,
     rowToRequest(data as RawMeetingRow)
   )
@@ -566,13 +574,13 @@ export async function pickMeetingTime(
     { title: finalized.title, startsAt: parsed.data }
   )
   revalidatePath('/dashboard')
-  return { request: finalized }
+  return { request: finalized, emailStatus }
 }
 
 export async function pickMeetingSlot(
   meetingId: string,
   slotIndex: number
-): Promise<{ request: MeetingRequest } | { error: string }> {
+): Promise<{ request: MeetingRequest; emailStatus?: EmailFanoutResult } | { error: string }> {
   const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
   const supabase = createAdminClient()
@@ -595,6 +603,12 @@ export async function pickMeetingSlot(
     return { error: 'Invalid slot index.' }
   }
   const pickedStartsAt = slots[slotIndex]
+  // Mirrors the future-time guard on pickMeetingTime. Slot-mode was
+  // missing it - a stale proposal could still be booked into the past
+  // and create a Calendar event for a meeting that's already over.
+  if (new Date(pickedStartsAt).getTime() < Date.now()) {
+    return { error: 'That slot has already passed. Ask the requester to reschedule.' }
+  }
 
   const { data, error } = await supabase
     .from('meeting_requests')
@@ -617,7 +631,7 @@ export async function pickMeetingSlot(
     .update({ picked_at: pickedStartsAt })
     .eq('meeting_id', meetingId)
     .eq('member_id', member.id)
-  const finalized = await finalizeSchedule(
+  const { request: finalized, emailStatus } = await finalizeSchedule(
     member.companyId,
     rowToRequest(data as RawMeetingRow)
   )
@@ -631,13 +645,13 @@ export async function pickMeetingSlot(
     { title: finalized.title, startsAt: pickedStartsAt }
   )
   revalidatePath('/dashboard')
-  return { request: finalized }
+  return { request: finalized, emailStatus }
 }
 
 export async function declineMeetingRequest(
   meetingId: string,
   reason?: string
-): Promise<{ request: MeetingRequest } | { error: string }> {
+): Promise<{ request: MeetingRequest; emailStatus?: EmailFanoutResult } | { error: string }> {
   const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
   const trimmed = (reason ?? '').trim().slice(0, 500) || null
@@ -672,7 +686,12 @@ export async function declineMeetingRequest(
     return { error: error?.message ?? 'Could not decline.' }
   }
   const request = rowToRequest(data as RawMeetingRow)
-  await sendDeclinedOrRejectedEmail(request, 'Declined', member.fullName, trimmed)
+  const emailStatus = await sendDeclinedOrRejectedEmail(
+    request,
+    'Declined',
+    member.fullName,
+    trimmed
+  )
   await logActivity(
     supabase,
     member.companyId,
@@ -683,7 +702,7 @@ export async function declineMeetingRequest(
     { title: request.title, reason: trimmed }
   )
   revalidatePath('/dashboard')
-  return { request }
+  return { request, emailStatus }
 }
 
 // ─── Reschedule (either party) ───────────────────────────────────────────
@@ -705,7 +724,7 @@ const RescheduleInput = z
 export async function rescheduleMeetingRequest(
   meetingId: string,
   raw: z.input<typeof RescheduleInput>
-): Promise<{ request: MeetingRequest } | { error: string }> {
+): Promise<{ request: MeetingRequest; emailStatus?: EmailFanoutResult } | { error: string }> {
   const parsed = RescheduleInput.safeParse(raw)
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
@@ -815,12 +834,16 @@ export async function rescheduleMeetingRequest(
   }
 
   let request = rowToRequest(data as RawMeetingRow)
+  const emailStatus = emptyFanout()
   if (isGroup) {
     // Recreate Calendar event + send "scheduled" emails. finalizeSchedule
     // uses the new selected_starts_at.
-    request = await finalizeSchedule(member.companyId, request)
+    const finalized = await finalizeSchedule(member.companyId, request)
+    request = finalized.request
+    emailStatus.sent += finalized.emailStatus.sent
+    emailStatus.failures.push(...finalized.emailStatus.failures)
   }
-  await sendRescheduledEmail(
+  const rescheduledStatus = await sendRescheduledEmail(
     request,
     member.id,
     member.fullName,
@@ -828,6 +851,8 @@ export async function rescheduleMeetingRequest(
     reason,
     !isGroup
   )
+  emailStatus.sent += rescheduledStatus.sent
+  emailStatus.failures.push(...rescheduledStatus.failures)
   await logActivity(
     supabase,
     member.companyId,
@@ -838,14 +863,14 @@ export async function rescheduleMeetingRequest(
     { title: request.title, reason }
   )
   revalidatePath('/dashboard')
-  return { request }
+  return { request, emailStatus }
 }
 
 // ─── Requester cancel ────────────────────────────────────────────────────
 
 export async function cancelMeetingRequest(
   meetingId: string
-): Promise<{ request: MeetingRequest } | { error: string }> {
+): Promise<{ request: MeetingRequest; emailStatus?: EmailFanoutResult } | { error: string }> {
   const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
   const supabase = createAdminClient()
@@ -911,7 +936,7 @@ const ReviewInput = z.object({
 export async function submitMeetingReview(
   meetingId: string,
   raw: z.input<typeof ReviewInput>
-): Promise<{ request: MeetingRequest } | { error: string }> {
+): Promise<{ request: MeetingRequest; emailStatus?: EmailFanoutResult } | { error: string }> {
   const parsed = ReviewInput.safeParse(raw)
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
@@ -974,12 +999,72 @@ export async function submitMeetingReview(
   return { request }
 }
 
+// ─── Manual resend of the situational email ──────────────────────────────
+//
+// Surfaces a "Resend email" affordance on inbox cards so the requester
+// (or any participant) can re-fire the notification when Resend
+// silently swallowed the original send, or when the recipient lost it
+// to spam. The function dispatches the email that matches the meeting's
+// current status:
+//   pending    -> meeting_request   (re-notify approvers)
+//   approved   -> meeting_approved  (re-notify the attendee to pick)
+//   scheduled  -> meeting_scheduled (re-notify everyone of the time)
+// Other statuses don't have a meaningful resend.
+
+export async function resendMeetingNotification(
+  meetingId: string
+): Promise<{ emailStatus: EmailFanoutResult } | { error: string }> {
+  const member = await getCurrentTeamMember()
+  if (!member) return { error: 'Not signed in.' }
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from('meeting_requests')
+    .select(SELECT_WITH_NAMES)
+    .eq('id', meetingId)
+    .eq('company_id', member.companyId)
+    .maybeSingle()
+  if (!data) return { error: 'Meeting not found.' }
+
+  const row = data as RawMeetingRow
+  const isPlanner =
+    member.accessTier === 'admin' || member.accessTier === 'lead'
+  const isRequester = row.requester_id === member.id
+  const isAttendeeRow = (row.meeting_attendees ?? []).some(
+    (a) => a.member_id === member.id
+  )
+  if (!isRequester && !isAttendeeRow && !isPlanner) {
+    return { error: 'Only participants can resend.' }
+  }
+
+  const request = rowToRequest(row)
+  let emailStatus: EmailFanoutResult
+  if (request.status === 'pending') {
+    emailStatus = await fanOutApprovalEmails(member.companyId, request)
+  } else if (request.status === 'approved') {
+    emailStatus = await sendApprovedEmailToAttendees(request)
+  } else if (request.status === 'scheduled') {
+    // Re-send "scheduled" to everyone. We don't recreate the Calendar
+    // event here - just the email, which matches what users mean when
+    // they click "Resend".
+    const { emailStatus: result } = await finalizeSchedule(
+      member.companyId,
+      request
+    )
+    emailStatus = result
+  } else {
+    return {
+      error: `No email to resend for "${request.status}" meetings.`
+    }
+  }
+  return { emailStatus }
+}
+
 // ─── Attendee appends context (after approve, 1:1 only) ──────────────────
 
 export async function appendMeetingContext(
   meetingId: string,
   text: string
-): Promise<{ request: MeetingRequest } | { error: string }> {
+): Promise<{ request: MeetingRequest; emailStatus?: EmailFanoutResult } | { error: string }> {
   const trimmed = text.trim().slice(0, 4000)
   if (!trimmed) return { error: 'Context cannot be empty.' }
   const member = await getCurrentTeamMember()
@@ -1032,7 +1117,7 @@ async function gateParticipantOrPlanner(
 export async function linkTaskToMeeting(
   meetingId: string,
   taskId: string
-): Promise<{ request: MeetingRequest } | { error: string }> {
+): Promise<{ request: MeetingRequest; emailStatus?: EmailFanoutResult } | { error: string }> {
   const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
   const supabase = createAdminClient()
@@ -1068,7 +1153,7 @@ export async function linkTaskToMeeting(
 export async function unlinkTaskFromMeeting(
   meetingId: string,
   taskId: string
-): Promise<{ request: MeetingRequest } | { error: string }> {
+): Promise<{ request: MeetingRequest; emailStatus?: EmailFanoutResult } | { error: string }> {
   const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
   const supabase = createAdminClient()
@@ -1192,8 +1277,9 @@ export async function fetchMeetingForShare(
 async function finalizeSchedule(
   companyId: string,
   request: MeetingRequest
-): Promise<MeetingRequest> {
-  if (!request.selectedStartsAt) return request
+): Promise<{ request: MeetingRequest; emailStatus: EmailFanoutResult }> {
+  const emailStatus = emptyFanout()
+  if (!request.selectedStartsAt) return { request, emailStatus }
   const supabase = createAdminClient()
 
   type Party = {
@@ -1294,25 +1380,85 @@ async function finalizeSchedule(
         recipientTimezone: party.timezone,
         unsubscribeUrl
       })
-      await sendEmail({
+      const res = await dispatchEmail({
+        memberId,
         to,
         subject,
         html,
         text,
         unsubscribeUrl,
         tag: 'meeting_scheduled'
-      }).catch(() => undefined)
+      })
+      if (res.ok) emailStatus.sent += 1
+      else emailStatus.failures.push({ memberId, reason: res.reason })
     })
   )
 
   return {
-    ...request,
-    calendarEventId: eventId,
-    meetLink
+    request: {
+      ...request,
+      calendarEventId: eventId,
+      meetLink
+    },
+    emailStatus
   }
 }
 
-// ─── Email fan-outs (best-effort, never block) ───────────────────────────
+// ─── Email fan-outs ───────────────────────────────────────────────────────
+//
+// Each fanout returns an EmailFanoutResult so the server action can
+// surface partial failures to the UI (and we can stop swallowing
+// Resend errors silently). `failures` is empty on the happy path.
+
+export interface EmailFanoutResult {
+  sent: number
+  failures: { memberId: string; reason: string }[]
+}
+
+function emptyFanout(): EmailFanoutResult {
+  return { sent: 0, failures: [] }
+}
+
+// Centralized send + logging so every fanout records the same shape of
+// success/failure. The caller never throws on a single bad recipient;
+// instead the failure is captured in the returned struct and logged
+// for Vercel runtime visibility.
+async function dispatchEmail(input: {
+  memberId: string
+  to: string
+  subject: string
+  html: string
+  text: string
+  unsubscribeUrl: string
+  tag: string
+}): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    const res = await sendEmail({
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+      text: input.text,
+      unsubscribeUrl: input.unsubscribeUrl,
+      tag: input.tag
+    })
+    if (!res.ok) {
+      const reason = res.reason ?? 'unknown'
+      console.error(
+        `[meeting-email] failed (${input.tag}) member=${input.memberId} to=${input.to} reason=${reason}`
+      )
+      return { ok: false, reason }
+    }
+    return { ok: true }
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : String(err).slice(0, 200)
+    console.error(
+      `[meeting-email] threw (${input.tag}) member=${input.memberId} to=${input.to}:`,
+      err
+    )
+    return { ok: false, reason: message }
+  }
+}
 
 function describeAttendees(request: MeetingRequest): string {
   if (request.attendees.length === 0) return 'someone'
@@ -1323,14 +1469,15 @@ function describeAttendees(request: MeetingRequest): string {
 async function fanOutApprovalEmails(
   companyId: string,
   request: MeetingRequest
-): Promise<void> {
+): Promise<EmailFanoutResult> {
+  const out = emptyFanout()
   const supabase = createAdminClient()
   const { data: approvers } = await supabase
     .from('team_members')
     .select('id, full_name, contact_email, email, timezone')
     .eq('company_id', companyId)
     .in('access_tier', ['admin', 'lead'])
-  if (!approvers || approvers.length === 0) return
+  if (!approvers || approvers.length === 0) return out
 
   const approvalUrl = absoluteUrl(`/dashboard?meetings=${request.id}`)
   const ids = approvers.map((a) => a.id)
@@ -1365,24 +1512,29 @@ async function fanOutApprovalEmails(
         recipientTimezone: a.timezone,
         unsubscribeUrl
       })
-      await sendEmail({
+      const res = await dispatchEmail({
+        memberId: a.id,
         to,
         subject,
         html,
         text,
         unsubscribeUrl,
         tag: 'meeting_request'
-      }).catch(() => undefined)
+      })
+      if (res.ok) out.sent += 1
+      else out.failures.push({ memberId: a.id, reason: res.reason })
     })
   )
+  return out
 }
 
 async function sendApprovedEmailToAttendees(
   request: MeetingRequest
-): Promise<void> {
+): Promise<EmailFanoutResult> {
+  const out = emptyFanout()
   const supabase = createAdminClient()
   const attendeeIds = request.attendees.map((a) => a.id)
-  if (attendeeIds.length === 0) return
+  if (attendeeIds.length === 0) return out
   const [{ data: parties }, { data: prefs }] = await Promise.all([
     supabase
       .from('team_members')
@@ -1418,16 +1570,20 @@ async function sendApprovedEmailToAttendees(
         recipientTimezone: p.timezone,
         unsubscribeUrl
       })
-      await sendEmail({
+      const res = await dispatchEmail({
+        memberId: p.id,
         to,
         subject,
         html,
         text,
         unsubscribeUrl,
         tag: 'meeting_approved'
-      }).catch(() => undefined)
+      })
+      if (res.ok) out.sent += 1
+      else out.failures.push({ memberId: p.id, reason: res.reason })
     })
   )
+  return out
 }
 
 // Fan out a "this was rescheduled" email to everyone who isn't the
@@ -1439,13 +1595,14 @@ async function sendRescheduledEmail(
   rescheduledByAvatarUrl: string | null,
   reason: string | null,
   needsPick: boolean
-): Promise<void> {
+): Promise<EmailFanoutResult> {
+  const out = emptyFanout()
   const supabase = createAdminClient()
   const recipientIds = [
     request.requesterId,
     ...request.attendees.map((a) => a.id)
   ].filter((id) => id !== rescheduledById)
-  if (recipientIds.length === 0) return
+  if (recipientIds.length === 0) return out
 
   const [{ data: parties }, { data: prefs }] = await Promise.all([
     supabase
@@ -1487,16 +1644,20 @@ async function sendRescheduledEmail(
         recipientTimezone: p.timezone,
         unsubscribeUrl
       })
-      await sendEmail({
+      const res = await dispatchEmail({
+        memberId: p.id,
         to,
         subject,
         html,
         text,
         unsubscribeUrl,
         tag: 'meeting_rescheduled'
-      }).catch(() => undefined)
+      })
+      if (res.ok) out.sent += 1
+      else out.failures.push({ memberId: p.id, reason: res.reason })
     })
   )
+  return out
 }
 
 async function sendDeclinedOrRejectedEmail(
@@ -1504,7 +1665,8 @@ async function sendDeclinedOrRejectedEmail(
   label: 'Declined' | 'Rejected',
   declinerName: string,
   reason: string | null
-): Promise<void> {
+): Promise<EmailFanoutResult> {
+  const out = emptyFanout()
   const supabase = createAdminClient()
   const [{ data: requester }, { data: pref }] = await Promise.all([
     supabase
@@ -1518,10 +1680,10 @@ async function sendDeclinedOrRejectedEmail(
       .eq('member_id', request.requesterId)
       .maybeSingle()
   ])
-  if (!requester) return
-  if (pref?.meetings === false) return
+  if (!requester) return out
+  if (pref?.meetings === false) return out
   const to = (requester.contact_email && requester.contact_email.trim()) || requester.email
-  if (!to) return
+  if (!to) return out
   const unsubscribeUrl = await buildUnsubscribeUrl(request.requesterId)
   const { subject, html, text } = meetingDeclinedOrRejectedEmail({
     recipientName: requester.full_name,
@@ -1531,12 +1693,16 @@ async function sendDeclinedOrRejectedEmail(
     reasonLabel: label,
     unsubscribeUrl
   })
-  await sendEmail({
+  const res = await dispatchEmail({
+    memberId: request.requesterId,
     to,
     subject,
     html,
     text,
     unsubscribeUrl,
     tag: label === 'Declined' ? 'meeting_declined' : 'meeting_rejected'
-  }).catch(() => undefined)
+  })
+  if (res.ok) out.sent += 1
+  else out.failures.push({ memberId: request.requesterId, reason: res.reason })
+  return out
 }

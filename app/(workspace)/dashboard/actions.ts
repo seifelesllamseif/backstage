@@ -20,6 +20,7 @@ import {
 import {
   appendMeetingContext as appendMeetingContextImpl,
   submitMeetingReview as submitMeetingReviewImpl,
+  resendMeetingNotification as resendMeetingNotificationImpl,
   approveMeetingRequest as approveMeetingRequestImpl,
   cancelMeetingRequest as cancelMeetingRequestImpl,
   createMeetingRequest as createMeetingRequestImpl,
@@ -486,6 +487,12 @@ export async function submitMeetingReview(
   ...args: Parameters<typeof submitMeetingReviewImpl>
 ) {
   return submitMeetingReviewImpl(...args)
+}
+
+export async function resendMeetingNotification(
+  ...args: Parameters<typeof resendMeetingNotificationImpl>
+) {
+  return resendMeetingNotificationImpl(...args)
 }
 
 export async function linkTaskToMeeting(
