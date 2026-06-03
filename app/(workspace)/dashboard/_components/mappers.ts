@@ -119,6 +119,7 @@ export function mapTask(
     priority: task.priority as TaskPriority,
     assignee,
     lead,
+    createdById: task.createdBy ?? undefined,
     projectId: task.projectId ?? undefined,
     tags: tags.length ? tags : undefined,
     due: formatDueDate(task.dueDate),
@@ -335,12 +336,160 @@ function activityTextFor(row: DbActivity): string {
       return `${who} duplicated this task`;
     case "task.deleted":
       return `${who} deleted the task`;
+    case "task.tags_changed": {
+      const tags = Array.isArray(meta?.tags) ? meta.tags : null;
+      if (!tags || tags.length === 0) return `${who} cleared the tags`;
+      return `${who} set tags to ${tags.join(", ")}`;
+    }
+    case "task.due_changed": {
+      if (from != null && to != null) return `${who} changed the due date`;
+      if (to != null) return `${who} set a due date`;
+      if (from != null) return `${who} cleared the due date`;
+      return `${who} changed the due date`;
+    }
     case "comment.added":
       return `${who} left a comment`;
     case "comment.edited":
       return `${who} edited a comment`;
     case "comment.deleted":
       return `${who} deleted a comment`;
+    default:
+      return `${who} · ${row.action}`;
+  }
+}
+
+// Converts team-management activity_log rows into the UpdateRow shape
+// the dashboard's globalActivity feed consumes. These rows have no
+// taskId (entity_type is 'team_member' or 'team_invite'), so we pass
+// null for the task fields.
+export interface TeamUpdate {
+  id: string;
+  kind: "team";
+  text: string;
+  at: string;
+  atRaw: string;
+  taskId: null;
+  taskRef: null;
+  taskTitle: null;
+}
+
+export function mapTeamActivity(
+  activity: DbActivity[],
+  memberNamesById: Map<string, string>,
+): TeamUpdate[] {
+  return activity.map((a) => {
+    const created = a.createdAt instanceof Date
+      ? a.createdAt
+      : new Date(a.createdAt);
+    return {
+      id: a.id,
+      kind: "team" as const,
+      text: teamActivityTextFor(a, memberNamesById),
+      at: formatTimestamp(a.createdAt),
+      atRaw: created.toISOString(),
+      taskId: null,
+      taskRef: null,
+      taskTitle: null,
+    };
+  });
+}
+
+function teamActivityTextFor(
+  row: DbActivity,
+  memberNamesById: Map<string, string>,
+): string {
+  const who = row.actor?.fullName ?? "Someone";
+  const targetName = row.entityId
+    ? (memberNamesById.get(row.entityId) ?? null)
+    : null;
+  const meta = (row.metadata as Record<string, unknown> | null) ?? null;
+  switch (row.action) {
+    case "team.tier_changed":
+      if (meta?.from && meta?.to && targetName) {
+        return `${who} changed ${targetName} from ${meta.from} to ${meta.to}`;
+      }
+      return `${who} changed an access tier`;
+    case "team.presence_changed":
+      if (meta?.to && targetName) {
+        return `${who} marked ${targetName} as ${formatStatus(meta.to)}`;
+      }
+      return `${who} changed a member's presence`;
+    case "team.removed":
+      return targetName
+        ? `${who} removed ${targetName} from the workspace`
+        : `${who} removed a member`;
+    case "team.reinstated":
+      return targetName
+        ? `${who} reinstated ${targetName}`
+        : `${who} reinstated a member`;
+    case "team.profile_edited":
+      return targetName
+        ? `${who} edited ${targetName}'s profile`
+        : `${who} edited a member's profile`;
+    case "team.invited":
+      if (meta?.email) return `${who} invited ${meta.email}`;
+      return `${who} invited a new member`;
+    case "team.invite_canceled":
+      return `${who} canceled an invite`;
+    default:
+      return `${who} · ${row.action}`;
+  }
+}
+
+// Meeting activity rows carry the meeting id on entityId. We surface
+// them on the Updates feed with a clickable affordance that opens the
+// MeetingsSheet focused on that meeting.
+export interface MeetingUpdate {
+  id: string;
+  kind: "meeting";
+  text: string;
+  at: string;
+  atRaw: string;
+  taskId: null;
+  taskRef: null;
+  taskTitle: null;
+  meetingId: string | null;
+}
+
+export function mapMeetingActivity(activity: DbActivity[]): MeetingUpdate[] {
+  return activity.map((a) => {
+    const created = a.createdAt instanceof Date
+      ? a.createdAt
+      : new Date(a.createdAt);
+    return {
+      id: a.id,
+      kind: "meeting" as const,
+      text: meetingActivityTextFor(a),
+      at: formatTimestamp(a.createdAt),
+      atRaw: created.toISOString(),
+      taskId: null,
+      taskRef: null,
+      taskTitle: null,
+      meetingId: a.entityId ?? null,
+    };
+  });
+}
+
+function meetingActivityTextFor(row: DbActivity): string {
+  const who = row.actor?.fullName ?? "Someone";
+  const meta = (row.metadata as Record<string, unknown> | null) ?? null;
+  const title =
+    typeof meta?.title === "string" && meta.title ? `"${meta.title}"` : "a meeting";
+  switch (row.action) {
+    case "meeting.requested":
+      return `${who} requested ${title}`;
+    case "meeting.approved":
+      return `${who} approved ${title}`;
+    case "meeting.scheduled":
+      return `${who} scheduled ${title}`;
+    case "meeting.rejected":
+      return `${who} rejected ${title}`;
+    case "meeting.declined":
+      return `${who} declined ${title}`;
+    case "meeting.rescheduled":
+      return `${who} rescheduled ${title}`;
+    case "meeting.canceled":
+      return `${who} canceled ${title}`;
     default:
       return `${who} · ${row.action}`;
   }

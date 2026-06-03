@@ -131,7 +131,12 @@ export function TeamPanel({ actor }: { actor: Actor }) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState<Set<RoleFilter>>(new Set())
-  const [statusFilter, setStatusFilter] = useState<Set<StatusFilter>>(new Set())
+  // Default to "active only" - hides anyone on vacation or who has left
+  // unless the viewer explicitly broadens the filter. Most of the time
+  // people want to see who's actually around.
+  const [statusFilter, setStatusFilter] = useState<Set<StatusFilter>>(
+    () => new Set<StatusFilter>(['active'])
+  )
 
   // Bulk confirmation modal.
   const [bulkConfirm, setBulkConfirm] = useState<null | {
@@ -253,7 +258,9 @@ export function TeamPanel({ actor }: { actor: Actor }) {
     const failed = results.filter((r) => 'error' in r).length
     const ok = results.length - failed
     if (ok > 0)
-      toast.success(`${ok} member${ok === 1 ? '' : 's'} - ${PRESENCE_LABELS[status]}.`)
+      toast.success(
+        `${ok} member${ok === 1 ? '' : 's'} - ${PRESENCE_LABELS[status]}.`
+      )
     if (failed > 0) toast.error(`${failed} failed.`)
     clearSelection()
     refetch()
@@ -281,8 +288,7 @@ export function TeamPanel({ actor }: { actor: Actor }) {
   }
 
   const allFilteredChecked =
-    actionableIds.length > 0 &&
-    actionableIds.every((id) => selected.has(id))
+    actionableIds.length > 0 && actionableIds.every((id) => selected.has(id))
 
   const columns = useMemo<ColumnDef<RosterMember>[]>(
     () => [
@@ -412,8 +418,7 @@ export function TeamPanel({ actor }: { actor: Actor }) {
             >
               {(['admin', 'lead', 'member'] as const).map((tier) => {
                 const allowed =
-                  tier === m.accessTier ||
-                  canChangeTier(actor, target, tier)
+                  tier === m.accessTier || canChangeTier(actor, target, tier)
                 return (
                   <option key={tier} value={tier} disabled={!allowed}>
                     {tier}
@@ -497,14 +502,7 @@ export function TeamPanel({ actor }: { actor: Actor }) {
         }
       }
     ],
-    [
-      actor,
-      pendingMember,
-      selected,
-      allFilteredChecked,
-      actionableIds,
-      t
-    ]
+    [actor, pendingMember, selected, allFilteredChecked, actionableIds, t]
   )
 
   const table = useReactTable({
@@ -522,10 +520,7 @@ export function TeamPanel({ actor }: { actor: Actor }) {
     actionableIds.includes(id)
   ).length
 
-  const filtersActive =
-    !!search ||
-    roleFilter.size > 0 ||
-    statusFilter.size > 0
+  const filtersActive = !!search || roleFilter.size > 0 || statusFilter.size > 0
 
   return (
     <div className="h-full overflow-y-auto p-6">
@@ -546,39 +541,11 @@ export function TeamPanel({ actor }: { actor: Actor }) {
         )}
       </div>
 
-      {/* Filters - faceted-filter buttons on the left, search + clear on the
-          right. No outer container, matches the toolbar pattern across the
-          rest of the dashboard. */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <FacetedFilter
-          title="Role"
-          values={['admin', 'lead', 'member']}
-          selected={roleFilter}
-          onToggle={(v) => {
-            setRoleFilter((prev) => {
-              const next = new Set(prev)
-              if (next.has(v)) next.delete(v)
-              else next.add(v)
-              return next
-            })
-          }}
-        />
-        <FacetedFilter
-          title="Status"
-          values={['active', 'away', 'on_vacation', 'left']}
-          labelMap={STATUS_FILTER_LABELS}
-          selected={statusFilter}
-          onToggle={(v) => {
-            setStatusFilter((prev) => {
-              const next = new Set(prev)
-              if (next.has(v)) next.delete(v)
-              else next.add(v)
-              return next
-            })
-          }}
-        />
-
-        <div className="ml-auto flex items-center gap-2">
+      {/* Toolbar: search + clear pinned to the left, faceted filters
+          pinned to the right. The outer flex with justify-between handles
+          the gap so on narrow viewports the filters wrap underneath. */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
           <div className="relative">
             <Search
               className={`pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 ${t.textSubtle}`}
@@ -602,6 +569,36 @@ export function TeamPanel({ actor }: { actor: Actor }) {
           >
             <X className="size-3" /> Clear
           </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <FacetedFilter
+            title="Role"
+            values={['admin', 'lead', 'member']}
+            selected={roleFilter}
+            onToggle={(v) => {
+              setRoleFilter((prev) => {
+                const next = new Set(prev)
+                if (next.has(v)) next.delete(v)
+                else next.add(v)
+                return next
+              })
+            }}
+          />
+          <FacetedFilter
+            title="Status"
+            values={['active', 'away', 'on_vacation', 'left']}
+            labelMap={STATUS_FILTER_LABELS}
+            selected={statusFilter}
+            onToggle={(v) => {
+              setStatusFilter((prev) => {
+                const next = new Set(prev)
+                if (next.has(v)) next.delete(v)
+                else next.add(v)
+                return next
+              })
+            }}
+          />
         </div>
       </div>
 
@@ -683,9 +680,7 @@ export function TeamPanel({ actor }: { actor: Actor }) {
                       </span>
                       <span className={`text-[11px] ${t.textSubtle}`}>
                         {inv.email} · {inv.accessTier}
-                        {inv.invitedByName
-                          ? ` · by ${inv.invitedByName}`
-                          : ''}
+                        {inv.invitedByName ? ` · by ${inv.invitedByName}` : ''}
                       </span>
                     </div>
                   </div>
@@ -713,7 +708,7 @@ export function TeamPanel({ actor }: { actor: Actor }) {
                 {hg.headers.map((h) => (
                   <th
                     key={h.id}
-                    className={`px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide ${t.textSubtle}`}
+                    className={`px-3 py-2 text-left text-[11px] font-medium tracking-wide uppercase ${t.textSubtle}`}
                   >
                     {flexRender(h.column.columnDef.header, h.getContext())}
                   </th>
@@ -783,9 +778,9 @@ export function TeamPanel({ actor }: { actor: Actor }) {
                   Delete {deleteConfirm.fullName}?
                 </AlertDialogTitle>
                 <AlertDialogDescription>
-                  They will be marked as Left and removed from active views.
-                  You can reinstate them from this page later by switching
-                  their status back to Active.
+                  They will be marked as Left and removed from active views. You
+                  can reinstate them from this page later by switching their
+                  status back to Active.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -814,8 +809,8 @@ export function TeamPanel({ actor }: { actor: Actor }) {
             <>
               <AlertDialogHeader>
                 <AlertDialogTitle>
-                  Mark {bulkConfirm.memberIds.length}{' '}
-                  member{bulkConfirm.memberIds.length === 1 ? '' : 's'} as{' '}
+                  Mark {bulkConfirm.memberIds.length} member
+                  {bulkConfirm.memberIds.length === 1 ? '' : 's'} as{' '}
                   {PRESENCE_LABELS[bulkConfirm.status]}?
                 </AlertDialogTitle>
                 <AlertDialogDescription>
@@ -1016,8 +1011,8 @@ function FacetedFilter<T extends string>({
             <span className="mx-1 h-3 w-px bg-current opacity-20" />
             <span className={`font-medium ${t.text}`}>
               {count === 1
-                ? labelMap?.[Array.from(selected)[0]] ??
-                  Array.from(selected)[0]
+                ? (labelMap?.[Array.from(selected)[0]] ??
+                  Array.from(selected)[0])
                 : `${count} selected`}
             </span>
           </>
@@ -1130,8 +1125,8 @@ function InviteModal({
         <h3 className={`text-base font-medium ${t.text}`}>Invite a teammate</h3>
         <p className={`mt-1 text-xs ${t.textSubtle}`}>
           We will generate a <span className="font-mono">@verbivore.app</span>{' '}
-          login from their name and email the invite to the contact email
-          you enter below.
+          login from their name and email the invite to the contact email you
+          enter below.
         </p>
         <form onSubmit={submit} className="mt-4 flex flex-col gap-3">
           <label className="flex flex-col gap-1">
@@ -1146,14 +1141,14 @@ function InviteModal({
             {fullName.trim() && (
               <span className={`text-[10px] ${t.textSubtle}`}>
                 Login will be{' '}
-                <span className="font-mono">
-                  {previewLoginEmail(fullName)}
-                </span>
+                <span className="font-mono">{previewLoginEmail(fullName)}</span>
               </span>
             )}
           </label>
           <label className="flex flex-col gap-1">
-            <span className={`text-xs font-medium ${t.text}`}>Contact email</span>
+            <span className={`text-xs font-medium ${t.text}`}>
+              Contact email
+            </span>
             <input
               type="email"
               value={contactEmail}
@@ -1163,8 +1158,8 @@ function InviteModal({
               placeholder="jane@example.com"
             />
             <span className={`text-[10px] ${t.textSubtle}`}>
-              We send the invite here. The recipient signs in with the
-              generated login above.
+              We send the invite here. The recipient signs in with the generated
+              login above.
             </span>
           </label>
           <label className="flex flex-col gap-1">

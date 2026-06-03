@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   FileText,
   GitCommit,
@@ -32,6 +33,44 @@ import type {
 
 const PRIORITIES: TaskPriority[] = ['urgent', 'high', 'medium', 'low', 'none']
 const PRESENCES: Presence[] = ['online', 'today', 'away', 'on_vacation', 'left']
+
+type MeetingStatusKey =
+  | 'pending'
+  | 'approved'
+  | 'scheduled'
+  | 'completed'
+
+const MEETING_STATUSES: {
+  id: MeetingStatusKey
+  label: string
+  desc: string
+  swatch: string
+}[] = [
+  {
+    id: 'pending',
+    label: 'Pending approval',
+    desc: 'Submitted; waiting for an admin / lead to approve or reject.',
+    swatch: 'bg-amber-500/20 ring-amber-500/40'
+  },
+  {
+    id: 'approved',
+    label: 'Approved - waiting pick',
+    desc: '1:1 meeting where the requestee still needs to pick a time.',
+    swatch: 'bg-sky-500/20 ring-sky-500/40'
+  },
+  {
+    id: 'scheduled',
+    label: 'Scheduled',
+    desc: 'Time is locked; Calendar event + Meet link sent.',
+    swatch: 'bg-emerald-500/20 ring-emerald-500/40'
+  },
+  {
+    id: 'completed',
+    label: 'Completed / done',
+    desc: 'Past meeting kept for history.',
+    swatch: 'bg-zinc-500/15 ring-zinc-500/30'
+  }
+]
 
 // Mirrors RING_CLASS / DIM_CLASS from Avatar.tsx so the swatch in the
 // library renders the same hue + treatment as the real avatar ring.
@@ -224,6 +263,33 @@ export default function SymbolsPanel({
     return c
   }, [sprints])
 
+  // Meeting counts come from the same React Query keys MeetingsPanel
+  // and MeetingsSheet use, so anywhere one of them refreshes, this
+  // section updates too.
+  const meetingsForCount = useQuery({
+    queryKey: ['meetingRequests', 'mine'],
+    queryFn: async () => {
+      const { listMyMeetingRequests } = await import('../actions')
+      const res = await listMyMeetingRequests()
+      return 'requests' in res ? res.requests : []
+    }
+  })
+  const meetingCounts = useMemo(() => {
+    const c: Record<MeetingStatusKey, number> = {
+      pending: 0,
+      approved: 0,
+      scheduled: 0,
+      completed: 0
+    }
+    for (const r of meetingsForCount.data ?? []) {
+      if (r.status === 'pending') c.pending++
+      else if (r.status === 'approved') c.approved++
+      else if (r.status === 'scheduled') c.scheduled++
+      else if (r.status === 'completed') c.completed++
+    }
+    return c
+  }, [meetingsForCount.data])
+
   const presenceCounts = useMemo(() => {
     const c: Record<Presence, number> = {
       online: 0,
@@ -362,6 +428,23 @@ export default function SymbolsPanel({
         </Section>
 
         <Section
+          title="Meeting statuses"
+          hint="Tints used on the Calendar tab and inside the Meetings sheet. Click any teammate name on a card to peek their profile."
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {MEETING_STATUSES.map((s) => (
+              <SymbolCell
+                key={s.id}
+                icon={<MeetingDot swatch={s.swatch} />}
+                label={s.label}
+                description={s.desc}
+                count={meetingCounts[s.id]}
+              />
+            ))}
+          </div>
+        </Section>
+
+        <Section
           title="Link kinds"
           hint="What we infer from a URL pasted into a task or project."
         >
@@ -458,6 +541,15 @@ function SymbolCell({
     )
   }
   return <div className={baseClass}>{inner}</div>
+}
+
+function MeetingDot({ swatch }: { swatch: string }) {
+  return (
+    <span
+      aria-hidden
+      className={`flex size-5 items-center justify-center rounded-md ring-1 ${swatch}`}
+    />
+  )
 }
 
 function PresenceSwatch({ presence }: { presence: Presence }) {

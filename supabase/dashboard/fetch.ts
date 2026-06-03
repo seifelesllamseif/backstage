@@ -180,6 +180,11 @@ export interface DashboardData {
   sprints: DashboardSprintRow[]
   comments: DashboardCommentRow[]
   activity: DashboardActivityRow[]
+  // Team-management activity (presence/tier/profile/etc), scoped to the
+  // viewer's company. Not bucketable by task, so it lives on its own.
+  teamActivity: DashboardActivityRow[]
+  // Meeting lifecycle events. Same companywide scope as teamActivity.
+  meetingActivity: DashboardActivityRow[]
   externalRefs: DashboardTaskExternalRefRow[]
   projectExternalRefs: DashboardProjectExternalRefRow[]
   currentMember: {
@@ -325,6 +330,8 @@ export async function fetchDashboardData(
     sprintTaskJoinForTasksRes,
     commentsRes,
     activityRes,
+    teamActivityRes,
+    meetingActivityRes,
     externalRefsRes,
     projectExternalRefsRes,
     refTasksRes
@@ -434,6 +441,24 @@ export async function fetchDashboardData(
       .eq('entity_type', 'task')
       .in('entity_id', safeTaskIds)
       .order('created_at', { ascending: true }),
+    // team-management activity (presence flips, tier changes, etc).
+    // Not scoped to a task so we just take everything in the company
+    // and let the UI render them as informational rows.
+    supabase
+      .from('activity_logs')
+      .select('*, actor:team_members!activity_log_actor_id_fkey(id, full_name)')
+      .eq('company_id', member.companyId)
+      .in('entity_type', ['team_member', 'team_invite'])
+      .order('created_at', { ascending: true }),
+    // Meeting lifecycle events (requested/approved/scheduled/declined/
+    // rejected/rescheduled/canceled). Same shape as team activity but
+    // entity_type = 'meeting'.
+    supabase
+      .from('activity_logs')
+      .select('*, actor:team_members!activity_log_actor_id_fkey(id, full_name)')
+      .eq('company_id', member.companyId)
+      .eq('entity_type', 'meeting')
+      .order('created_at', { ascending: true }),
     // task external refs scoped to visible tasks
     supabase
       .from('task_external_refs')
@@ -475,6 +500,8 @@ export async function fetchDashboardData(
     sprintTaskJoinForTasksRes.error,
     commentsRes.error,
     activityRes.error,
+    teamActivityRes.error,
+    meetingActivityRes.error,
     externalRefsRes.error,
     projectExternalRefsRes.error,
     refTasksRes.error
@@ -664,6 +691,34 @@ export async function fetchDashboardData(
     }
   })
 
+  const teamActivity: DashboardActivityRow[] = (
+    teamActivityRes.data ?? []
+  ).map((a) => {
+    const actor = a.actor as { id: string; full_name: string } | null
+    return {
+      id: a.id,
+      entityId: a.entity_id,
+      action: a.action,
+      createdAt: a.created_at,
+      metadata: a.metadata,
+      actor: actor ? { id: actor.id, fullName: actor.full_name } : null
+    }
+  })
+
+  const meetingActivity: DashboardActivityRow[] = (
+    meetingActivityRes.data ?? []
+  ).map((a) => {
+    const actor = a.actor as { id: string; full_name: string } | null
+    return {
+      id: a.id,
+      entityId: a.entity_id,
+      action: a.action,
+      createdAt: a.created_at,
+      metadata: a.metadata,
+      actor: actor ? { id: actor.id, fullName: actor.full_name } : null
+    }
+  })
+
   const externalRefs: DashboardTaskExternalRefRow[] = (
     externalRefsRes.data ?? []
   ).map((r) => ({
@@ -695,6 +750,8 @@ export async function fetchDashboardData(
     sprints,
     comments,
     activity,
+    teamActivity,
+    meetingActivity,
     externalRefs,
     projectExternalRefs,
     currentMember: {

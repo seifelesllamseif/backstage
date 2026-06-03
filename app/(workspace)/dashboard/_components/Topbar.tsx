@@ -24,7 +24,7 @@ export type QuickFilter = 'open' | 'due' | 'review' | 'done'
 interface TopbarProps {
   query: string
   onQuery: (q: string) => void
-  tab: 'board' | 'list' | 'timeline' | 'sprints'
+  tab: 'board' | 'list' | 'timeline' | 'sprints' | 'meetings'
   totals: { open: number; due: number; review: number; done: number }
   onNewTask: () => void
   onToggleFilter: () => void
@@ -72,19 +72,21 @@ const FEED_VIEWS: {
 ]
 
 const TABS: {
-  id: 'board' | 'list' | 'timeline' | 'sprints'
+  id: 'board' | 'list' | 'timeline' | 'sprints' | 'meetings'
   label: string
   requiresProject?: boolean
 }[] = [
   { id: 'board', label: 'Board' },
   { id: 'list', label: 'List' },
   { id: 'timeline', label: 'Timeline' },
-  { id: 'sprints', label: 'Sprints', requiresProject: true }
+  { id: 'sprints', label: 'Sprints', requiresProject: true },
+  { id: 'meetings', label: 'Calendar' }
 ]
 
 const GROUPS: { id: GroupBy; label: string }[] = [
   { id: 'status', label: 'Status' },
   { id: 'assignee', label: 'Assignee' },
+  { id: 'lead', label: 'Lead' },
   { id: 'priority', label: 'Priority' }
 ]
 

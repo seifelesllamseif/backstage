@@ -1,8 +1,10 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Briefcase,
+  CalendarPlus,
   Check,
   ExternalLink,
   FileText,
@@ -19,13 +21,19 @@ import {
   Trash2,
   X
 } from 'lucide-react'
-import { defaultExternalRefLabel, parseExternalRef } from '@/lib/externalRef'
+import {
+  defaultExternalRefLabel,
+  isSelfHosted,
+  parseExternalRef
+} from '@/lib/externalRef'
 import type { TaskExternalRef, TaskExternalRefKind } from './boardData'
 import {
   addTaskWatcher,
   fetchTaskHandoff,
+  listMeetingsForTask,
   listTaskWatchers,
-  removeTaskWatcher
+  removeTaskWatcher,
+  unlinkTaskFromMeeting
 } from '../actions'
 import { toast } from 'sonner'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
@@ -47,6 +55,8 @@ import {
   AlertDialogTrigger
 } from '@/components/ui/alert-dialog'
 import MentionInput, { renderMentionedBody } from './MentionInput'
+import { useMeetingRequestSheet } from './MeetingRequestSheet'
+import { useMeetingsSheet } from './MeetingsSheet'
 import { useTaskActions } from './actions'
 import { Share2 } from 'lucide-react'
 import {
@@ -127,6 +137,11 @@ interface TaskDetailProps {
   onChangeAssignee: (id: string, assigneeId: string | null) => void
   onChangeLead: (id: string, leadId: string | null) => void
   onChangeDueDate: (id: string, dueIso: string | null) => void
+  onChangeTags: (id: string, tags: string[]) => void
+  // All tags ever used in the company. Drives the picker so users can
+  // re-use existing taxonomy instead of typing free-form. Creating a
+  // brand-new tag is admin/lead only (gated server-side).
+  availableTags: string[]
   onChangeTitle: (id: string, title: string) => void
   onChangeDescription: (id: string, description: string | null) => void
   onAddComment: (id: string, body: string, mentions?: string[]) => void
@@ -166,6 +181,8 @@ export default function TaskDetail({
   onChangeAssignee,
   onChangeLead,
   onChangeDueDate,
+  onChangeTags,
+  availableTags,
   onChangeTitle,
   onChangeDescription,
   onAddComment,
@@ -183,8 +200,11 @@ export default function TaskDetail({
   const team = useTeam()
   const isPlanner = accessTier === 'admin' || accessTier === 'lead'
   const isAssignee = task?.assignee?.id === currentUserId
+  const isCreator = task?.createdById === currentUserId
   // Planner fields: only admins / leads.
   const canEditPlanner = isPlanner
+  // Tags are looser: planners or the original creator can curate them.
+  const canEditTags = isPlanner || isCreator
   // Owner fields: planners OR the task's own assignee. Mirrors the server
   // gate in mutations.ts -> ensureTaskAccess(taskId, 'owner').
   const canEditOwner = isPlanner || isAssignee
@@ -194,40 +214,48 @@ export default function TaskDetail({
   const [leadOpen, setLeadOpen] = useState(false)
   const [askLeadOpen, setAskLeadOpen] = useState(false)
 
-  // Spectator state lives at the task-detail level so the @-mention input
-  // can rank them at the top of its dropdown. Auto-refreshes on
-  // comments.length so a mention that promotes someone to spectator
-  // (mutations.ts addComment) surfaces immediately. UUID guard skips the
-  // fetch for the synthetic temp id used during optimistic create.
-  const [spectators, setSpectators] = useState<WatcherRow[]>([])
-  const [spectatorsLoading, setSpectatorsLoading] = useState(false)
-  const refreshSpectators = async () => {
-    if (!task) return
-    if (!UUID_RE.test(task.id)) {
-      setSpectators([])
-      return
+  // Spectators are fetched per-task and cached so re-opening a task
+  // shows the existing list instantly. The cache stays warm across
+  // sheet open/close cycles, and the @-mention dropdown reads the same
+  // cache to rank watchers at the top.
+  const queryClient = useQueryClient()
+  const watchersTaskId = task && UUID_RE.test(task.id) ? task.id : null
+  const watchersQuery = useQuery({
+    queryKey: ['taskWatchers', watchersTaskId],
+    queryFn: async () => {
+      if (!watchersTaskId) return [] as WatcherRow[]
+      const res = await listTaskWatchers(watchersTaskId)
+      if ('error' in res) throw new Error(res.error)
+      return res.watchers.map<WatcherRow>((w) => ({
+        memberId: w.memberId,
+        fullName: w.fullName,
+        avatarUrl: w.avatarUrl,
+        invitedAt: w.invitedAt
+      }))
+    },
+    enabled: watchersTaskId !== null,
+    staleTime: 30_000,
+    // Cached data stays visible while a refetch runs in the background
+    // - this kills the empty-then-populated flicker on task re-open.
+    placeholderData: (prev) => prev
+  })
+  const spectators = watchersQuery.data ?? []
+  const spectatorsLoading =
+    watchersQuery.isLoading && spectators.length === 0
+  const refreshSpectators = () => {
+    if (watchersTaskId) {
+      void queryClient.invalidateQueries({
+        queryKey: ['taskWatchers', watchersTaskId]
+      })
     }
-    setSpectatorsLoading(true)
-    const res = await listTaskWatchers(task.id)
-    if ('error' in res) {
-      toast.error(res.error)
-      setSpectators([])
-    } else {
-      setSpectators(
-        res.watchers.map((w) => ({
-          memberId: w.memberId,
-          fullName: w.fullName,
-          avatarUrl: w.avatarUrl,
-          invitedAt: w.invitedAt
-        }))
-      )
-    }
-    setSpectatorsLoading(false)
   }
+  // A new comment can promote a mentioned user to spectator (handled in
+  // mutations.ts addComment). Re-fetch in that case so the list stays
+  // accurate without forcing a manual reload.
   useEffect(() => {
-    void refreshSpectators()
+    refreshSpectators()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.id, comments.length])
+  }, [comments.length])
   const spectatorIds = useMemo(
     () => spectators.map((s) => s.memberId),
     [spectators]
@@ -500,16 +528,13 @@ export default function TaskDetail({
           />
 
           <FieldLabel>Tags</FieldLabel>
-          <span className="flex flex-wrap gap-1">
-            {task.tags?.map((tag) => (
-              <span
-                key={tag}
-                className={`rounded border px-1.5 py-0.5 text-[10px] tracking-wider uppercase ${t.metaTag}`}
-              >
-                {tag}
-              </span>
-            )) ?? <span className={t.textSubtle}>—</span>}
-          </span>
+          <TagsField
+            tags={task.tags ?? []}
+            canEdit={canEditTags}
+            canCreate={isPlanner}
+            availableTags={availableTags}
+            onChange={(next) => onChangeTags(task.id, next)}
+          />
 
           <FieldLabel>Relations</FieldLabel>
           <RelationPicker
@@ -522,6 +547,24 @@ export default function TaskDetail({
             variant="compact"
           />
         </div>
+
+        <LinkedMeetingsSection
+          taskId={task.id}
+          taskRef={task.ref ?? null}
+          taskTitle={task.title}
+          defaultRequesteeId={(() => {
+            // Lead is the typical answer ("ask my lead about this task"),
+            // unless I *am* the lead - then default to the assignee so
+            // we don't try to schedule a meeting with ourselves.
+            const lead = task.lead?.id
+            const assignee = task.assignee?.id
+            if (lead && lead !== currentUserId) return lead
+            if (assignee && assignee !== currentUserId) return assignee
+            return lead ?? assignee ?? null
+          })()}
+          currentUserId={currentUserId}
+          canEdit={canEditOwner}
+        />
 
         <WatchersSection
           taskId={task.id}
@@ -1117,6 +1160,197 @@ function hostOf(url: string): string | null {
   }
 }
 
+function TagsField({
+  tags,
+  canEdit,
+  canCreate,
+  availableTags,
+  onChange
+}: {
+  tags: string[]
+  canEdit: boolean
+  // Only admins / leads can *invent* a brand-new tag. Task creators and
+  // anyone else with edit access can still pick from existing ones.
+  canCreate: boolean
+  availableTags: string[]
+  onChange: (next: string[]) => void
+}) {
+  const { t } = useDashTheme()
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  // Existing tags not already on this task, case-insensitive match.
+  const suggestions = useMemo(() => {
+    const lowerSelected = new Set(tags.map((g) => g.toLowerCase()))
+    const q = draft.trim().toLowerCase()
+    return availableTags
+      .filter((name) => !lowerSelected.has(name.toLowerCase()))
+      .filter((name) => !q || name.toLowerCase().includes(q))
+      .slice(0, 8)
+  }, [availableTags, tags, draft])
+
+  const draftMatchesExisting = useMemo(() => {
+    const q = draft.trim().toLowerCase()
+    if (!q) return true
+    return availableTags.some((n) => n.toLowerCase() === q)
+  }, [availableTags, draft])
+
+  function addExisting(name: string) {
+    if (tags.some((g) => g.toLowerCase() === name.toLowerCase())) return
+    onChange([...tags, name])
+    setDraft('')
+  }
+
+  function tryCreate() {
+    const trimmed = draft.trim()
+    if (!trimmed) return
+    if (!canCreate) {
+      toast.error('Only admins and leads can create a new tag.')
+      return
+    }
+    if (tags.some((g) => g.toLowerCase() === trimmed.toLowerCase())) {
+      setDraft('')
+      return
+    }
+    onChange([...tags, trimmed])
+    setDraft('')
+  }
+
+  function remove(tag: string) {
+    onChange(tags.filter((g) => g !== tag))
+  }
+
+  if (!canEdit) {
+    return (
+      <span className="flex flex-wrap gap-1">
+        {tags.length === 0 ? (
+          <span className={t.textSubtle}>—</span>
+        ) : (
+          tags.map((tag) => (
+            <span
+              key={tag}
+              className={`rounded border px-1.5 py-0.5 text-[10px] tracking-wider uppercase ${t.metaTag}`}
+            >
+              {tag}
+            </span>
+          ))
+        )}
+      </span>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-1">
+        {tags.map((tag) => (
+          <span
+            key={tag}
+            className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] tracking-wider uppercase ${t.metaTag}`}
+          >
+            {tag}
+            <button
+              type="button"
+              onClick={() => remove(tag)}
+              aria-label={`Remove ${tag}`}
+              className="flex size-3 items-center justify-center rounded-sm hover:bg-zinc-200/60"
+            >
+              <X className="size-2.5" />
+            </button>
+          </span>
+        ))}
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className={`inline-flex h-5 items-center gap-0.5 rounded border border-dashed px-1.5 text-[10px] tracking-wider uppercase ${t.border} ${t.textMuted}`}
+        >
+          <Plus className="size-2.5" /> tag
+        </button>
+      </div>
+
+      {open && (
+        <div
+          className={`flex flex-col gap-1 rounded-md border p-1.5 ${t.border}`}
+        >
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                const exact = suggestions.find(
+                  (s) => s.toLowerCase() === draft.trim().toLowerCase()
+                )
+                if (exact) {
+                  addExisting(exact)
+                } else if (suggestions.length > 0 && !draft.trim()) {
+                  // empty input + Enter does nothing
+                } else if (suggestions.length === 1 && !draft.trim()) {
+                  addExisting(suggestions[0])
+                } else if (!draftMatchesExisting) {
+                  tryCreate()
+                } else if (suggestions.length > 0) {
+                  addExisting(suggestions[0])
+                }
+              } else if (e.key === 'Escape') {
+                setOpen(false)
+                setDraft('')
+              }
+            }}
+            placeholder={
+              canCreate
+                ? 'Search tags or type a new one'
+                : 'Search existing tags'
+            }
+            maxLength={32}
+            className={`h-7 rounded border px-2 text-[11px] ${t.border} ${t.input}`}
+          />
+          <div className="flex max-h-44 flex-col gap-0.5 overflow-y-auto">
+            {suggestions.length === 0 && draft.trim() === '' && (
+              <p className={`px-1 py-1 text-[10px] italic ${t.textSubtle}`}>
+                {availableTags.length === 0
+                  ? 'No tags in this workspace yet.'
+                  : 'All existing tags are already on this task.'}
+              </p>
+            )}
+            {suggestions.map((name) => (
+              <button
+                key={name}
+                type="button"
+                onClick={() => addExisting(name)}
+                className={`flex items-center justify-between rounded px-2 py-1 text-left text-[11px] ${t.tab} ${t.rowHover}`}
+              >
+                <span className="truncate">{name}</span>
+                <span className={`text-[9px] ${t.textSubtle}`}>existing</span>
+              </button>
+            ))}
+            {draft.trim() && !draftMatchesExisting && (
+              <button
+                type="button"
+                onClick={tryCreate}
+                disabled={!canCreate}
+                title={
+                  !canCreate
+                    ? 'Only admins and leads can create a new tag.'
+                    : undefined
+                }
+                className={`flex items-center justify-between rounded px-2 py-1 text-left text-[11px] disabled:cursor-not-allowed disabled:opacity-50 ${t.tab} ${t.rowHover}`}
+              >
+                <span className="truncate">
+                  Create &ldquo;{draft.trim()}&rdquo;
+                </span>
+                <span className={`text-[9px] ${t.textSubtle}`}>
+                  {canCreate ? 'new' : 'leads only'}
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Inline editable due date. Click the current value to edit. Server-side
 // auto-tags the change as "postponed" or "early" when the task previously
 // had a due date - see updateDashboardTaskDueDate in mutations.ts.
@@ -1290,6 +1524,11 @@ function LinksSection({
             // the amber border-tile fights with it. Render it borderless
             // and let the mark fill the tile.
             const isOwnBrand = ref.kind === 'verbivore'
+            // In-app links (the dashboard's own subdomain) shouldn't
+            // render as "external" - we drop target=_blank and the
+            // ExternalLink chevron so navigating between tasks /
+            // sprints / profiles feels native.
+            const internal = isSelfHosted(ref.url)
             return (
               <li
                 key={ref.id}
@@ -1307,8 +1546,9 @@ function LinksSection({
                 </span>
                 <a
                   href={ref.url}
-                  target="_blank"
-                  rel="noreferrer noopener"
+                  {...(internal
+                    ? {}
+                    : { target: '_blank', rel: 'noreferrer noopener' })}
                   className="flex min-w-0 flex-1 flex-col gap-0.5"
                   title={ref.url}
                 >
@@ -1316,9 +1556,11 @@ function LinksSection({
                     <span className={`truncate text-xs font-medium ${t.text}`}>
                       {label}
                     </span>
-                    <ExternalLink
-                      className={`size-3 shrink-0 ${t.textSubtle}`}
-                    />
+                    {!internal && (
+                      <ExternalLink
+                        className={`size-3 shrink-0 ${t.textSubtle}`}
+                      />
+                    )}
                   </span>
                   <span
                     className={`flex items-center gap-1.5 text-[10px] ${t.textSubtle}`}
@@ -1662,6 +1904,188 @@ interface WatcherRow {
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+type LinkedMeeting = {
+  id: string
+  title: string
+  status:
+    | 'pending'
+    | 'approved'
+    | 'rejected'
+    | 'declined'
+    | 'scheduled'
+    | 'canceled'
+    | 'completed'
+  durationMin: number
+  proposedDate: string | null
+  selectedStartsAt: string | null
+  requesterId: string
+  requesterName: string
+  attendees: { id: string; fullName: string }[]
+}
+
+function LinkedMeetingsSection({
+  taskId,
+  taskRef,
+  taskTitle,
+  defaultRequesteeId,
+  currentUserId,
+  canEdit
+}: {
+  taskId: string
+  taskRef: string | null
+  taskTitle: string
+  // Who the "Request meeting about this task" CTA targets by default
+  // (assignee, falling back to lead). null when neither is set.
+  defaultRequesteeId: string | null
+  currentUserId: string
+  // Mirrors LinksSection: admin/lead/assignee can manage, members can't.
+  canEdit: boolean
+}) {
+  const { t } = useDashTheme()
+  const meetingRequest = useMeetingRequestSheet()
+  const meetings = useMeetingsSheet()
+  const [items, setItems] = useState<LinkedMeeting[]>([])
+  const [loading, setLoading] = useState(true)
+  const [refreshTick, setRefreshTick] = useState(0)
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    listMeetingsForTask(taskId).then((res) => {
+      if (!alive) return
+      if ('requests' in res) {
+        setItems(
+          res.requests.map((r) => ({
+            id: r.id,
+            title: r.title,
+            status: r.status,
+            durationMin: r.durationMin,
+            proposedDate: r.proposedDate,
+            selectedStartsAt: r.selectedStartsAt,
+            requesterId: r.requesterId,
+            requesterName: r.requesterName,
+            attendees: r.attendees.map((a) => ({
+              id: a.id,
+              fullName: a.fullName
+            }))
+          }))
+        )
+      }
+      setLoading(false)
+    })
+    return () => {
+      alive = false
+    }
+  }, [taskId, refreshTick])
+
+  function refresh() {
+    setRefreshTick((n) => n + 1)
+  }
+
+  async function unlink(meetingId: string) {
+    const res = await unlinkTaskFromMeeting(meetingId, taskId)
+    if ('error' in res) {
+      toast.error(res.error)
+      return
+    }
+    toast.success('Unlinked.')
+    refresh()
+  }
+
+  function openRequest() {
+    if (!defaultRequesteeId) {
+      toast.error('Assign this task first; we use the assignee as the requestee.')
+      return
+    }
+    meetingRequest.open({
+      memberId: defaultRequesteeId,
+      prefill: {
+        title: `Discuss: ${taskRef ?? taskTitle.slice(0, 40)}`,
+        linkedTaskId: taskId,
+        linkedTaskRef: taskRef ?? undefined,
+        linkedTaskTitle: taskTitle
+      }
+    })
+  }
+
+  return (
+    <div>
+      <div
+        className={`mb-2 flex items-center justify-between text-[10px] tracking-[0.22em] uppercase ${t.textMuted}`}
+      >
+        <span>Linked meetings{items.length > 0 ? ` (${items.length})` : ''}</span>
+        {canEdit && (
+          <button
+            onClick={openRequest}
+            disabled={!defaultRequesteeId}
+            className={`inline-flex h-6 items-center gap-1 rounded-md border px-1.5 text-[10px] transition disabled:opacity-40 ${t.border} ${t.btn}`}
+            title={
+              defaultRequesteeId
+                ? 'Request a meeting about this task'
+                : 'Assign the task first'
+            }
+          >
+            <CalendarPlus className="size-3" /> Request meeting
+          </button>
+        )}
+      </div>
+      {loading ? (
+        <p className={`text-[11px] italic ${t.textSubtle}`}>Loading...</p>
+      ) : items.length === 0 ? (
+        <p className={`text-[11px] italic ${t.textSubtle}`}>
+          No meetings linked yet.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-1">
+          {items.map((m) => {
+            const counterparty =
+              m.requesterId === currentUserId
+                ? m.attendees.length === 1
+                  ? m.attendees[0]?.fullName ?? 'someone'
+                  : `${m.attendees[0]?.fullName ?? 'someone'} + ${m.attendees.length - 1} more`
+                : m.requesterName
+            const when =
+              m.status === 'scheduled' && m.selectedStartsAt
+                ? new Intl.DateTimeFormat('en-US', {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit'
+                  }).format(new Date(m.selectedStartsAt))
+                : m.proposedDate
+            return (
+              <li
+                key={m.id}
+                className={`flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-[11px] ${t.border}`}
+              >
+                <button
+                  onClick={() => meetings.open({ focusedRequestId: m.id })}
+                  className={`flex min-w-0 flex-1 flex-col items-start text-left ${t.text} hover:underline`}
+                >
+                  <span className="truncate font-medium">{m.title}</span>
+                  <span className={`text-[10px] ${t.textMuted}`}>
+                    {counterparty} · {m.status}
+                    {when ? ` · ${when}` : ''}
+                  </span>
+                </button>
+                {canEdit && (
+                  <button
+                    onClick={() => unlink(m.id)}
+                    className={`text-[10px] ${t.textSubtle} hover:underline`}
+                  >
+                    Unlink
+                  </button>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
 
 function WatchersSection({
   taskId,

@@ -45,6 +45,9 @@ export interface BoardTask {
   assignee?: BoardAssignee
   // Lead member: who assignees ask for help. Distinct from assignee.
   lead?: BoardAssignee
+  // Member who originally created the task. Drives the "creator can
+  // edit tags" gate in TaskDetail.
+  createdById?: string
   projectId?: string
   tags?: string[]
   due?: string

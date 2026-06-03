@@ -9,6 +9,7 @@ import { createClient } from '@/supabase/server'
 import { getCurrentTeamMember } from '@/lib/dal'
 import { absoluteUrl, sendEmail } from '@/lib/email/send'
 import { inviteMemberEmail } from '@/lib/email/templates'
+import { logActivity } from './mutations'
 import {
   canCancelInvite,
   canChangeTier,
@@ -449,6 +450,16 @@ export async function setMemberPresence(input: {
     prevStatus === 'away' ? 'active' : prevStatus
   )
 
+  await logActivity(
+    supabase,
+    me.companyId,
+    me.id,
+    'team.presence_changed',
+    'team_member',
+    input.memberId,
+    { from: prevStatus, to: input.status }
+  )
+
   revalidatePath('/dashboard/team')
   revalidatePath('/dashboard')
   return { ok: true }
@@ -476,6 +487,15 @@ export async function softRemoveMember(
 
   await applyAuthSideEffectsForPresence(memberId, 'left', null)
 
+  await logActivity(
+    supabase,
+    me.companyId,
+    me.id,
+    'team.removed',
+    'team_member',
+    memberId
+  )
+
   revalidatePath('/dashboard/team')
   revalidatePath('/dashboard')
   return { ok: true }
@@ -502,6 +522,15 @@ export async function reinstateMember(
   if (error) return { error: error.message }
 
   await applyAuthSideEffectsForPresence(memberId, 'active', 'left')
+
+  await logActivity(
+    supabase,
+    me.companyId,
+    me.id,
+    'team.reinstated',
+    'team_member',
+    memberId
+  )
 
   revalidatePath('/dashboard/team')
   revalidatePath('/dashboard')
@@ -541,6 +570,16 @@ export async function changeAccessTier(
     .eq('id', parsed.data.memberId)
     .eq('company_id', me.companyId)
   if (error) return { error: error.message }
+
+  await logActivity(
+    supabase,
+    me.companyId,
+    me.id,
+    'team.tier_changed',
+    'team_member',
+    parsed.data.memberId,
+    { from: target.accessTier, to: parsed.data.newTier }
+  )
 
   revalidatePath('/dashboard/team')
   revalidatePath('/dashboard')
@@ -594,6 +633,19 @@ export async function updateMemberProfileByAdmin(
     .eq('id', parsed.data.memberId)
     .eq('company_id', me.companyId)
   if (error) return { error: error.message }
+
+  await logActivity(
+    supabase,
+    me.companyId,
+    me.id,
+    'team.profile_edited',
+    'team_member',
+    parsed.data.memberId,
+    {
+      fullName: parsed.data.fullName,
+      contactEmail: parsed.data.contactEmail
+    }
+  )
 
   revalidatePath('/dashboard/team')
   revalidatePath('/dashboard')

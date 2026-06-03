@@ -7,8 +7,12 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import {
   ArrowLeft,
+  CalendarDays,
+  CalendarPlus,
+  Check,
   ChevronDown,
   LogOut,
+  Rocket,
   RotateCcw,
   Sun,
   Moon,
@@ -44,6 +48,7 @@ import {
   updateDashboardTaskAssignee,
   updateDashboardTaskDetails,
   updateDashboardTaskDueDate,
+  updateDashboardTaskTags,
   updateDashboardTaskLead,
   updateDashboardTaskPriority,
   updateDashboardTaskStatus,
@@ -71,6 +76,7 @@ import NewTaskModal from './NewTaskModal'
 import Timeline from './Timeline'
 import FilterPanel from './FilterPanel'
 import { ProjectsPanel, SettingsPanel, UpdatesPanel } from './Panels'
+import { MeetingsPanel } from './MeetingsPanel'
 import { TeamPanel } from './TeamPanel'
 import SprintsPanel from './SprintsPanel'
 import SprintHero from './SprintHero'
@@ -92,10 +98,14 @@ import { TeamProvider } from './TeamContext'
 import { PortfolioSheetProvider } from './PortfolioSheet'
 import { QuickNoteSheetProvider } from './QuickNoteSheet'
 import { MeetingRequestSheetProvider } from './MeetingRequestSheet'
-import { MeetingsSheetProvider } from './MeetingsSheet'
+import { MeetingsSheetProvider, useMeetingsSheet } from './MeetingsSheet'
+import {
+  MeetingCreateWizardProvider,
+  useMeetingCreateWizard
+} from './MeetingCreateWizard'
 import { useDashboardSearchParams } from './useDashboardSearchParams'
 
-export type GroupBy = 'status' | 'assignee' | 'priority'
+export type GroupBy = 'status' | 'assignee' | 'priority' | 'lead'
 export type View =
   | 'all'
   | 'mine'
@@ -106,6 +116,7 @@ export type View =
   | 'settings'
   | 'symbols'
   | 'team'
+  | 'meetings'
   | 'archive'
 
 export interface DashboardInitial {
@@ -126,6 +137,31 @@ export interface DashboardInitial {
   labels: { id: string; name: string }[]
   commentsByTask: Record<string, TaskComment[]>
   activityByTask: Record<string, TaskActivity[]>
+  // Team-management activity (presence flips, tier changes, etc).
+  // Surface alongside task activity in the Updates panel.
+  teamUpdates: {
+    id: string
+    kind: 'team'
+    text: string
+    at: string
+    atRaw: string
+    taskId: null
+    taskRef: null
+    taskTitle: null
+  }[]
+  // Meeting lifecycle activity. taskId stays null; meetingId opens the
+  // meetings sheet on click.
+  meetingUpdates: {
+    id: string
+    kind: 'meeting'
+    text: string
+    at: string
+    atRaw: string
+    taskId: null
+    taskRef: null
+    taskTitle: null
+    meetingId: string | null
+  }[]
   externalRefsByTask: Record<string, TaskExternalRef[]>
   externalRefsByProject: Record<string, ProjectExternalRef[]>
   currentMember: {
@@ -180,7 +216,7 @@ function nextId(prefix: string) {
   return `${prefix}-${Date.now()}-${idCounter}`
 }
 
-type ActiveTab = 'board' | 'list' | 'timeline' | 'sprints'
+type ActiveTab = 'board' | 'list' | 'timeline' | 'sprints' | 'meetings'
 
 const PANEL_VIEWS = [
   'projects',
@@ -188,6 +224,7 @@ const PANEL_VIEWS = [
   'settings',
   'symbols',
   'team',
+  'meetings',
   'archive'
 ] as const
 type PanelView = (typeof PANEL_VIEWS)[number]
@@ -196,6 +233,7 @@ function pathTabFor(pathname: string | null): ActiveTab {
   if (pathname === '/dashboard/list') return 'list'
   if (pathname === '/dashboard/timeline') return 'timeline'
   if (pathname === '/dashboard/sprints') return 'sprints'
+  if (pathname === '/dashboard/meetings') return 'meetings'
   return 'board'
 }
 
@@ -227,6 +265,7 @@ function viewTitle(
     if (view === 'mentions') return 'Mentions'
     if (view === 'projects') return 'Projects'
     if (view === 'updates') return 'Updates'
+    if (view === 'meetings') return 'Meetings calendar'
     if (view === 'symbols') return 'Symbol library'
     if (view === 'settings') return 'Workspace settings'
     if (view === 'team') return 'Team'
@@ -388,12 +427,19 @@ export default function DashboardShellWrapper(props: {
               tasks={props.initial.tasks}
               currentUserId={props.initial.currentMember.id}
             >
-              <MeetingRequestSheetProvider>
+              <MeetingRequestSheetProvider
+                currentUserId={props.initial.currentMember.id}
+              >
                 <MeetingsSheetProvider
                   currentUserId={props.initial.currentMember.id}
                   accessTier={props.initial.currentMember.accessTier}
                 >
-                  <DashboardShellInner {...props} />
+                  <MeetingCreateWizardProvider
+                    currentUserId={props.initial.currentMember.id}
+                    tasks={props.initial.tasks}
+                  >
+                    <DashboardShellInner {...props} />
+                  </MeetingCreateWizardProvider>
                 </MeetingsSheetProvider>
               </MeetingRequestSheetProvider>
             </QuickNoteSheetProvider>
@@ -407,6 +453,8 @@ export default function DashboardShellWrapper(props: {
 function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   const { t, toggle, mode } = useDashTheme()
   const { open: openMenu } = useContextMenu()
+  const meetingWizard = useMeetingCreateWizard()
+  const meetingsSheet = useMeetingsSheet()
   const router = useRouter()
   const currentSearchParams = useSearchParams()
   const queryClient = useQueryClient()
@@ -487,7 +535,9 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   const pathname = usePathname()
   const tab = pathTabFor(pathname)
   const panel = pathPanelFor(pathname)
-  const setTab = (next: 'board' | 'list' | 'timeline' | 'sprints') => {
+  const setTab = (
+    next: 'board' | 'list' | 'timeline' | 'sprints' | 'meetings'
+  ) => {
     const qs = currentSearchParams.toString()
     router.push(qs ? `/dashboard/${next}?${qs}` : `/dashboard/${next}`)
   }
@@ -507,6 +557,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     statusFilter,
     priorityFilter,
     assigneeFilter,
+    leadFilter,
     tagFilter,
     sprintFilter,
     query,
@@ -517,6 +568,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     togglePriority,
     setAssigneeFilter,
     toggleAssignee,
+    setLeadFilter,
+    toggleLead,
     setTagFilter,
     toggleTag,
     setSprintFilter,
@@ -739,6 +792,11 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         (task) => task.assignee && assigneeFilter.includes(task.assignee.id)
       )
     }
+    if (leadFilter.length > 0) {
+      list = list.filter(
+        (task) => task.lead && leadFilter.includes(task.lead.id)
+      )
+    }
     if (tagFilter.length > 0) {
       list = list.filter((task) =>
         task.tags?.some((tag) => tagFilter.includes(tag))
@@ -771,6 +829,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     statusFilter,
     priorityFilter,
     assigneeFilter,
+    leadFilter,
     tagFilter,
     sprintFilter,
     sprints,
@@ -1007,6 +1066,34 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         toast.error(res.error)
         return
       }
+      invalidateDashboard()
+    })
+  }
+
+  const updateTags = (id: string, tags: string[]) => {
+    let snapshot: BoardTask[] | null = null
+    setTasks((cur) => {
+      snapshot = cur
+      return cur.map((task) =>
+        task.id === id
+          ? { ...task, tags: tags.length ? tags : undefined }
+          : task
+      )
+    })
+    startTransition(async () => {
+      const res = await updateDashboardTaskTags(id, tags)
+      if ('error' in res) {
+        if (snapshot) setTasks(snapshot)
+        toast.error(res.error)
+        return
+      }
+      setTasks((cur) =>
+        cur.map((task) =>
+          task.id === id
+            ? { ...task, tags: res.tags.length ? res.tags : undefined }
+            : task
+        )
+      )
       invalidateDashboard()
     })
   }
@@ -1782,7 +1869,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   )
 
   const globalActivity = useMemo(() => {
-    const all = Object.entries(activity).flatMap(([taskId, list]) => {
+    const taskRows = Object.entries(activity).flatMap(([taskId, list]) => {
       const task = tasks.find((task) => task.id === taskId)
       return list.map((a) => ({
         id: a.id,
@@ -1790,13 +1877,21 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         text: a.text,
         at: a.at,
         atRaw: a.atRaw,
-        taskId,
+        taskId: taskId as string | null,
         taskRef: task?.ref ?? null,
-        taskTitle: task?.title ?? null
+        taskTitle: task?.title ?? null,
+        meetingId: null as string | null
       }))
     })
+    // Team and meeting rows arrive pre-shaped from fetchInitial; concat
+    // and sort everything by recency.
+    const teamRows = initial.teamUpdates.map((r) => ({
+      ...r,
+      meetingId: null as string | null
+    }))
+    const all = [...taskRows, ...teamRows, ...initial.meetingUpdates]
     return all.sort((a, b) => b.atRaw.localeCompare(a.atRaw))
-  }, [activity, tasks])
+  }, [activity, tasks, initial.teamUpdates, initial.meetingUpdates])
 
   // Notification-style unread counter for the sidebar Updates entry.
   // We persist the timestamp of the most recent activity row the member
@@ -1840,6 +1935,61 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     return globalActivity.filter((a) => a.atRaw > updatesSeenAt).length
   }, [globalActivity, updatesSeenAt])
 
+  // Mac shows the Option glyph (⌥); everything else spells out "Alt+".
+  // Detected once on mount so SSR markup stays platform-neutral.
+  const [isMac, setIsMac] = useState(false)
+  useEffect(() => {
+    if (typeof navigator === 'undefined') return
+    const ua = navigator.userAgent
+    setIsMac(/Mac|iPhone|iPad|iPod/i.test(ua))
+  }, [])
+  const altLabel = (key: string) => (isMac ? `⌥${key}` : `Alt+${key}`)
+
+  // Alt+N opens New Task, Alt+M opens the meeting wizard. On macOS Option
+  // is altKey, so the same handler covers both platforms. We skip while
+  // typing in an input/textarea/contenteditable so the shortcuts don't
+  // steal characters mid-compose. Latest-callback refs avoid re-binding
+  // the listener on every render.
+  const newTaskRef = useRef<() => void>(() => {})
+  const meetingWizardRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    newTaskRef.current = () => {
+      setNewTaskColumn('todo')
+      setNewTaskAssigneeId(undefined)
+      setNewTaskPriority(undefined)
+      setNewTaskOpen(true)
+    }
+    meetingWizardRef.current = () => meetingWizard.open()
+  })
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+      const t = e.target as HTMLElement | null
+      if (t) {
+        const tag = t.tagName
+        if (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          t.isContentEditable
+        )
+          return
+      }
+      // macOS Option-key remaps Alt+letter to glyphs like ˜ (Option+N),
+      // so checking `e.key` alone misses it. `e.code` is the physical key.
+      const code = e.code
+      if (code === 'KeyN') {
+        e.preventDefault()
+        newTaskRef.current()
+      } else if (code === 'KeyM') {
+        e.preventDefault()
+        meetingWizardRef.current()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // Sort within each column: explicit sortOrder first (3b drag/drop),
   // createdAt as the fallback for rows that pre-date the migration.
   const byColumnOrder = (a: BoardTask, b: BoardTask) => {
@@ -1868,22 +2018,41 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 .sort(byColumnOrder)
             })
           )
-        : [
-            ...team.map((m) => ({
-              key: m.id,
-              label: m.name,
-              items: filtered
-                .filter((task) => task.assignee?.id === m.id)
-                .sort(byColumnOrder)
-            })),
-            {
-              key: 'unassigned',
-              label: 'Unassigned',
-              items: filtered
-                .filter((task) => !task.assignee)
-                .sort(byColumnOrder)
-            }
-          ]
+        : groupBy === 'lead'
+          ? [
+              ...team
+                .filter((m) => m.role === 'admin' || m.role === 'lead')
+                .map((m) => ({
+                  key: m.id,
+                  label: m.name,
+                  items: filtered
+                    .filter((task) => task.lead?.id === m.id)
+                    .sort(byColumnOrder)
+                })),
+              {
+                key: 'no-lead',
+                label: 'No lead',
+                items: filtered
+                  .filter((task) => !task.lead)
+                  .sort(byColumnOrder)
+              }
+            ]
+          : [
+              ...team.map((m) => ({
+                key: m.id,
+                label: m.name,
+                items: filtered
+                  .filter((task) => task.assignee?.id === m.id)
+                  .sort(byColumnOrder)
+              })),
+              {
+                key: 'unassigned',
+                label: 'Unassigned',
+                items: filtered
+                  .filter((task) => !task.assignee)
+                  .sort(byColumnOrder)
+              }
+            ]
 
   const actions = {
     changeStatus: updateStatus,
@@ -2135,6 +2304,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 view === 'settings' ||
                 view === 'symbols' ||
                 view === 'team' ||
+                view === 'meetings' ||
                 view === 'archive'
                   ? 'all'
                   : view
@@ -2173,6 +2343,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   view === 'settings' ||
                   view === 'symbols' ||
                   view === 'team' ||
+                  view === 'meetings' ||
                   view === 'archive'
                     ? 'all'
                     : view
@@ -2300,6 +2471,9 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               assigneeFilter={assigneeFilter}
               onToggleAssignee={toggleAssignee}
               onClearAssignee={() => setAssigneeFilter([])}
+              leadFilter={leadFilter}
+              onToggleLead={toggleLead}
+              onClearLead={() => setLeadFilter([])}
               tagFilter={tagFilter}
               onToggleTag={toggleTag}
               onClearTag={() => setTagFilter([])}
@@ -2346,27 +2520,101 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                     id: 'add',
                     label: 'New Task',
                     icon: <PlusCircle className="size-3.5" />,
-                    shortcut: 'N',
+                    shortcut: altLabel('N'),
                     onSelect: () => openNewTask()
+                  },
+                  {
+                    id: 'add-meeting',
+                    label: 'New meeting',
+                    icon: <CalendarPlus className="size-3.5" />,
+                    shortcut: altLabel('M'),
+                    onSelect: () => meetingWizard.open()
                   },
                   { id: 'sep', label: '', separator: true },
                   {
                     id: 'switch-board',
                     label: 'Board view',
+                    trailingIcon:
+                      tab === 'board' ? (
+                        <Check className="size-3.5" />
+                      ) : undefined,
                     disabled: tab === 'board',
+                    title:
+                      tab === 'board' ? "You're already on the board view." : undefined,
                     onSelect: () => setTab('board')
                   },
                   {
                     id: 'switch-list',
                     label: 'List view',
+                    trailingIcon:
+                      tab === 'list' ? (
+                        <Check className="size-3.5" />
+                      ) : undefined,
                     disabled: tab === 'list',
+                    title:
+                      tab === 'list' ? "You're already on the list view." : undefined,
                     onSelect: () => setTab('list')
                   },
                   {
                     id: 'switch-timeline',
                     label: 'Timeline view',
+                    trailingIcon:
+                      tab === 'timeline' ? (
+                        <Check className="size-3.5" />
+                      ) : undefined,
                     disabled: tab === 'timeline',
+                    title:
+                      tab === 'timeline'
+                        ? "You're already on the timeline view."
+                        : undefined,
                     onSelect: () => setTab('timeline')
+                  },
+                  (() => {
+                    const projectForSprints =
+                      initial.currentProjectId ?? initial.defaultProjectId
+                    return {
+                      id: 'switch-sprints',
+                      label: 'Sprints view',
+                      icon: <Rocket className="size-3.5" />,
+                      trailingIcon:
+                        tab === 'sprints' ? (
+                          <Check className="size-3.5" />
+                        ) : undefined,
+                      disabled: tab === 'sprints' || projectForSprints === null,
+                      title:
+                        tab === 'sprints'
+                          ? "You're already on the sprints view."
+                          : projectForSprints === null
+                            ? 'Create a project first to plan sprints.'
+                            : undefined,
+                      onSelect: () => {
+                        if (!projectForSprints) return
+                        if (initial.currentProjectId) {
+                          setTab('sprints')
+                          return
+                        }
+                        const params = new URLSearchParams(
+                          currentSearchParams.toString()
+                        )
+                        params.set('project', projectForSprints)
+                        router.push(`/dashboard/sprints?${params.toString()}`)
+                      }
+                    }
+                  })(),
+                  {
+                    id: 'switch-calendar',
+                    label: 'Calendar view',
+                    icon: <CalendarDays className="size-3.5" />,
+                    trailingIcon:
+                      tab === 'meetings' ? (
+                        <Check className="size-3.5" />
+                      ) : undefined,
+                    disabled: tab === 'meetings',
+                    title:
+                      tab === 'meetings'
+                        ? "You're already on the calendar view."
+                        : undefined,
+                    onSelect: () => setTab('meetings')
                   },
                   { id: 'sep2', label: '', separator: true },
                   {
@@ -2509,6 +2757,12 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                                     openNewTaskWith({
                                       priority: g.key as TaskPriority
                                     })
+                                  } else if (groupBy === 'lead') {
+                                    // The new-task sheet doesn't yet
+                                    // prefill leadId from the column. The
+                                    // user picks the lead inside the
+                                    // sheet (or leaves it null).
+                                    openNewTaskWith({})
                                   } else {
                                     openNewTaskWith({
                                       assigneeId:
@@ -2650,6 +2904,16 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 <UpdatesPanel
                   activity={globalActivity}
                   onOpenTask={(id) => setSelectedId(id)}
+                  onOpenMeeting={(id) =>
+                    meetingsSheet.open({ focusedRequestId: id })
+                  }
+                />
+              )}
+              {view === 'meetings' && (
+                <MeetingsPanel
+                  sprints={sprints}
+                  currentUserId={initial.currentMember.id}
+                  accessTier={initial.currentMember.accessTier}
                 />
               )}
               {view === 'symbols' && (
@@ -2754,6 +3018,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                     onChangeAssignee={updateAssignee}
                     onChangeLead={updateLead}
                     onChangeDueDate={updateDueDate}
+                    onChangeTags={updateTags}
+                    availableTags={initial.labels.map((l) => l.name)}
                     onChangeTitle={updateTitle}
                     onChangeDescription={updateDescription}
                     onAddComment={addComment}

@@ -36,6 +36,7 @@ import { useQuickNoteSheet } from './QuickNoteSheet'
 import { useMeetingRequestSheet } from './MeetingRequestSheet'
 import { useMeetingsSheet } from './MeetingsSheet'
 import {
+  Calendar,
   CalendarPlus,
   MessageSquare
 } from 'lucide-react'
@@ -77,6 +78,7 @@ type View =
   | 'settings'
   | 'symbols'
   | 'team'
+  | 'meetings'
   | 'archive'
 
 interface SidebarProps {
@@ -425,13 +427,14 @@ export default function Sidebar({
             hint={showHints ? HINTS.updates : undefined}
           />
           <SidebarItem
-            icon={<CalendarPlus className="size-3.5" />}
+            icon={<Calendar className="size-3.5" />}
             label="Meetings"
             count={meetingsBadge > 0 ? meetingsBadge : undefined}
-            onClick={() => meetings.open()}
+            active={secondary === 'meetings'}
+            onClick={() => onSecondary('meetings')}
             hint={
               showHints
-                ? 'Request and approve meetings with teammates. Approved requests get a Google Meet link.'
+                ? 'Calendar of your meetings + sprints. Badge counts pending approvals and meetings awaiting your pick.'
                 : undefined
             }
           />

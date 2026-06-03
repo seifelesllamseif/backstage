@@ -85,7 +85,7 @@ function toCamelProjectRef(r: ProjectExternalRefRow) {
 }
 
 // ─── Activity log helper ─────────────────────────────────────────────────
-async function logActivity(
+export async function logActivity(
   supabase: ReturnType<typeof createAdminClient>,
   companyId: string,
   actorId: string,
@@ -653,6 +653,7 @@ export async function updateDashboardTaskAssignee(taskId: string, assigneeId: st
           const { subject, html, text } = assignmentEmail({
             recipientName: recipient.full_name,
             assignerName: member.fullName,
+            assignerAvatarUrl: member.avatarUrl ?? null,
             taskRef: t.ref,
             taskTitle: t.title ?? '',
             taskUrl: absoluteUrl(`/share/${t.ref}`),
@@ -896,6 +897,125 @@ export async function updateDashboardTaskDueDate(
   )
   revalidatePath('/dashboard')
   return { ok: true }
+}
+
+const TAG_NAME_MAX = 32
+const MAX_TAGS_PER_TASK = 12
+
+// Admin / lead can always edit; otherwise only the task creator may
+// change tags. Mirrors the spirit of "owners can curate metadata" but
+// without giving every assignee write access to taxonomy.
+export async function updateTaskTags(
+  taskId: string,
+  rawTags: string[]
+): Promise<{ ok: true; tags: string[] } | { error: string }> {
+  const member = await getCurrentTeamMember()
+  if (!member) return { error: 'Not signed in.' }
+  const supabase = createAdminClient()
+
+  const { data: task } = await supabase
+    .from('tasks')
+    .select('id, created_by')
+    .eq('id', taskId)
+    .eq('company_id', member.companyId)
+    .maybeSingle()
+  if (!task) return { error: 'Task not found.' }
+
+  const isPlanner =
+    member.accessTier === 'admin' || member.accessTier === 'lead'
+  const isCreator = task.created_by === member.id
+  if (!isPlanner && !isCreator) {
+    return { error: 'Only admins, leads, or the task creator can edit tags.' }
+  }
+
+  // Normalize: trim, drop blanks, dedupe (case-insensitive), cap length
+  // and total count.
+  const seen = new Set<string>()
+  const nextNames: string[] = []
+  for (const raw of rawTags) {
+    if (nextNames.length >= MAX_TAGS_PER_TASK) break
+    const trimmed = raw.trim().slice(0, TAG_NAME_MAX)
+    if (!trimmed) continue
+    const key = trimmed.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    nextNames.push(trimmed)
+  }
+
+  // Resolve label IDs for the requested names; create any that don't
+  // exist yet. Labels are company-scoped so the same tag can be reused
+  // across projects.
+  const { data: existingLabels } = await supabase
+    .from('labels')
+    .select('id, name')
+    .eq('company_id', member.companyId)
+  const labelByLower = new Map<string, { id: string; name: string }>(
+    (existingLabels ?? []).map((l) => [l.name.toLowerCase(), l])
+  )
+  const nextLabelIds: string[] = []
+  for (const name of nextNames) {
+    const found = labelByLower.get(name.toLowerCase())
+    if (found) {
+      nextLabelIds.push(found.id)
+      continue
+    }
+    // Creating a brand-new label expands the company's taxonomy, so
+    // we restrict it to admins / leads even when the task creator is
+    // editing. Existing labels can be linked freely.
+    if (!isPlanner) {
+      return {
+        error: `"${name}" is a new tag. Only admins or leads can create new tags.`
+      }
+    }
+    const { data: created, error: createErr } = await supabase
+      .from('labels')
+      .insert({ company_id: member.companyId, name })
+      .select('id, name')
+      .single()
+    if (createErr || !created) {
+      return { error: createErr?.message ?? 'Could not create tag.' }
+    }
+    labelByLower.set(name.toLowerCase(), created)
+    nextLabelIds.push(created.id)
+  }
+
+  const { data: existingJoins } = await supabase
+    .from('task_labels')
+    .select('label_id')
+    .eq('task_id', taskId)
+  const prevIds = new Set((existingJoins ?? []).map((r) => r.label_id))
+  const nextIds = new Set(nextLabelIds)
+
+  const toRemove = [...prevIds].filter((id) => !nextIds.has(id))
+  const toAdd = nextLabelIds.filter((id) => !prevIds.has(id))
+
+  if (toRemove.length > 0) {
+    await supabase
+      .from('task_labels')
+      .delete()
+      .eq('task_id', taskId)
+      .in('label_id', toRemove)
+  }
+  if (toAdd.length > 0) {
+    await supabase
+      .from('task_labels')
+      .upsert(
+        toAdd.map((label_id) => ({ task_id: taskId, label_id })),
+        { onConflict: 'task_id,label_id', ignoreDuplicates: true }
+      )
+  }
+
+  await logActivity(
+    supabase,
+    member.companyId,
+    member.id,
+    'task.tags_changed',
+    'task',
+    taskId,
+    { tags: nextNames }
+  )
+  revalidatePath('/dashboard')
+  return { ok: true, tags: nextNames }
 }
 
 const SORT_STEP = 1024
@@ -1162,6 +1282,7 @@ export async function addComment(taskId: string, body: string, mentions?: string
           const { subject, html, text } = mentionEmail({
             recipientName: r.full_name,
             authorName: member.fullName,
+            authorAvatarUrl: member.avatarUrl ?? null,
             taskRef: taskRow.ref!,
             taskTitle: taskRow.title ?? '',
             commentBody: body,

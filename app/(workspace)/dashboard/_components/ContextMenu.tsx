@@ -17,9 +17,16 @@ export interface MenuItem {
   id: string
   label: ReactNode
   icon?: ReactNode
+  // Renders flush to the right of the item, before any shortcut/chevron.
+  // Used for selection check-marks so the row's left icon can keep its
+  // role as a category glyph (Rocket, Calendar, etc).
+  trailingIcon?: ReactNode
   shortcut?: string
   destructive?: boolean
   disabled?: boolean
+  // Native hover tooltip. Useful on disabled items to explain WHY
+  // (e.g. "You're already on this view" or "Pick a project first").
+  title?: string
   onSelect?: () => void
   submenu?: MenuItem[]
   separator?: boolean
@@ -185,6 +192,7 @@ const Menu = ({
             <button
               key={item.id}
               disabled={item.disabled}
+              title={item.title}
               onMouseEnter={(e) => {
                 if (item.submenu) {
                   const rect = e.currentTarget.getBoundingClientRect()
@@ -214,9 +222,14 @@ const Menu = ({
                 </span>
               )}
               <span className="flex-1 truncate">{item.label}</span>
+              {item.trailingIcon && (
+                <span className="shrink-0 inline-flex items-center justify-center">
+                  {item.trailingIcon}
+                </span>
+              )}
               {item.shortcut && (
                 <span
-                  className={`text-[10px] uppercase tracking-wider ${theme.textSubtle}`}
+                  className={`text-[10px] tracking-wider ${theme.textSubtle}`}
                 >
                   {item.shortcut}
                 </span>

@@ -29,6 +29,28 @@ const DOC_HOSTS = new Set([
   'notion.so'
 ])
 
+// True when the URL points at the deployed Backstage dashboard itself
+// (so the UI can render it as an in-app link: no target="_blank", no
+// ExternalLink icon). Checks NEXT_PUBLIC_SITE_URL when present; falls
+// back to recognizing backstage.verbivore.app + localhost.
+export function isSelfHosted(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl)
+    const selfBase = process.env.NEXT_PUBLIC_SITE_URL
+    if (selfBase) {
+      const selfHost = new URL(selfBase).host
+      if (url.host === selfHost) return true
+    }
+    return (
+      url.host === 'backstage.verbivore.app' ||
+      url.host === 'localhost:3000' ||
+      url.host === '127.0.0.1:3000'
+    )
+  } catch {
+    return false
+  }
+}
+
 export function parseExternalRef(rawUrl: string): ParsedExternalRef | null {
   let url: URL
   try {
@@ -242,6 +264,12 @@ export function defaultExternalRefLabel(parsed: ParsedExternalRef): string {
     return parsed.identifier ? `Figma · ${parsed.identifier}` : 'Figma'
   }
   if (parsed.kind === 'verbivore') {
+    // The dashboard runs on backstage.verbivore.app - same brand but a
+    // distinct product. Surface it as "Backstage" so internal task <->
+    // task / sprint / member links don't read as third-party.
+    if (parsed.identifier?.startsWith('backstage.')) {
+      return 'Backstage'
+    }
     return parsed.identifier ? `Verbivore · ${parsed.identifier}` : 'Verbivore'
   }
   if (parsed.kind === 'vercel') {

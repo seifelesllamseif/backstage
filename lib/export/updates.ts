@@ -5,11 +5,20 @@ import { EXPORT_VERSION } from './types'
 
 export interface UpdateRow {
   id: string
-  kind: 'status' | 'comment' | 'attachment' | 'created' | 'priority' | 'assignee'
+  kind:
+    | 'status'
+    | 'comment'
+    | 'attachment'
+    | 'created'
+    | 'priority'
+    | 'assignee'
+    | 'team'
+    | 'meeting'
   text: string
   at: string
   atRaw: string
-  taskId: string
+  // Team and meeting rows aren't tied to a task; taskId/ref/title stay null.
+  taskId: string | null
   taskRef: string | null
   taskTitle: string | null
 }

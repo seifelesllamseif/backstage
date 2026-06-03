@@ -9,7 +9,11 @@ import {
   groupExternalRefsByTask,
   mapSprints,
   mapMembers,
-  mapTasks
+  mapTasks,
+  mapTeamActivity,
+  mapMeetingActivity,
+  type TeamUpdate,
+  type MeetingUpdate
 } from './mappers'
 import type { DashboardInitial } from './DashboardShell'
 
@@ -26,6 +30,16 @@ export async function fetchInitial(
   const externalRefsByTask = groupExternalRefsByTask(data.externalRefs)
   const externalRefsByProject = groupExternalRefsByProject(
     data.projectExternalRefs
+  )
+  const memberNamesById = new Map(
+    data.members.map((m) => [m.id, m.fullName])
+  )
+  const teamUpdates: TeamUpdate[] = mapTeamActivity(
+    data.teamActivity,
+    memberNamesById
+  )
+  const meetingUpdates: MeetingUpdate[] = mapMeetingActivity(
+    data.meetingActivity
   )
 
   const projectExists = projectParam
@@ -61,6 +75,8 @@ export async function fetchInitial(
     labels: data.labels.map((l) => ({ id: l.id, name: l.name })),
     commentsByTask,
     activityByTask,
+    teamUpdates,
+    meetingUpdates,
     externalRefsByTask,
     externalRefsByProject,
     currentMember: {

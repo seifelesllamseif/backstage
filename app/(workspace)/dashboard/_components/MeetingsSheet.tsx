@@ -12,11 +12,21 @@ import {
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Calendar, Check, X as XIcon } from 'lucide-react'
+import {
+  Calendar,
+  Check,
+  Copy,
+  MessageCircle,
+  Plus,
+  X as XIcon
+} from 'lucide-react'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { VisuallyHidden } from 'radix-ui'
 import { useDashTheme } from './theme'
+import { useTeam } from './TeamContext'
+import { formatTimeIn } from '@/lib/timezone'
 import {
+  appendMeetingContext,
   approveMeetingRequest,
   cancelMeetingRequest,
   declineMeetingRequest,
@@ -24,7 +34,9 @@ import {
   listPendingApprovals,
   pickMeetingSlot,
   pickMeetingTime,
-  rejectMeetingRequest
+  rejectMeetingRequest,
+  rescheduleMeetingRequest,
+  submitMeetingReview
 } from '../actions'
 
 // Single sheet that surfaces meeting-request state, scoped to the
@@ -32,8 +44,14 @@ import {
 //   - admin / lead: pending approvals + their own requests
 //   - member: their own requests + meetings where they're the requestee
 
+// `focus` narrows the sheet to a single subset so the Stats cards on
+// the Meetings page can deep-link into one bucket instead of dumping
+// the whole inbox. `undefined` keeps the full inbox view.
+type FocusKey = 'pending' | 'awaiting' | 'scheduled' | 'review'
+
 interface OpenArgs {
   focusedRequestId?: string
+  focus?: FocusKey
 }
 
 interface Ctx {
@@ -49,6 +67,8 @@ export function useMeetingsSheet(): Ctx {
   if (!ctx) throw new Error('useMeetingsSheet outside provider')
   return ctx
 }
+
+type MeetingOutcome = 'resolved' | 'partial' | 'needs_followup' | 'failed'
 
 type MeetingRequestRow = {
   id: string
@@ -72,14 +92,63 @@ type MeetingRequestRow = {
   calendarEventId: string | null
   requesterId: string
   requesterName: string
-  requesteeId: string
-  requesteeName: string
+  attendees: {
+    id: string
+    fullName: string
+    avatarUrl: string | null
+    pickedAt: string | null
+  }[]
   approvedById: string | null
   approvedAt: string | null
   rejectionReason: string | null
   declineReason: string | null
+  goal: string | null
+  context: string | null
+  questions: string | null
+  preRead: string | null
+  requesteeContext: string | null
+  linkedTaskIds: string[]
+  outcome: MeetingOutcome | null
+  reviewNotes: string | null
+  reviewedAt: string | null
+  reviewedById: string | null
+  followUpMeetingId: string | null
   createdAt: string
   updatedAt: string
+}
+
+function attendeesLabel(req: MeetingRequestRow): string {
+  if (req.attendees.length === 0) return 'someone'
+  if (req.attendees.length === 1) return req.attendees[0].fullName
+  return `${req.attendees[0].fullName} + ${req.attendees.length - 1} more`
+}
+
+function isAttendeeOf(req: MeetingRequestRow, memberId: string): boolean {
+  return req.attendees.some((a) => a.id === memberId)
+}
+
+// Active = something the user might still take action on. Terminal
+// states (rejected / declined / canceled / completed) drop out of the
+// sheet so it stays an inbox. History stays visible on the dedicated
+// /dashboard/meetings calendar page.
+const ACTIVE_STATUSES: MeetingRequestRow['status'][] = [
+  'pending',
+  'approved',
+  'scheduled'
+]
+
+function isActive(req: MeetingRequestRow): boolean {
+  return ACTIVE_STATUSES.includes(req.status)
+}
+
+// True when the meeting's selectedStartsAt + durationMin has already
+// passed (i.e. nothing left to join). Used to hide the Join button on
+// past meetings.
+function isMeetingOver(req: MeetingRequestRow): boolean {
+  if (!req.selectedStartsAt) return false
+  const ends =
+    new Date(req.selectedStartsAt).getTime() + req.durationMin * 60_000
+  return ends < Date.now()
 }
 
 const STATUS_LABEL: Record<MeetingRequestRow['status'], string> = {
@@ -92,17 +161,21 @@ const STATUS_LABEL: Record<MeetingRequestRow['status'], string> = {
   completed: 'Completed'
 }
 
-function fmtDate(dateIso: string): string {
+function fmtDate(dateIso: string, viewerTz: string | null): string {
+  // dateIso is YYYY-MM-DD with no zone attached. Parse as local-noon
+  // and format in the viewer's zone so the weekday doesn't shift across
+  // the date-line for off-by-half-day cases.
   const d = new Date(`${dateIso}T12:00:00`)
   if (Number.isNaN(d.getTime())) return dateIso
   return new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
     month: 'short',
-    day: 'numeric'
+    day: 'numeric',
+    timeZone: viewerTz ?? undefined
   }).format(d)
 }
 
-function fmtDateTime(iso: string): string {
+function fmtDateTime(iso: string, viewerTz: string | null): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   return new Intl.DateTimeFormat('en-US', {
@@ -110,7 +183,9 @@ function fmtDateTime(iso: string): string {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
-    minute: '2-digit'
+    minute: '2-digit',
+    timeZone: viewerTz ?? undefined,
+    timeZoneName: 'short'
   }).format(d)
 }
 
@@ -129,8 +204,12 @@ export function MeetingsSheetProvider({
   const queryClient = useQueryClient()
   const [openSheet, setOpenSheet] = useState(false)
   const [focusedId, setFocusedId] = useState<string | null>(null)
+  const [focus, setFocus] = useState<FocusKey | null>(null)
 
   const isPlanner = accessTier === 'admin' || accessTier === 'lead'
+  const team = useTeam()
+  const viewerTz =
+    team.find((m) => m.id === currentUserId)?.timezone ?? null
 
   const pendingQuery = useQuery({
     queryKey: ['meetingRequests', 'pending'],
@@ -159,13 +238,17 @@ export function MeetingsSheetProvider({
   const awaitingPickCount = useMemo(
     () =>
       mine.filter(
-        (r) => r.status === 'approved' && r.requesteeId === currentUserId
+        (r) =>
+          r.status === 'approved' &&
+          r.attendees.length === 1 &&
+          isAttendeeOf(r, currentUserId)
       ).length,
     [mine, currentUserId]
   )
 
   const open = useCallback((args?: OpenArgs) => {
     if (args?.focusedRequestId) setFocusedId(args.focusedRequestId)
+    setFocus(args?.focus ?? null)
     setOpenSheet(true)
   }, [])
 
@@ -181,6 +264,7 @@ export function MeetingsSheetProvider({
     setOpenSheet(next)
     if (!next) {
       setFocusedId(null)
+      setFocus(null)
       const sp = new URLSearchParams(searchParams.toString())
       if (sp.has('meetings')) {
         sp.delete('meetings')
@@ -205,6 +289,7 @@ export function MeetingsSheetProvider({
       <Sheet open={openSheet} onOpenChange={handleClose}>
         <SheetContent
           side="right"
+          showCloseButton={false}
           aria-describedby={undefined}
           className={`w-full p-0 sm:max-w-120! ${t.detail}`}
         >
@@ -218,104 +303,220 @@ export function MeetingsSheetProvider({
             >
               <Calendar className={`size-4 ${t.textMuted}`} />
               <span className={`text-xs font-medium ${t.text}`}>Meetings</span>
+              {focus && (
+                <>
+                  <span className={`text-[10px] ${t.textSubtle}`}>/</span>
+                  <span className={`text-xs ${t.textMuted}`}>
+                    {focus === 'pending'
+                      ? 'Pending approval'
+                      : focus === 'awaiting'
+                        ? 'Awaiting your pick'
+                        : focus === 'review'
+                          ? 'Awaiting your review'
+                          : 'Scheduled'}
+                  </span>
+                </>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto px-4 py-4">
-              {isPlanner && (
-                <Section title="Pending approval" count={pending.length}>
-                  {pending.length === 0 ? (
-                    <Empty>Nothing waiting.</Empty>
-                  ) : (
-                    pending.map((req) => (
-                      <PendingApprovalCard
-                        key={req.id}
-                        request={req}
-                        highlighted={req.id === focusedId}
-                        onResolved={invalidate}
-                      />
-                    ))
-                  )}
-                </Section>
+              {focus && (
+                <button
+                  type="button"
+                  onClick={() => setFocus(null)}
+                  className={`mb-3 inline-flex items-center gap-1 text-[10px] ${t.textMuted} hover:underline`}
+                >
+                  ← Show all sections
+                </button>
               )}
-
-              <Section title="Awaiting your pick" count={awaitingPickCount}>
-                {awaitingPickCount === 0 ? (
-                  <Empty>You have nothing to pick.</Empty>
-                ) : (
-                  mine
-                    .filter(
-                      (r) =>
-                        r.status === 'approved' &&
-                        r.requesteeId === currentUserId
-                    )
-                    .map((req) => (
-                      <PickCard
-                        key={req.id}
-                        request={req}
-                        highlighted={req.id === focusedId}
-                        onResolved={invalidate}
-                      />
-                    ))
-                )}
-              </Section>
-
-              <Section
-                title="Your requests"
-                count={mine.filter((r) => r.requesterId === currentUserId).length}
-              >
-                {mine.filter((r) => r.requesterId === currentUserId).length ===
-                0 ? (
-                  <Empty>You haven&apos;t requested any meetings yet.</Empty>
-                ) : (
-                  mine
-                    .filter((r) => r.requesterId === currentUserId)
-                    .map((req) => (
-                      <RequestStatusCard
-                        key={req.id}
-                        request={req}
-                        currentUserId={currentUserId}
-                        onResolved={invalidate}
-                      />
-                    ))
-                )}
-              </Section>
-
-              <Section
-                title="Meetings with you"
-                count={
-                  mine.filter(
-                    (r) =>
-                      r.requesteeId === currentUserId && r.status !== 'approved'
-                  ).length
-                }
-              >
-                {mine.filter(
-                  (r) =>
-                    r.requesteeId === currentUserId && r.status !== 'approved'
-                ).length === 0 ? (
-                  <Empty>Nobody has scheduled a meeting with you yet.</Empty>
-                ) : (
-                  mine
-                    .filter(
-                      (r) =>
-                        r.requesteeId === currentUserId &&
-                        r.status !== 'approved'
-                    )
-                    .map((req) => (
-                      <RequestStatusCard
-                        key={req.id}
-                        request={req}
-                        currentUserId={currentUserId}
-                        onResolved={invalidate}
-                      />
-                    ))
-                )}
-              </Section>
+              <ListView
+                isPlanner={isPlanner}
+                pending={pending}
+                mine={mine}
+                currentUserId={currentUserId}
+                viewerTz={viewerTz}
+                awaitingPickCount={awaitingPickCount}
+                focusedId={focusedId}
+                focus={focus}
+                onResolved={invalidate}
+              />
             </div>
           </div>
         </SheetContent>
       </Sheet>
     </MeetingsCtx.Provider>
+  )
+}
+
+function ListView({
+  isPlanner,
+  pending,
+  mine,
+  currentUserId,
+  viewerTz,
+  awaitingPickCount,
+  focusedId,
+  focus,
+  onResolved
+}: {
+  isPlanner: boolean
+  pending: MeetingRequestRow[]
+  mine: MeetingRequestRow[]
+  currentUserId: string
+  viewerTz: string | null
+  awaitingPickCount: number
+  focusedId: string | null
+  focus: FocusKey | null
+  onResolved: () => void
+}) {
+  const show = (key: 'pending' | 'awaiting' | 'review' | 'mine' | 'with-you') => {
+    if (focus === null) return true
+    if (focus === 'pending') return key === 'pending'
+    if (focus === 'awaiting') return key === 'awaiting'
+    if (focus === 'review') return key === 'review'
+    // 'scheduled' surfaces in both "Your requests" and "Meetings with you".
+    if (focus === 'scheduled') return key === 'mine' || key === 'with-you'
+    return true
+  }
+  const rowMatchesFocus = (req: MeetingRequestRow) =>
+    focus === 'scheduled' ? req.status === 'scheduled' : true
+
+  const myRequests = mine.filter(
+    (r) => r.requesterId === currentUserId && isActive(r) && rowMatchesFocus(r)
+  )
+  const withYou = mine.filter(
+    (r) =>
+      isAttendeeOf(r, currentUserId) &&
+      isActive(r) &&
+      r.status !== 'approved' &&
+      rowMatchesFocus(r)
+  )
+  // "Awaiting your review" = meeting I participated in, status still
+  // 'scheduled', and selected_starts_at + duration_min is already past.
+  // The action also accepts 'completed' (re-edit) but the section only
+  // surfaces unreviewed ones.
+  const awaitingReview = mine.filter(
+    (r) =>
+      (r.requesterId === currentUserId ||
+        isAttendeeOf(r, currentUserId)) &&
+      r.status === 'scheduled' &&
+      r.selectedStartsAt &&
+      isMeetingOver(r) &&
+      !r.reviewedAt
+  )
+
+  return (
+    <>
+      {show('pending') && (isPlanner || focus === 'pending') && (
+        <Section title="Pending approval" count={pending.length}>
+          {!isPlanner ? (
+            <Empty>Only admins and leads see pending approvals.</Empty>
+          ) : pending.length === 0 ? (
+            <Empty>Nothing waiting.</Empty>
+          ) : (
+            pending.map((req) => (
+              <PendingApprovalCard
+                key={req.id}
+                request={req}
+                viewerTz={viewerTz}
+                highlighted={req.id === focusedId}
+                onResolved={onResolved}
+              />
+            ))
+          )}
+        </Section>
+      )}
+
+      {show('review') && awaitingReview.length > 0 && (
+        <Section title="Awaiting your review" count={awaitingReview.length}>
+          {awaitingReview.map((req) => (
+            <ReviewCard
+              key={req.id}
+              request={req}
+              viewerTz={viewerTz}
+              onResolved={onResolved}
+            />
+          ))}
+        </Section>
+      )}
+
+      {show('awaiting') && (
+        <Section title="Awaiting your pick" count={awaitingPickCount}>
+          {awaitingPickCount === 0 ? (
+            <Empty>You have nothing to pick.</Empty>
+          ) : (
+            mine
+              .filter(
+                (r) =>
+                  r.status === 'approved' &&
+                  r.attendees.length === 1 &&
+                  isAttendeeOf(r, currentUserId)
+              )
+              .map((req) => (
+                <PickCard
+                  key={req.id}
+                  request={req}
+                  viewerTz={viewerTz}
+                  highlighted={req.id === focusedId}
+                  onResolved={onResolved}
+                />
+              ))
+          )}
+        </Section>
+      )}
+
+      {show('mine') && (
+        <Section
+          title={focus === 'scheduled' ? 'Your scheduled' : 'Your requests'}
+          count={myRequests.length}
+        >
+          {myRequests.length === 0 ? (
+            <Empty>
+              {focus === 'scheduled'
+                ? 'No scheduled meetings of yours yet.'
+                : 'You have no active requests. Past meetings live on the Calendar page.'}
+            </Empty>
+          ) : (
+            myRequests.map((req) => (
+              <RequestStatusCard
+                key={req.id}
+                request={req}
+                currentUserId={currentUserId}
+                viewerTz={viewerTz}
+                onResolved={onResolved}
+              />
+            ))
+          )}
+        </Section>
+      )}
+
+      {show('with-you') && (
+        <Section
+          title={
+            focus === 'scheduled' ? 'Scheduled with you' : 'Meetings with you'
+          }
+          count={withYou.length}
+        >
+          {withYou.length === 0 ? (
+            <Empty>
+              {focus === 'scheduled'
+                ? 'Nothing scheduled with you yet.'
+                : 'Nobody has scheduled a meeting with you yet.'}
+            </Empty>
+          ) : (
+            withYou.map((req) => (
+              <RequestStatusCard
+                key={req.id}
+                request={req}
+                currentUserId={currentUserId}
+                viewerTz={viewerTz}
+                onResolved={onResolved}
+              />
+            ))
+          )}
+        </Section>
+      )}
+    </>
   )
 }
 
@@ -367,15 +568,17 @@ function CardShell({
 }
 
 function ProposedSummary({
-  request
+  request,
+  viewerTz
 }: {
   request: MeetingRequestRow
+  viewerTz: string | null
 }) {
   const { t } = useDashTheme()
   if (request.mode === 'day' && request.proposedDate) {
     return (
       <p className={`mb-2 text-[11px] ${t.text}`}>
-        Day: <strong>{fmtDate(request.proposedDate)}</strong>
+        Day: <strong>{fmtDate(request.proposedDate, viewerTz)}</strong>
       </p>
     )
   }
@@ -386,7 +589,7 @@ function ProposedSummary({
         <ul className="list-inside list-disc">
           {request.slots.map((s, i) => (
             <li key={i} className={`text-[11px] ${t.text}`}>
-              {fmtDateTime(s)}
+              {fmtDateTime(s, viewerTz)}
             </li>
           ))}
         </ul>
@@ -398,10 +601,12 @@ function ProposedSummary({
 
 function PendingApprovalCard({
   request,
+  viewerTz,
   highlighted,
   onResolved
 }: {
   request: MeetingRequestRow
+  viewerTz: string | null
   highlighted: boolean
   onResolved: () => void
 }) {
@@ -444,7 +649,7 @@ function PendingApprovalCard({
         <div className="min-w-0 flex-1">
           <p className={`text-xs font-medium ${t.text}`}>{request.title}</p>
           <p className={`text-[10px] ${t.textMuted}`}>
-            {request.requesterName} → {request.requesteeName} ·{' '}
+            {request.requesterName} → {attendeesLabel(request)} ·{' '}
             {request.durationMin} min
           </p>
         </div>
@@ -452,7 +657,7 @@ function PendingApprovalCard({
       {request.agenda && (
         <p className={`mb-2 text-[11px] ${t.textMuted}`}>{request.agenda}</p>
       )}
-      <ProposedSummary request={request} />
+      <ProposedSummary request={request} viewerTz={viewerTz} />
       {rejecting && (
         <textarea
           value={reason}
@@ -501,14 +706,27 @@ function combineDateTime(dateIso: string, hhmm: string): string {
 
 function PickCard({
   request,
+  viewerTz,
   highlighted,
   onResolved
 }: {
   request: MeetingRequestRow
+  viewerTz: string | null
   highlighted: boolean
   onResolved: () => void
 }) {
   const { t } = useDashTheme()
+  const team = useTeam()
+  const requesterTz =
+    team.find((m) => m.id === request.requesterId)?.timezone ?? null
+  function requesterPreview(iso: string): string | null {
+    if (!requesterTz || requesterTz === viewerTz) return null
+    return formatTimeIn(iso, requesterTz, {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    })
+  }
   const [busy, startBusy] = useTransition()
   const [declining, setDeclining] = useState(false)
   const [reason, setReason] = useState('')
@@ -573,7 +791,7 @@ function PickCard({
       {request.mode === 'day' && request.proposedDate ? (
         <>
           <p className={`mb-2 text-[11px] ${t.text}`}>
-            Day: <strong>{fmtDate(request.proposedDate)}</strong>
+            Day: <strong>{fmtDate(request.proposedDate, viewerTz)}</strong>
           </p>
           <div className="mb-2 flex items-center gap-2">
             <span className={`text-[10px] ${t.textMuted}`}>Time</span>
@@ -602,7 +820,14 @@ function PickCard({
               disabled={busy}
               className={`flex items-center justify-between rounded-md border px-2 py-1.5 text-[11px] transition disabled:opacity-40 hover:bg-teal-500/10 ${t.border} ${t.text}`}
             >
-              <span>{fmtDateTime(s)}</span>
+              <div className="flex flex-col items-start">
+                <span>{fmtDateTime(s, viewerTz)}</span>
+                {requesterPreview(s) && (
+                  <span className={`text-[9px] ${t.textSubtle}`}>
+                    requester: {requesterPreview(s)}
+                  </span>
+                )}
+              </div>
               <span className={`text-[9px] ${t.textMuted}`}>Pick</span>
             </button>
           ))}
@@ -644,17 +869,26 @@ function PickCard({
 function RequestStatusCard({
   request,
   currentUserId,
+  viewerTz,
   onResolved
 }: {
   request: MeetingRequestRow
   currentUserId: string
+  viewerTz: string | null
   onResolved: () => void
 }) {
   const { t } = useDashTheme()
   const [busy, startBusy] = useTransition()
+  const [rescheduling, setRescheduling] = useState(false)
   const isRequester = request.requesterId === currentUserId
+  const isParticipant = isRequester || isAttendeeOf(request, currentUserId)
   const canCancel =
     isRequester &&
+    (request.status === 'pending' ||
+      request.status === 'approved' ||
+      request.status === 'scheduled')
+  const canReschedule =
+    isParticipant &&
     (request.status === 'pending' ||
       request.status === 'approved' ||
       request.status === 'scheduled')
@@ -672,7 +906,7 @@ function RequestStatusCard({
   }
 
   const counterpartyName = isRequester
-    ? request.requesteeName
+    ? attendeesLabel(request)
     : request.requesterName
 
   // What date/time to surface in the card body. Scheduled → the picked
@@ -695,12 +929,12 @@ function RequestStatusCard({
       </p>
       {showScheduled ? (
         <p className={`mb-1 text-[11px] ${t.text}`}>
-          {fmtDateTime(request.selectedStartsAt!)}
+          {fmtDateTime(request.selectedStartsAt!, viewerTz)}
         </p>
       ) : (
-        <ProposedSummary request={request} />
+        <ProposedSummary request={request} viewerTz={viewerTz} />
       )}
-      {request.meetLink && (
+      {request.meetLink && !isMeetingOver(request) && (
         <a
           href={request.meetLink}
           target="_blank"
@@ -709,6 +943,11 @@ function RequestStatusCard({
         >
           Join Google Meet
         </a>
+      )}
+      {isMeetingOver(request) && request.status === 'scheduled' && (
+        <p className={`text-[10px] italic ${t.textSubtle}`}>
+          This meeting has ended.
+        </p>
       )}
       {request.rejectionReason && (
         <p className={`text-[10px] italic ${t.textSubtle}`}>
@@ -720,17 +959,490 @@ function RequestStatusCard({
           Reason: {request.declineReason}
         </p>
       )}
-      {canCancel && (
-        <div className="mt-2 flex justify-end">
-          <button
-            onClick={cancel}
-            disabled={busy}
-            className={`h-7 rounded-md border px-2 text-[11px] disabled:opacity-40 ${t.btn}`}
+      {!isRequester &&
+        isParticipant &&
+        (request.status === 'approved' || request.status === 'scheduled') && (
+          <RequesteeContextEditor
+            meetingId={request.id}
+            initial={request.requesteeContext}
+            onSaved={onResolved}
+          />
+        )}
+      {isRequester && request.requesteeContext && (
+        <div
+          className={`mt-2 rounded border px-2 py-1.5 text-[11px] whitespace-pre-wrap ${t.border} ${t.surfaceMuted}`}
+        >
+          <span
+            className={`mb-0.5 block text-[9px] tracking-wider uppercase ${t.textMuted}`}
           >
-            Cancel
-          </button>
+            From {request.attendees[0]?.fullName ?? 'attendee'}
+          </span>
+          <span className={t.text}>{request.requesteeContext}</span>
         </div>
       )}
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <ShareButtons request={request} />
+        <div className="flex items-center gap-1.5">
+          {canReschedule && !rescheduling && (
+            <button
+              onClick={() => setRescheduling(true)}
+              disabled={busy}
+              className={`h-7 rounded-md border px-2 text-[11px] disabled:opacity-40 ${t.btn}`}
+            >
+              Reschedule
+            </button>
+          )}
+          {canCancel && (
+            <button
+              onClick={cancel}
+              disabled={busy}
+              className={`h-7 rounded-md border px-2 text-[11px] disabled:opacity-40 ${t.btn}`}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      </div>
+      {rescheduling && (
+        <RescheduleForm
+          request={request}
+          onResolved={() => {
+            setRescheduling(false)
+            onResolved()
+          }}
+        />
+      )}
     </CardShell>
+  )
+}
+
+const OUTCOMES: { id: MeetingOutcome; label: string; tone: string }[] = [
+  {
+    id: 'resolved',
+    label: 'Resolved',
+    tone: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30'
+  },
+  {
+    id: 'partial',
+    label: 'Partial',
+    tone: 'bg-amber-500/10 text-amber-700 border-amber-500/30'
+  },
+  {
+    id: 'needs_followup',
+    label: 'Needs follow-up',
+    tone: 'bg-sky-500/10 text-sky-700 border-sky-500/30'
+  },
+  {
+    id: 'failed',
+    label: "Didn't deliver",
+    tone: 'bg-rose-500/10 text-rose-700 border-rose-500/30'
+  }
+]
+
+function ReviewCard({
+  request,
+  viewerTz,
+  onResolved
+}: {
+  request: MeetingRequestRow
+  viewerTz: string | null
+  onResolved: () => void
+}) {
+  const { t } = useDashTheme()
+  const [outcome, setOutcome] = useState<MeetingOutcome | null>(null)
+  const [notes, setNotes] = useState('')
+  const [busy, startBusy] = useTransition()
+
+  function submit() {
+    if (!outcome) {
+      toast.error('Pick an outcome first.')
+      return
+    }
+    startBusy(async () => {
+      const res = await submitMeetingReview(request.id, {
+        outcome,
+        notes: notes.trim() || null
+      })
+      if ('error' in res) {
+        toast.error(res.error)
+        return
+      }
+      toast.success('Review saved. Meeting marked complete.')
+      onResolved()
+    })
+  }
+
+  return (
+    <CardShell>
+      <div className="mb-1 flex items-start justify-between gap-2">
+        <p className={`text-xs font-medium ${t.text}`}>{request.title}</p>
+        <span className={`text-[10px] ${t.textMuted}`}>
+          {request.selectedStartsAt &&
+            fmtDateTime(request.selectedStartsAt, viewerTz)}
+        </span>
+      </div>
+      <p className={`mb-2 text-[10px] ${t.textMuted}`}>
+        How did it go? Pick one and (optionally) leave a few notes.
+      </p>
+      <div className="mb-2 flex flex-wrap gap-1">
+        {OUTCOMES.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            onClick={() => setOutcome(o.id)}
+            className={`inline-flex h-6 items-center rounded-full border px-2 text-[10px] transition ${
+              outcome === o.id ? o.tone : `${t.border} ${t.textMuted}`
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        rows={2}
+        maxLength={4000}
+        placeholder="What was decided? Any open threads?"
+        className={`mb-2 w-full resize-none rounded-md border px-2 py-1.5 text-[11px] leading-relaxed ${t.input}`}
+      />
+      <div className="flex items-center justify-end gap-1.5">
+        <button
+          onClick={submit}
+          disabled={busy || !outcome}
+          className={`inline-flex h-7 items-center rounded-md px-2.5 text-[11px] disabled:opacity-40 ${t.accent}`}
+        >
+          {busy ? 'Saving...' : 'Save review'}
+        </button>
+      </div>
+    </CardShell>
+  )
+}
+
+function RequesteeContextEditor({
+  meetingId,
+  initial,
+  onSaved
+}: {
+  meetingId: string
+  initial: string | null
+  onSaved: () => void
+}) {
+  const { t } = useDashTheme()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(initial ?? '')
+  const [busy, startBusy] = useTransition()
+
+  function save() {
+    const trimmed = draft.trim()
+    if (!trimmed) {
+      toast.error('Add a few words before saving.')
+      return
+    }
+    startBusy(async () => {
+      const res = await appendMeetingContext(meetingId, trimmed)
+      if ('error' in res) {
+        toast.error(res.error)
+        return
+      }
+      toast.success('Saved.')
+      setEditing(false)
+      onSaved()
+    })
+  }
+
+  if (!editing && !initial) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className={`mt-2 inline-flex h-6 items-center gap-1 rounded-md border border-dashed px-2 text-[10px] ${t.border} ${t.textMuted}`}
+      >
+        <Plus className="size-2.5" /> Add what you&apos;re bringing
+      </button>
+    )
+  }
+
+  if (!editing && initial) {
+    return (
+      <div
+        className={`mt-2 rounded border px-2 py-1.5 text-[11px] whitespace-pre-wrap ${t.border} ${t.surfaceMuted}`}
+      >
+        <div className="mb-0.5 flex items-baseline justify-between">
+          <span
+            className={`text-[9px] tracking-wider uppercase ${t.textMuted}`}
+          >
+            What you&apos;re bringing
+          </span>
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className={`text-[10px] ${t.textMuted} hover:underline`}
+          >
+            Edit
+          </button>
+        </div>
+        <span className={t.text}>{initial}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`mt-2 flex flex-col gap-1.5 rounded border p-2 ${t.border}`}>
+      <span className={`text-[9px] tracking-wider uppercase ${t.textMuted}`}>
+        What you&apos;re bringing (optional)
+      </span>
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        rows={3}
+        maxLength={4000}
+        autoFocus
+        placeholder="What you already know, what you'll bring to the call, what you'd like to leave with..."
+        className={`resize-none rounded-md border px-2 py-1.5 text-[11px] leading-relaxed ${t.input}`}
+      />
+      <div className="flex items-center justify-end gap-1.5">
+        <button
+          type="button"
+          onClick={() => {
+            setDraft(initial ?? '')
+            setEditing(false)
+          }}
+          disabled={busy}
+          className={`h-6 rounded-md border px-2 text-[10px] ${t.btn}`}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={busy || !draft.trim()}
+          className={`inline-flex h-6 items-center rounded-md px-2.5 text-[10px] disabled:opacity-40 ${t.accent}`}
+        >
+          {busy ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function RescheduleForm({
+  request,
+  onResolved
+}: {
+  request: MeetingRequestRow
+  onResolved: () => void
+}) {
+  const { t } = useDashTheme()
+  const isGroup = request.attendees.length >= 2
+  // For groups: one locked time (mode='slots', slots=[iso]).
+  // For 1:1: respect existing mode (day → new date, slots → new 2-3).
+  const [reason, setReason] = useState('')
+  const [groupTime, setGroupTime] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    d.setMinutes(0, 0, 0)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:00`
+  })
+  const [newDate, setNewDate] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  })
+  const [newSlots, setNewSlots] = useState<string[]>(() => {
+    const make = (offset: number) => {
+      const d = new Date()
+      d.setHours(d.getHours() + offset)
+      d.setMinutes(0, 0, 0)
+      const pad = (n: number) => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:00`
+    }
+    return [make(24), make(48)]
+  })
+  const [busy, startBusy] = useTransition()
+
+  function submit() {
+    startBusy(async () => {
+      let res
+      if (isGroup) {
+        res = await rescheduleMeetingRequest(request.id, {
+          mode: 'slots',
+          slots: [new Date(groupTime).toISOString()],
+          reason: reason.trim() || null
+        })
+      } else if (request.mode === 'day') {
+        res = await rescheduleMeetingRequest(request.id, {
+          mode: 'day',
+          proposedDate: newDate,
+          reason: reason.trim() || null
+        })
+      } else {
+        res = await rescheduleMeetingRequest(request.id, {
+          mode: 'slots',
+          slots: newSlots.map((s) => new Date(s).toISOString()),
+          reason: reason.trim() || null
+        })
+      }
+      if ('error' in res) {
+        toast.error(res.error)
+        return
+      }
+      toast.success('Rescheduled.')
+      onResolved()
+    })
+  }
+
+  return (
+    <div
+      className={`mt-2 flex flex-col gap-2 rounded-md border p-2 ${t.border} ${t.surfaceMuted}`}
+    >
+      {isGroup ? (
+        <label className="flex flex-col gap-1">
+          <span className={`text-[9px] tracking-wider uppercase ${t.textMuted}`}>
+            New locked time
+          </span>
+          <input
+            type="datetime-local"
+            value={groupTime}
+            onChange={(e) => setGroupTime(e.target.value)}
+            className={`h-8 rounded-md border px-2 text-xs ${t.input}`}
+          />
+        </label>
+      ) : request.mode === 'day' ? (
+        <label className="flex flex-col gap-1">
+          <span className={`text-[9px] tracking-wider uppercase ${t.textMuted}`}>
+            New day
+          </span>
+          <input
+            type="date"
+            value={newDate}
+            onChange={(e) => setNewDate(e.target.value)}
+            className={`h-8 rounded-md border px-2 text-xs ${t.input}`}
+          />
+        </label>
+      ) : (
+        <div className="flex flex-col gap-1">
+          <span className={`text-[9px] tracking-wider uppercase ${t.textMuted}`}>
+            New slots ({newSlots.length}/3)
+          </span>
+          {newSlots.map((s, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <input
+                type="datetime-local"
+                value={s}
+                onChange={(e) =>
+                  setNewSlots(
+                    newSlots.map((x, idx) => (idx === i ? e.target.value : x))
+                  )
+                }
+                className={`h-8 flex-1 rounded-md border px-2 text-[11px] ${t.input}`}
+              />
+              {newSlots.length > 2 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setNewSlots(newSlots.filter((_, idx) => idx !== i))
+                  }
+                  className={`text-[10px] ${t.textMuted} hover:underline`}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          ))}
+          {newSlots.length < 3 && (
+            <button
+              type="button"
+              onClick={() => {
+                const d = new Date()
+                d.setHours(d.getHours() + 24 * (newSlots.length + 1))
+                d.setMinutes(0, 0, 0)
+                const pad = (n: number) => String(n).padStart(2, '0')
+                const iso = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:00`
+                setNewSlots([...newSlots, iso])
+              }}
+              className={`text-[10px] ${t.textMuted} hover:underline self-start`}
+            >
+              + Add slot
+            </button>
+          )}
+        </div>
+      )}
+      <label className="flex flex-col gap-1">
+        <span className={`text-[9px] tracking-wider uppercase ${t.textMuted}`}>
+          Reason (optional)
+        </span>
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          maxLength={500}
+          placeholder="Why are you moving it?"
+          className={`h-8 rounded-md border px-2 text-[11px] ${t.input}`}
+        />
+      </label>
+      <div className="flex items-center justify-end gap-1.5">
+        <button
+          onClick={() => onResolved()}
+          disabled={busy}
+          className={`h-7 rounded-md border px-2 text-[11px] ${t.btn}`}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={submit}
+          disabled={busy}
+          className={`h-7 rounded-md bg-teal-600 px-2.5 text-[11px] text-white disabled:opacity-40 hover:bg-teal-700`}
+        >
+          {busy ? 'Saving...' : 'Reschedule'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ShareButtons({ request }: { request: MeetingRequestRow }) {
+  const { t } = useDashTheme()
+  // Only meetings with a public-visible status get share buttons. This
+  // mirrors fetchMeetingForShare on the server (pending / approved /
+  // scheduled / completed return a page; rejected / declined / canceled
+  // 404). For 'pending' it's still a placeholder; OK to share since the
+  // share page renders the status pill so the receiver knows.
+  const shareable =
+    request.status === 'pending' ||
+    request.status === 'approved' ||
+    request.status === 'scheduled' ||
+    request.status === 'completed'
+  if (!shareable) return null
+  const shareUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}/share/meeting/${request.id}`
+      : `/share/meeting/${request.id}`
+  function copy() {
+    if (typeof window === 'undefined') return
+    void navigator.clipboard.writeText(shareUrl)
+    toast.success('Share link copied.')
+  }
+  const whatsappHref = `https://wa.me/?text=${encodeURIComponent(`${request.title}\n${shareUrl}`)}`
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={copy}
+        title="Copy share link"
+        className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[10px] ${t.border} ${t.btn}`}
+      >
+        <Copy className="size-3" /> Share link
+      </button>
+      <a
+        href={whatsappHref}
+        target="_blank"
+        rel="noreferrer"
+        title="Share on WhatsApp"
+        className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[10px] ${t.border} ${t.btn}`}
+      >
+        <MessageCircle className="size-3" /> WhatsApp
+      </a>
+    </div>
   )
 }

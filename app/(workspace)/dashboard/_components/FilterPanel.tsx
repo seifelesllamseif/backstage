@@ -26,6 +26,9 @@ interface FilterPanelProps {
   assigneeFilter: string[]
   onToggleAssignee: (id: string) => void
   onClearAssignee: () => void
+  leadFilter: string[]
+  onToggleLead: (id: string) => void
+  onClearLead: () => void
   tagFilter: string[]
   onToggleTag: (tag: string) => void
   onClearTag: () => void
@@ -58,6 +61,9 @@ export default function FilterPanel({
   assigneeFilter,
   onToggleAssignee,
   onClearAssignee,
+  leadFilter,
+  onToggleLead,
+  onClearLead,
   tagFilter,
   onToggleTag,
   onClearTag,
@@ -94,6 +100,14 @@ export default function FilterPanel({
       id: `assignee-${id}`,
       label: `Assignee: ${member?.name ?? id}`,
       onRemove: () => onToggleAssignee(id)
+    })
+  }
+  for (const id of leadFilter) {
+    const member = team.find((m) => m.id === id)
+    activePills.push({
+      id: `lead-${id}`,
+      label: `Lead: ${member?.name ?? id}`,
+      onRemove: () => onToggleLead(id)
     })
   }
   for (const tag of tagFilter) {
@@ -217,6 +231,31 @@ export default function FilterPanel({
               {m.name}
             </Chip>
           ))}
+        </ChipGroup>
+
+        <ChipGroup label="Lead">
+          <Chip
+            active={leadFilter.length === 0}
+            onClick={() => onClearLead()}
+          >
+            Any
+          </Chip>
+          {team
+            .filter((m) => m.role === 'admin' || m.role === 'lead')
+            .map((m) => (
+              <Chip
+                key={m.id}
+                active={leadFilter.includes(m.id)}
+                onClick={() => onToggleLead(m.id)}
+              >
+                <span
+                  className={`flex size-3.5 items-center justify-center rounded-full text-[8px] font-semibold text-white ${m.color}`}
+                >
+                  {m.initials}
+                </span>
+                {m.name}
+              </Chip>
+            ))}
         </ChipGroup>
 
         {allTags.length > 0 && (

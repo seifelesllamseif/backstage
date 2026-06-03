@@ -18,15 +18,21 @@ import {
   getGoogleConnectionStatus as getGoogleConnectionStatusImpl,
 } from '@/supabase/dashboard/googleConnection'
 import {
+  appendMeetingContext as appendMeetingContextImpl,
+  submitMeetingReview as submitMeetingReviewImpl,
   approveMeetingRequest as approveMeetingRequestImpl,
   cancelMeetingRequest as cancelMeetingRequestImpl,
   createMeetingRequest as createMeetingRequestImpl,
   declineMeetingRequest as declineMeetingRequestImpl,
+  linkTaskToMeeting as linkTaskToMeetingImpl,
+  listMeetingsForTask as listMeetingsForTaskImpl,
   listMyMeetingRequests as listMyMeetingRequestsImpl,
   listPendingApprovals as listPendingApprovalsImpl,
   pickMeetingSlot as pickMeetingSlotImpl,
   pickMeetingTime as pickMeetingTimeImpl,
   rejectMeetingRequest as rejectMeetingRequestImpl,
+  rescheduleMeetingRequest as rescheduleMeetingRequestImpl,
+  unlinkTaskFromMeeting as unlinkTaskFromMeetingImpl,
 } from '@/supabase/dashboard/meetings'
 import {
   cancelInvite as cancelInviteImpl,
@@ -82,6 +88,7 @@ import {
   updateDashboardTaskLead as updateDashboardTaskLeadImpl,
   updateDashboardTaskPriority as updateDashboardTaskPriorityImpl,
   updateDashboardTaskDueDate as updateDashboardTaskDueDateImpl,
+  updateTaskTags as updateTaskTagsImpl,
   updateDashboardTaskStatus as updateDashboardTaskStatusImpl,
   updateProjectExternalRefLabel as updateProjectExternalRefLabelImpl,
   updateSprint as updateSprintImpl,
@@ -161,6 +168,12 @@ export async function updateDashboardTaskDueDate(
   ...args: Parameters<typeof updateDashboardTaskDueDateImpl>
 ) {
   return updateDashboardTaskDueDateImpl(...args)
+}
+
+export async function updateDashboardTaskTags(
+  ...args: Parameters<typeof updateTaskTagsImpl>
+) {
+  return updateTaskTagsImpl(...args)
 }
 
 export async function moveDashboardTask(
@@ -455,6 +468,42 @@ export async function cancelMeetingRequest(
   ...args: Parameters<typeof cancelMeetingRequestImpl>
 ) {
   return cancelMeetingRequestImpl(...args)
+}
+
+export async function rescheduleMeetingRequest(
+  ...args: Parameters<typeof rescheduleMeetingRequestImpl>
+) {
+  return rescheduleMeetingRequestImpl(...args)
+}
+
+export async function appendMeetingContext(
+  ...args: Parameters<typeof appendMeetingContextImpl>
+) {
+  return appendMeetingContextImpl(...args)
+}
+
+export async function submitMeetingReview(
+  ...args: Parameters<typeof submitMeetingReviewImpl>
+) {
+  return submitMeetingReviewImpl(...args)
+}
+
+export async function linkTaskToMeeting(
+  ...args: Parameters<typeof linkTaskToMeetingImpl>
+) {
+  return linkTaskToMeetingImpl(...args)
+}
+
+export async function unlinkTaskFromMeeting(
+  ...args: Parameters<typeof unlinkTaskFromMeetingImpl>
+) {
+  return unlinkTaskFromMeetingImpl(...args)
+}
+
+export async function listMeetingsForTask(
+  ...args: Parameters<typeof listMeetingsForTaskImpl>
+) {
+  return listMeetingsForTaskImpl(...args)
 }
 
 export async function listTeamRoster(

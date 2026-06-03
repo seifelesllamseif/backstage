@@ -34,6 +34,42 @@ interface CalendarEventResponse {
   }
 }
 
+// Deletes an event from the scheduler's primary calendar. Used when a
+// meeting gets rescheduled (the old event would otherwise linger as an
+// orphan with a Meet link no one's joining) or canceled. sendUpdates=all
+// tells Google to email the attendees a cancellation notice.
+//
+// Best-effort: callers ignore the result so a Google outage never
+// blocks the local state change. Logs to the server for diagnosis.
+export async function deleteCalendarEvent(
+  companyId: string,
+  eventId: string
+): Promise<{ ok: true } | { error: string }> {
+  if (!eventId) return { ok: true }
+  const token = await getSchedulerAccessToken(companyId)
+  if ('error' in token) return { error: token.error }
+
+  const url = `${EVENTS_URL('primary')}/${encodeURIComponent(eventId)}?sendUpdates=all`
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      authorization: `Bearer ${token.accessToken}`
+    }
+  })
+
+  // 204 = success. 410 = already gone (treat as success - the event
+  // was probably deleted on the Google side already). Anything else
+  // is reported.
+  if (res.status === 204 || res.status === 410) {
+    await markSchedulerUsed(companyId)
+    return { ok: true }
+  }
+  const text = await res.text()
+  return {
+    error: `Calendar API delete error (${res.status}): ${text.slice(0, 200)}`
+  }
+}
+
 export async function createCalendarEventWithMeet(
   input: CreateCalendarEventInput
 ): Promise<CreateCalendarEventResult | { error: string }> {

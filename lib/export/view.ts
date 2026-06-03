@@ -13,7 +13,7 @@ export interface ViewMeta {
   // "Phase 2 sprint").
   title: string
   // How tasks should be grouped in the markdown output. JSON ignores this.
-  groupBy?: 'status' | 'priority' | 'sprint' | 'assignee' | 'none'
+  groupBy?: 'status' | 'priority' | 'sprint' | 'assignee' | 'lead' | 'none'
   // Optional time scope name shown in the markdown header.
   scopeLabel?: string
 }
@@ -88,6 +88,21 @@ export function viewToMarkdown(
           : list[0]?.assignee?.name ?? key
       lines.push('')
       lines.push(`## ${name} (${list.length})`)
+      for (const task of list) renderTask(task)
+    }
+  } else if (grouping === 'lead') {
+    const byId = new Map<string, BoardTask[]>()
+    for (const task of tasks) {
+      const key = task.lead?.id ?? '__noLead__'
+      const list = byId.get(key) ?? []
+      list.push(task)
+      byId.set(key, list)
+    }
+    for (const [key, list] of byId) {
+      const name =
+        key === '__noLead__' ? 'No lead' : list[0]?.lead?.name ?? key
+      lines.push('')
+      lines.push(`## Lead: ${name} (${list.length})`)
       for (const task of list) renderTask(task)
     }
   } else if (grouping === 'sprint') {

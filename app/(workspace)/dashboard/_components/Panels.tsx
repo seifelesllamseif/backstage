@@ -8,6 +8,7 @@ import {
   Archive as ArchiveIcon,
   ArchiveRestore,
   Bell,
+  CalendarDays,
   Check,
   Compass,
   ExternalLink,
@@ -59,14 +60,8 @@ import {
   StripeIcon,
   WordPressIcon
 } from './BrandIcons'
-import type {
-  ProjectExternalRef,
-  TaskExternalRefKind
-} from './boardData'
-import {
-  defaultExternalRefLabel,
-  parseExternalRef
-} from '@/lib/externalRef'
+import type { ProjectExternalRef, TaskExternalRefKind } from './boardData'
+import { defaultExternalRefLabel, parseExternalRef } from '@/lib/externalRef'
 import { CopyButton, type CopyMenuItem } from '@/components/ui/copy-button'
 import { updatesToJson, updatesToMarkdown } from '@/lib/export/updates'
 import { isInScope, type TimeScope } from '@/lib/export/timeRange'
@@ -124,7 +119,11 @@ export function ProjectsPanel({
   refsByProject: Record<string, ProjectExternalRef[]>
   onAddProjectRef: (projectId: string, url: string) => void
   onRemoveProjectRef: (projectId: string, refId: string) => void
-  onRenameProjectRef: (projectId: string, refId: string, label: string | null) => void
+  onRenameProjectRef: (
+    projectId: string,
+    refId: string,
+    label: string | null
+  ) => void
   // Optional per-project copy-button factory. DashboardShell owns the
   // export context so it injects a CopyButton per project here.
   renderCopySlot?: (projectId: string) => React.ReactNode
@@ -634,7 +633,7 @@ function ProjectCard({
             </form>
           ) : (
             <h3
-              className={`truncate text-[15px] font-semibold leading-tight tracking-tight ${t.text}`}
+              className={`truncate text-[15px] leading-tight font-semibold tracking-tight ${t.text}`}
             >
               {project.name}
             </h3>
@@ -659,67 +658,67 @@ function ProjectCard({
           {copySlot}
           {canEdit && !isEditing && (
             <div className="relative">
-            <button
-              onClick={(e) => {
-                stop(e)
-                setMenuOpen((o) => !o)
-              }}
-              className={`flex size-7 items-center justify-center rounded-md border transition ${t.btn}`}
-              aria-label="Project actions"
-            >
-              <MoreHorizontal className="size-3.5" />
-            </button>
-            {menuOpen && (
-              <>
-                <div
-                  className="fixed inset-0 z-30"
-                  onClick={(e) => {
-                    stop(e)
-                    setMenuOpen(false)
-                  }}
-                />
-                <div
-                  className={`absolute top-8 right-0 z-40 w-40 rounded-md border py-1 shadow-xl ${t.detail}`}
-                  onClick={stop}
-                >
-                  <button
+              <button
+                onClick={(e) => {
+                  stop(e)
+                  setMenuOpen((o) => !o)
+                }}
+                className={`flex size-7 items-center justify-center rounded-md border transition ${t.btn}`}
+                aria-label="Project actions"
+              >
+                <MoreHorizontal className="size-3.5" />
+              </button>
+              {menuOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-30"
                     onClick={(e) => {
                       stop(e)
                       setMenuOpen(false)
-                      onStartEdit()
                     }}
-                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs ${t.tab}`}
+                  />
+                  <div
+                    className={`absolute top-8 right-0 z-40 w-40 rounded-md border py-1 shadow-xl ${t.detail}`}
+                    onClick={stop}
                   >
-                    <Pencil className="size-3.5" /> Rename
-                  </button>
-                  {project.isArchived ? (
                     <button
                       onClick={(e) => {
                         stop(e)
                         setMenuOpen(false)
-                        onRestore()
+                        onStartEdit()
                       }}
-                      disabled={disabled}
-                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs disabled:opacity-50 ${t.tab}`}
+                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs ${t.tab}`}
                     >
-                      <ArchiveRestore className="size-3.5" /> Restore
+                      <Pencil className="size-3.5" /> Rename
                     </button>
-                  ) : (
-                    <button
-                      onClick={(e) => {
-                        stop(e)
-                        setMenuOpen(false)
-                        onArchive()
-                      }}
-                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs ${t.tab} ${t.accentText}`}
-                    >
-                      <ArchiveIcon className="size-3.5" /> Archive
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
+                    {project.isArchived ? (
+                      <button
+                        onClick={(e) => {
+                          stop(e)
+                          setMenuOpen(false)
+                          onRestore()
+                        }}
+                        disabled={disabled}
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs disabled:opacity-50 ${t.tab}`}
+                      >
+                        <ArchiveRestore className="size-3.5" /> Restore
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => {
+                          stop(e)
+                          setMenuOpen(false)
+                          onArchive()
+                        }}
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs ${t.tab} ${t.accentText}`}
+                      >
+                        <ArchiveIcon className="size-3.5" /> Archive
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -873,7 +872,7 @@ function MemberStack({
       ))}
       {extra > 0 && (
         <div
-          className={`inline-flex items-center justify-center rounded-full ring-2 ring-white text-[10px] font-medium dark:ring-zinc-900 ${t.surfaceMuted} ${t.textMuted}`}
+          className={`inline-flex items-center justify-center rounded-full text-[10px] font-medium ring-2 ring-white dark:ring-zinc-900 ${t.surfaceMuted} ${t.textMuted}`}
           style={{
             width: size,
             height: size,
@@ -991,7 +990,9 @@ function ProjectTable({
                         style={{ width: `${pct}%` }}
                       />
                     </div>
-                    <span className={`text-[10px] tabular-nums ${t.textSubtle}`}>
+                    <span
+                      className={`text-[10px] tabular-nums ${t.textSubtle}`}
+                    >
                       {pct}%
                     </span>
                   </div>
@@ -1135,8 +1136,7 @@ function ProjectList({
                 const palette = refChipPalette(brand, t.surfaceMuted)
                 const parsed = parseExternalRef(r.url)
                 const tipLabel =
-                  r.label ??
-                  (parsed ? defaultExternalRefLabel(parsed) : r.url)
+                  r.label ?? (parsed ? defaultExternalRefLabel(parsed) : r.url)
                 return (
                   <a
                     key={r.id}
@@ -1155,10 +1155,10 @@ function ProjectList({
                 <ArchiveIcon className={`size-3 shrink-0 ${t.textSubtle}`} />
               )}
             </div>
-            <span className={`hidden text-xs tabular-nums sm:inline ${t.textMuted}`}>
-              {tasks.length === 0
-                ? 'No tasks'
-                : `${done}/${tasks.length}`}
+            <span
+              className={`hidden text-xs tabular-nums sm:inline ${t.textMuted}`}
+            >
+              {tasks.length === 0 ? 'No tasks' : `${done}/${tasks.length}`}
             </span>
             <div className="hidden w-32 items-center gap-2 md:flex">
               <div
@@ -1195,7 +1195,10 @@ type DisplayBrand =
   | 'godaddy'
   | 'wordpress'
 
-function displayBrand(ref: { kind: TaskExternalRefKind; url: string }): DisplayBrand {
+function displayBrand(ref: {
+  kind: TaskExternalRefKind
+  url: string
+}): DisplayBrand {
   let host = ''
   let pathname = ''
   try {
@@ -1208,7 +1211,8 @@ function displayBrand(ref: { kind: TaskExternalRefKind; url: string }): DisplayB
   if (ref.kind === 'doc' && host === 'docs.google.com') return 'gdocs'
   if (ref.kind === 'link') {
     if (host === 'resend.com' || host.endsWith('.resend.com')) return 'resend'
-    if (host === 'godaddy.com' || host.endsWith('.godaddy.com')) return 'godaddy'
+    if (host === 'godaddy.com' || host.endsWith('.godaddy.com'))
+      return 'godaddy'
     // WordPress: hosted variants AND custom-domain self-hosts (detected
     // via the canonical /wp-admin or /wp-content/ paths).
     if (
@@ -1404,9 +1408,7 @@ function LinkRow({
 }) {
   const { t } = useDashTheme()
   const parsed = parseExternalRef(refData.url)
-  const fallbackLabel = parsed
-    ? defaultExternalRefLabel(parsed)
-    : refData.url
+  const fallbackLabel = parsed ? defaultExternalRefLabel(parsed) : refData.url
   const displayLabel = refData.label ?? fallbackLabel
   const brand = displayBrand(refData)
   const Icon = refIconForKind(brand)
@@ -1636,6 +1638,8 @@ type UpdateKind =
   | 'created'
   | 'priority'
   | 'assignee'
+  | 'team'
+  | 'meeting'
 
 interface UpdateRow {
   id: string
@@ -1643,19 +1647,33 @@ interface UpdateRow {
   text: string
   at: string
   atRaw: string
-  taskId: string
+  // taskId is nullable now because team-management rows don't tie to
+  // a task. The renderer hides the "jump to task" affordance when null.
+  taskId: string | null
   taskRef: string | null
   taskTitle: string | null
+  // Populated for meeting rows; click opens the inbox sheet focused on
+  // this meeting. Null for everything else.
+  meetingId: string | null
 }
 
-type UpdateFilter = 'all' | 'comment' | 'status' | 'priority' | 'assignee'
+type UpdateFilter =
+  | 'all'
+  | 'comment'
+  | 'status'
+  | 'priority'
+  | 'assignee'
+  | 'team'
+  | 'meeting'
 
 const FILTERS: { id: UpdateFilter; label: string; match: UpdateKind[] }[] = [
   { id: 'all', label: 'All', match: [] },
   { id: 'comment', label: 'Comments', match: ['comment'] },
   { id: 'status', label: 'Status', match: ['status', 'created'] },
   { id: 'priority', label: 'Priority', match: ['priority'] },
-  { id: 'assignee', label: 'Assignees', match: ['assignee'] }
+  { id: 'assignee', label: 'Assignees', match: ['assignee'] },
+  { id: 'team', label: 'Team', match: ['team'] },
+  { id: 'meeting', label: 'Meetings', match: ['meeting'] }
 ]
 
 function kindIcon(kind: UpdateKind) {
@@ -1670,6 +1688,10 @@ function kindIcon(kind: UpdateKind) {
       return Paperclip
     case 'created':
       return Sparkles
+    case 'team':
+      return UserCog
+    case 'meeting':
+      return CalendarDays
     case 'status':
     default:
       return MoveRight
@@ -1689,6 +1711,10 @@ function kindTone(kind: UpdateKind, mode: 'light' | 'dark') {
         return 'bg-zinc-100 text-zinc-700 border-zinc-200'
       case 'created':
         return 'bg-emerald-100 text-emerald-700 border-emerald-200'
+      case 'team':
+        return 'bg-teal-100 text-teal-700 border-teal-200'
+      case 'meeting':
+        return 'bg-indigo-100 text-indigo-700 border-indigo-200'
       case 'status':
       default:
         return 'bg-rose-100 text-rose-700 border-rose-200'
@@ -1705,6 +1731,10 @@ function kindTone(kind: UpdateKind, mode: 'light' | 'dark') {
       return 'bg-white/5 text-white/70 border-white/20'
     case 'created':
       return 'bg-emerald-400/10 text-emerald-300 border-emerald-400/30'
+    case 'team':
+      return 'bg-teal-400/10 text-teal-300 border-teal-400/30'
+    case 'meeting':
+      return 'bg-indigo-400/10 text-indigo-300 border-indigo-400/30'
     case 'status':
     default:
       return 'bg-rose-400/10 text-rose-300 border-rose-400/30'
@@ -1814,10 +1844,12 @@ function buildUpdatesCopyMenu(args: {
 
 export function UpdatesPanel({
   activity,
-  onOpenTask
+  onOpenTask,
+  onOpenMeeting
 }: {
   activity: UpdateRow[]
   onOpenTask: (taskId: string) => void
+  onOpenMeeting: (meetingId: string) => void
 }) {
   const { t, mode } = useDashTheme()
   const [filter, setFilter] = useState<UpdateFilter>('all')
@@ -1829,13 +1861,17 @@ export function UpdatesPanel({
       comment: 0,
       status: 0,
       priority: 0,
-      assignee: 0
+      assignee: 0,
+      team: 0,
+      meeting: 0
     }
     for (const a of activity) {
       if (a.kind === 'comment') c.comment++
       else if (a.kind === 'status' || a.kind === 'created') c.status++
       else if (a.kind === 'priority') c.priority++
       else if (a.kind === 'assignee') c.assignee++
+      else if (a.kind === 'team') c.team++
+      else if (a.kind === 'meeting') c.meeting++
     }
     return c
   }, [activity])
@@ -1874,8 +1910,8 @@ export function UpdatesPanel({
             <h2 className={`text-2xl font-medium ${t.text}`}>Updates</h2>
             <p className={`mt-1 text-sm ${t.textMuted}`}>
               Everything that&apos;s happened across your tasks comments, status
-              moves, priority shifts and reassignments. Click any row to jump
-              to its task.
+              moves, priority shifts and reassignments. Click any row to jump to
+              its task.
             </p>
           </div>
           {activity.length > 0 && (
@@ -1885,8 +1921,7 @@ export function UpdatesPanel({
               primaryGetContent={() =>
                 updatesToMarkdown(filtered, {
                   title: 'Updates',
-                  scopeLabel:
-                    filter === 'all' ? undefined : `Filter: ${filter}`
+                  scopeLabel: filter === 'all' ? undefined : `Filter: ${filter}`
                 })
               }
               menu={buildUpdatesCopyMenu({
@@ -1988,11 +2023,19 @@ export function UpdatesPanel({
                       {grouped[b.id].map((a) => {
                         const Icon = kindIcon(a.kind)
                         const tone = kindTone(a.kind, mode)
+                        const clickable = Boolean(a.taskId || a.meetingId)
                         return (
                           <li key={a.id}>
                             <button
-                              onClick={() => onOpenTask(a.taskId)}
-                              className={`group flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition ${t.column} ${t.rowHover}`}
+                              onClick={() => {
+                                // Meeting rows open the inbox sheet
+                                // focused on this meeting; task rows open
+                                // the task. Team rows are informational.
+                                if (a.taskId) onOpenTask(a.taskId)
+                                else if (a.meetingId) onOpenMeeting(a.meetingId)
+                              }}
+                              disabled={!clickable}
+                              className={`group flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition disabled:cursor-default ${t.column} ${clickable ? t.rowHover : ''}`}
                             >
                               <span
                                 className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border ${tone}`}
@@ -2123,7 +2166,7 @@ export function SettingsPanel({
             >
               <span
                 className={`absolute top-0.5 size-4 rounded-full bg-white transition-transform ${
-                  push.subscribed ? 'translate-x-5' : 'translate-x-0.5'
+                  push.subscribed ? 'translate-x-0' : 'translate-x-0.5'
                 }`}
               />
             </button>
@@ -2202,7 +2245,7 @@ export function SettingsPanel({
           >
             <span
               className={`absolute top-0.5 size-4 rounded-full bg-white transition-transform ${
-                showHints ? 'translate-x-5' : 'translate-x-0.5'
+                showHints ? 'translate-x-0' : 'translate-x-0.5'
               }`}
             />
           </button>
@@ -2218,7 +2261,6 @@ export function SettingsPanel({
             </button>
           </Row>
         )}
-
       </div>
     </div>
   )
@@ -2231,9 +2273,9 @@ function EmailNotifications() {
     assigned: boolean
     meetings: boolean
   } | null>(null)
-  const [saving, setSaving] = useState<null | 'mentions' | 'assigned' | 'meetings'>(
-    null
-  )
+  const [saving, setSaving] = useState<
+    null | 'mentions' | 'assigned' | 'meetings'
+  >(null)
 
   useEffect(() => {
     let alive = true
@@ -2289,7 +2331,7 @@ function EmailNotifications() {
             >
               <span
                 className={`absolute top-0.5 size-4 rounded-full bg-white transition-transform ${
-                  on ? 'translate-x-5' : 'translate-x-0.5'
+                  on ? 'translate-x-0' : 'translate-x-0.5'
                 }`}
               />
             </button>
@@ -2302,17 +2344,14 @@ function EmailNotifications() {
 
 function GoogleCalendarConnection() {
   const { t } = useDashTheme()
-  const [status, setStatus] = useState<
-    | null
-    | {
-        configured: boolean
-        connected: boolean
-        connectedAt: string | null
-        lastUsedAt: string | null
-        googleEmail: string | null
-        connectedByName: string | null
-      }
-  >(null)
+  const [status, setStatus] = useState<null | {
+    configured: boolean
+    connected: boolean
+    connectedAt: string | null
+    lastUsedAt: string | null
+    googleEmail: string | null
+    connectedByName: string | null
+  }>(null)
   const [busy, startBusy] = useTransition()
 
   async function refresh() {

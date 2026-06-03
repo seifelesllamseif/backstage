@@ -281,6 +281,39 @@ export type Database = {
           },
         ]
       }
+      meeting_attendees: {
+        Row: {
+          meeting_id: string
+          member_id: string
+          picked_at: string | null
+        }
+        Insert: {
+          meeting_id: string
+          member_id: string
+          picked_at?: string | null
+        }
+        Update: {
+          meeting_id?: string
+          member_id?: string
+          picked_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meeting_attendees_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "meeting_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_attendees_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       meeting_requests: {
         Row: {
           agenda: string | null
@@ -288,16 +321,28 @@ export type Database = {
           approved_by_id: string | null
           calendar_event_id: string | null
           company_id: string
+          context: string | null
           created_at: string
           decline_reason: string | null
           duration_min: number
+          follow_up_meeting_id: string | null
+          goal: string | null
           id: string
+          last_rescheduled_at: string | null
+          last_rescheduled_by_id: string | null
           meet_link: string | null
           mode: string
+          outcome: Database["public"]["Enums"]["meeting_outcome"] | null
+          pre_read: string | null
           proposed_date: string | null
+          questions: string | null
           rejection_reason: string | null
-          requestee_id: string
+          requestee_context: string | null
           requester_id: string
+          reschedule_reason: string | null
+          review_notes: string | null
+          reviewed_at: string | null
+          reviewed_by_id: string | null
           selected_slot_index: number | null
           selected_starts_at: string | null
           slots: Json | null
@@ -311,16 +356,28 @@ export type Database = {
           approved_by_id?: string | null
           calendar_event_id?: string | null
           company_id: string
+          context?: string | null
           created_at?: string
           decline_reason?: string | null
           duration_min?: number
+          follow_up_meeting_id?: string | null
+          goal?: string | null
           id?: string
+          last_rescheduled_at?: string | null
+          last_rescheduled_by_id?: string | null
           meet_link?: string | null
           mode?: string
+          outcome?: Database["public"]["Enums"]["meeting_outcome"] | null
+          pre_read?: string | null
           proposed_date?: string | null
+          questions?: string | null
           rejection_reason?: string | null
-          requestee_id: string
+          requestee_context?: string | null
           requester_id: string
+          reschedule_reason?: string | null
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by_id?: string | null
           selected_slot_index?: number | null
           selected_starts_at?: string | null
           slots?: Json | null
@@ -334,16 +391,28 @@ export type Database = {
           approved_by_id?: string | null
           calendar_event_id?: string | null
           company_id?: string
+          context?: string | null
           created_at?: string
           decline_reason?: string | null
           duration_min?: number
+          follow_up_meeting_id?: string | null
+          goal?: string | null
           id?: string
+          last_rescheduled_at?: string | null
+          last_rescheduled_by_id?: string | null
           meet_link?: string | null
           mode?: string
+          outcome?: Database["public"]["Enums"]["meeting_outcome"] | null
+          pre_read?: string | null
           proposed_date?: string | null
+          questions?: string | null
           rejection_reason?: string | null
-          requestee_id?: string
+          requestee_context?: string | null
           requester_id?: string
+          reschedule_reason?: string | null
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by_id?: string | null
           selected_slot_index?: number | null
           selected_starts_at?: string | null
           slots?: Json | null
@@ -367,8 +436,15 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "meeting_requests_requestee_id_fkey"
-            columns: ["requestee_id"]
+            foreignKeyName: "meeting_requests_follow_up_meeting_id_fkey"
+            columns: ["follow_up_meeting_id"]
+            isOneToOne: false
+            referencedRelation: "meeting_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_requests_last_rescheduled_by_id_fkey"
+            columns: ["last_rescheduled_by_id"]
             isOneToOne: false
             referencedRelation: "team_members"
             referencedColumns: ["id"]
@@ -378,6 +454,56 @@ export type Database = {
             columns: ["requester_id"]
             isOneToOne: false
             referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_requests_reviewed_by_id_fkey"
+            columns: ["reviewed_by_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      meeting_tasks: {
+        Row: {
+          linked_at: string
+          linked_by_id: string | null
+          meeting_id: string
+          task_id: string
+        }
+        Insert: {
+          linked_at?: string
+          linked_by_id?: string | null
+          meeting_id: string
+          task_id: string
+        }
+        Update: {
+          linked_at?: string
+          linked_by_id?: string | null
+          meeting_id?: string
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meeting_tasks_linked_by_id_fkey"
+            columns: ["linked_by_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_tasks_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "meeting_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_tasks_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
             referencedColumns: ["id"]
           },
         ]
@@ -1154,6 +1280,7 @@ export type Database = {
         | "gcloud"
         | "stripe"
       handoff_status: "in_progress" | "blocked" | "ready_for_review" | "done"
+      meeting_outcome: "resolved" | "partial" | "needs_followup" | "failed"
       meeting_request_status:
         | "pending"
         | "approved"
@@ -1321,6 +1448,7 @@ export const Constants = {
         "stripe",
       ],
       handoff_status: ["in_progress", "blocked", "ready_for_review", "done"],
+      meeting_outcome: ["resolved", "partial", "needs_followup", "failed"],
       meeting_request_status: [
         "pending",
         "approved",

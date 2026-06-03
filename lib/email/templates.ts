@@ -22,6 +22,67 @@ function escape(s: string): string {
     .replace(/"/g, '&quot;')
 }
 
+// Deterministic background color for the initials fallback so the same
+// person stays the same color across emails. Mirrors the dashboard
+// avatar palette (theme.ts) but stays inline-safe for Outlook.
+const AVATAR_BG_COLORS = [
+  '#0f766e',
+  '#0369a1',
+  '#7c2d12',
+  '#7c3aed',
+  '#be123c',
+  '#1f2937',
+  '#a16207',
+  '#15803d'
+]
+function avatarBgFor(name: string): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0
+  }
+  return AVATAR_BG_COLORS[hash % AVATAR_BG_COLORS.length]
+}
+
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
+
+// Inline avatar chip: img tag when avatarUrl is present, initials block
+// otherwise. Outlook ignores border-radius on <img> for non-svg sources
+// so the avatar shows as a square there; acceptable degrade.
+export function avatarChip(
+  name: string,
+  avatarUrl?: string | null,
+  opts: { size?: number; inline?: boolean } = {}
+): string {
+  const size = opts.size ?? 28
+  const display = opts.inline ? 'inline-block' : 'inline-block'
+  const safeName = escape(name)
+  if (avatarUrl) {
+    return `<img src="${escape(avatarUrl)}" alt="${safeName}" width="${size}" height="${size}" style="display:${display};vertical-align:middle;width:${size}px;height:${size}px;border-radius:${size}px;object-fit:cover;background:#e4e4e7" />`
+  }
+  const bg = avatarBgFor(name)
+  const initials = escape(initialsOf(name))
+  const lineHeight = `${size}px`
+  return `<span style="display:${display};vertical-align:middle;width:${size}px;height:${size}px;border-radius:${size}px;background:${bg};color:#fff;text-align:center;line-height:${lineHeight};font-size:${Math.round(size * 0.42)}px;font-weight:600">${initials}</span>`
+}
+
+// Compact "<avatar> Name" inline group. Used in the body of meeting
+// and mention emails so the reader can recognize the person at a glance.
+export function avatarWithName(
+  name: string,
+  avatarUrl?: string | null,
+  opts: { size?: number; bold?: boolean } = {}
+): string {
+  const nameStyle = `margin-left:6px;vertical-align:middle${
+    opts.bold ? ';font-weight:600' : ''
+  }`
+  return `${avatarChip(name, avatarUrl, { size: opts.size ?? 22 })}<span style="${nameStyle}">${escape(name)}</span>`
+}
+
 function shell(opts: {
   preheader: string
   bodyHtml: string
@@ -42,6 +103,7 @@ function shell(opts: {
 export interface MentionEmailInput {
   recipientName: string
   authorName: string
+  authorAvatarUrl?: string | null
   taskRef: string
   taskTitle: string
   commentBody: string
@@ -64,7 +126,7 @@ export function mentionEmail(input: MentionEmailInput): {
     preheader: `${input.authorName} mentioned you on ${input.taskRef} - ${input.taskTitle}`,
     bodyHtml:
       `<p style="margin:0 0 8px">Hi ${escape(input.recipientName.split(' ')[0] || input.recipientName)},</p>` +
-      `<p style="margin:0 0 12px"><strong>${escape(input.authorName)}</strong> mentioned you on <a href="${escape(input.taskUrl)}" style="color:#0f766e">${escape(input.taskRef)} - ${escape(input.taskTitle)}</a>.</p>` +
+      `<p style="margin:0 0 12px">${avatarWithName(input.authorName, input.authorAvatarUrl, { bold: true })} mentioned you on <a href="${escape(input.taskUrl)}" style="color:#0f766e">${escape(input.taskRef)} - ${escape(input.taskTitle)}</a>.</p>` +
       `<blockquote style="margin:12px 0;padding:10px 14px;border-left:3px solid #0f766e;background:#f4f4f5;color:#444;white-space:pre-wrap">${escape(trimmedBody)}</blockquote>`,
     ctaLabel: 'Open task',
     ctaUrl: input.taskUrl,
@@ -123,7 +185,9 @@ function formatSlotList(
 export interface MeetingRequestEmailInput {
   recipientName: string
   requesterName: string
+  requesterAvatarUrl?: string | null
   requesteeName: string
+  requesteeAvatarUrl?: string | null
   title: string
   agenda?: string | null
   durationMin: number
@@ -132,9 +196,51 @@ export interface MeetingRequestEmailInput {
   proposedDate?: string | null
   // Set when mode='slots'.
   slotIsos?: string[] | null
+  // Mandatory pre-meeting brief filled by the requester.
+  goal?: string | null
+  context?: string | null
+  questions?: string | null
   approvalUrl: string
   recipientTimezone?: string | null
   unsubscribeUrl?: string
+}
+
+function briefHtml(input: {
+  goal?: string | null
+  context?: string | null
+  questions?: string | null
+}): string {
+  const blocks: string[] = []
+  if (input.goal) {
+    blocks.push(
+      `<p style="margin:0 0 6px;color:#444"><strong>Goal:</strong> ${escape(input.goal.slice(0, 600))}</p>`
+    )
+  }
+  if (input.context) {
+    const trimmed = input.context.length > 600 ? input.context.slice(0, 600) + '...' : input.context
+    blocks.push(
+      `<p style="margin:0 0 6px;color:#444"><strong>Context:</strong> ${escape(trimmed)}</p>`
+    )
+  }
+  if (input.questions) {
+    const trimmed = input.questions.length > 800 ? input.questions.slice(0, 800) + '...' : input.questions
+    blocks.push(
+      `<div style="margin:0 0 12px;color:#444"><strong>Questions:</strong><br>${escape(trimmed).replace(/\n/g, '<br>')}</div>`
+    )
+  }
+  return blocks.join('')
+}
+
+function briefText(input: {
+  goal?: string | null
+  context?: string | null
+  questions?: string | null
+}): string[] {
+  const out: string[] = []
+  if (input.goal) out.push(`Goal: ${input.goal.slice(0, 600)}`)
+  if (input.context) out.push(`Context: ${input.context.slice(0, 600)}`)
+  if (input.questions) out.push(`Questions:\n${input.questions.slice(0, 800)}`)
+  return out
 }
 
 export function meetingRequestSubmittedEmail(
@@ -177,12 +283,14 @@ export function meetingRequestSubmittedEmail(
     preheaderTiming = `with ${list.length} proposed slots`
   }
 
+  const briefBodyHtml = briefHtml(input)
   const html = shell({
     preheader: `${input.requesterName} wants to meet with ${input.requesteeName} ${preheaderTiming}`,
     bodyHtml:
       `<p style="margin:0 0 8px">Hi ${escape(input.recipientName.split(' ')[0] || input.recipientName)},</p>` +
-      `<p style="margin:0 0 12px"><strong>${escape(input.requesterName)}</strong> requested a meeting with <strong>${escape(input.requesteeName)}</strong>.</p>` +
+      `<p style="margin:0 0 12px">${avatarWithName(input.requesterName, input.requesterAvatarUrl, { bold: true })} requested a meeting with ${avatarWithName(input.requesteeName, input.requesteeAvatarUrl, { bold: true })}.</p>` +
       `<p style="margin:0 0 12px"><strong>Title:</strong> ${escape(input.title)}</p>` +
+      briefBodyHtml +
       agendaHtml +
       timingHtml,
     ctaLabel: 'Review and approve',
@@ -195,6 +303,7 @@ export function meetingRequestSubmittedEmail(
     `${input.requesterName} requested a meeting with ${input.requesteeName}.`,
     `Title: ${input.title}`,
     input.agenda ? `Agenda: ${input.agenda}` : '',
+    ...briefText(input),
     '',
     ...timingText,
     '',
@@ -209,12 +318,16 @@ export function meetingRequestSubmittedEmail(
 export interface MeetingApprovedEmailInput {
   recipientName: string
   requesterName: string
+  requesterAvatarUrl?: string | null
   title: string
   agenda?: string | null
   durationMin: number
   mode: 'day' | 'slots'
   proposedDate?: string | null
   slotIsos?: string[] | null
+  goal?: string | null
+  context?: string | null
+  questions?: string | null
   pickUrl: string
   recipientTimezone?: string | null
   unsubscribeUrl?: string
@@ -257,12 +370,14 @@ export function meetingApprovedEmail(
     ]
   }
 
+  const briefBodyHtml = briefHtml(input)
   const html = shell({
     preheader: `${input.requesterName} wants to meet - open to confirm`,
     bodyHtml:
       `<p style="margin:0 0 8px">Hi ${escape(input.recipientName.split(' ')[0] || input.recipientName)},</p>` +
-      `<p style="margin:0 0 12px"><strong>${escape(input.requesterName)}</strong> would like to meet with you. The request was approved.</p>` +
+      `<p style="margin:0 0 12px">${avatarWithName(input.requesterName, input.requesterAvatarUrl, { bold: true })} would like to meet with you. The request was approved.</p>` +
       `<p style="margin:0 0 12px"><strong>Title:</strong> ${escape(input.title)}</p>` +
+      briefBodyHtml +
       agendaHtml +
       timingHtml,
     ctaLabel: input.mode === 'day' ? 'Pick a time' : 'Pick a slot',
@@ -289,6 +404,7 @@ export function meetingApprovedEmail(
 export interface MeetingScheduledEmailInput {
   recipientName: string
   counterpartyName: string
+  counterpartyAvatarUrl?: string | null
   title: string
   agenda?: string | null
   durationMin: number
@@ -329,7 +445,7 @@ export function meetingScheduledEmail(
     preheader: `Meeting with ${input.counterpartyName} on ${whenLabel}`,
     bodyHtml:
       `<p style="margin:0 0 8px">Hi ${escape(input.recipientName.split(' ')[0] || input.recipientName)},</p>` +
-      `<p style="margin:0 0 12px">Your meeting with <strong>${escape(input.counterpartyName)}</strong> is booked.</p>` +
+      `<p style="margin:0 0 12px">Your meeting with ${avatarWithName(input.counterpartyName, input.counterpartyAvatarUrl, { bold: true })} is booked.</p>` +
       `<p style="margin:0 0 12px"><strong>Title:</strong> ${escape(input.title)}</p>` +
       agendaHtml +
       `<p style="margin:0 0 12px"><strong>When:</strong> ${escape(whenLabel)} (${input.durationMin} min)</p>` +
@@ -346,6 +462,101 @@ export function meetingScheduledEmail(
     `When: ${whenLabel} (${input.durationMin} min)`,
     input.meetLink ? `Join: ${input.meetLink}` : '',
     input.calendarEventLink ? `Calendar: ${input.calendarEventLink}` : '',
+    input.unsubscribeUrl ? `\nUnsubscribe: ${input.unsubscribeUrl}` : ''
+  ]
+    .filter(Boolean)
+    .join('\n')
+  return { subject, html, text }
+}
+
+export interface MeetingRescheduledEmailInput {
+  recipientName: string
+  rescheduledByName: string
+  rescheduledByAvatarUrl?: string | null
+  title: string
+  durationMin: number
+  // Either a new proposed date (1:1 day mode), an array of new slots
+  // (1:1 slots mode), or a single locked time (group). Match exactly one.
+  newProposedDate?: string | null
+  newSlotIsos?: string[] | null
+  newLockedStartsAt?: string | null
+  reason?: string | null
+  // Where to land in the dashboard - typically the meetings sheet for
+  // this id so the recipient can pick again or just confirm.
+  openUrl: string
+  needsPick: boolean
+  recipientTimezone?: string | null
+  unsubscribeUrl?: string
+}
+
+export function meetingRescheduledEmail(
+  input: MeetingRescheduledEmailInput
+): { subject: string; html: string; text: string } {
+  const subject = `Rescheduled: ${input.title}`
+  const reasonHtml = input.reason
+    ? `<p style="margin:0 0 12px;color:#444"><strong>Reason:</strong> ${input.reason.replace(/</g, '&lt;')}</p>`
+    : ''
+
+  let timingHtml: string
+  let timingText: string
+  if (input.newLockedStartsAt) {
+    const d = new Date(input.newLockedStartsAt)
+    const opts: Intl.DateTimeFormatOptions = {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: input.recipientTimezone ?? undefined,
+      timeZoneName: 'short'
+    }
+    const label = Number.isNaN(d.getTime())
+      ? input.newLockedStartsAt
+      : new Intl.DateTimeFormat('en-US', opts).format(d)
+    timingHtml = `<p style="margin:0 0 12px"><strong>New time:</strong> ${escape(label)} (${input.durationMin} min)</p>`
+    timingText = `New time: ${label} (${input.durationMin} min)`
+  } else if (input.newProposedDate) {
+    const label = formatProposedDate(input.newProposedDate)
+    timingHtml = `<p style="margin:0 0 12px"><strong>New day:</strong> ${escape(label)} (${input.durationMin} min)</p>`
+    timingText = `New day: ${label} (${input.durationMin} min)`
+  } else {
+    const list = formatSlotList(
+      input.newSlotIsos ?? [],
+      input.durationMin,
+      input.recipientTimezone
+    )
+    const slotsHtml = list
+      .map((s) => `<li style="margin:4px 0;color:#333">${s.replace(/</g, '&lt;')}</li>`)
+      .join('')
+    timingHtml =
+      `<p style="margin:0 0 6px"><strong>New slots (${input.durationMin} min):</strong></p>` +
+      `<ul style="margin:0 0 12px;padding-left:20px">${slotsHtml}</ul>`
+    timingText = `New slots:\n${list.map((s, i) => `${i + 1}. ${s}`).join('\n')}`
+  }
+
+  const html = shell({
+    preheader: `${input.rescheduledByName} rescheduled "${input.title}"`,
+    bodyHtml:
+      `<p style="margin:0 0 8px">Hi ${escape(input.recipientName.split(' ')[0] || input.recipientName)},</p>` +
+      `<p style="margin:0 0 12px">${avatarWithName(input.rescheduledByName, input.rescheduledByAvatarUrl, { bold: true })} rescheduled <em>${escape(input.title)}</em>.</p>` +
+      reasonHtml +
+      timingHtml +
+      (input.needsPick
+        ? `<p style="margin:0 0 12px;color:#666">Open the dashboard to pick a time that works for you.</p>`
+        : ''),
+    ctaLabel: input.needsPick ? 'Pick a new time' : 'Open meeting',
+    ctaUrl: input.openUrl,
+    unsubscribeUrl: input.unsubscribeUrl
+  })
+  const text = [
+    `Hi ${input.recipientName.split(' ')[0] || input.recipientName},`,
+    '',
+    `${input.rescheduledByName} rescheduled "${input.title}".`,
+    input.reason ? `Reason: ${input.reason}` : '',
+    '',
+    timingText,
+    '',
+    `${input.needsPick ? 'Pick a new time' : 'Open meeting'}: ${input.openUrl}`,
     input.unsubscribeUrl ? `\nUnsubscribe: ${input.unsubscribeUrl}` : ''
   ]
     .filter(Boolean)
@@ -392,6 +603,7 @@ export function meetingDeclinedOrRejectedEmail(
 export interface AssignmentEmailInput {
   recipientName: string
   assignerName: string
+  assignerAvatarUrl?: string | null
   taskRef: string
   taskTitle: string
   taskUrl: string
@@ -408,7 +620,7 @@ export function assignmentEmail(input: AssignmentEmailInput): {
     preheader: `${input.assignerName} assigned ${input.taskRef} to you - ${input.taskTitle}`,
     bodyHtml:
       `<p style="margin:0 0 8px">Hi ${escape(input.recipientName.split(' ')[0] || input.recipientName)},</p>` +
-      `<p style="margin:0 0 12px"><strong>${escape(input.assignerName)}</strong> assigned <a href="${escape(input.taskUrl)}" style="color:#0f766e">${escape(input.taskRef)} - ${escape(input.taskTitle)}</a> to you.</p>`,
+      `<p style="margin:0 0 12px">${avatarWithName(input.assignerName, input.assignerAvatarUrl, { bold: true })} assigned <a href="${escape(input.taskUrl)}" style="color:#0f766e">${escape(input.taskRef)} - ${escape(input.taskTitle)}</a> to you.</p>`,
     ctaLabel: 'Open task',
     ctaUrl: input.taskUrl,
     unsubscribeUrl: input.unsubscribeUrl

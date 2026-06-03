@@ -4,7 +4,7 @@ import { useCallback, useMemo } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import type { TaskPriority, TaskStatus } from './status'
 
-export type GroupBy = 'status' | 'assignee' | 'priority'
+export type GroupBy = 'status' | 'assignee' | 'priority' | 'lead'
 export type Feed = 'all' | 'mine' | 'inbox' | 'mentions'
 
 const FEED_VALUES: Feed[] = ['all', 'mine', 'inbox', 'mentions']
@@ -20,7 +20,7 @@ const STATUS_VALUES: TaskStatus[] = [
   'duplicate'
 ]
 const PRIORITY_VALUES: TaskPriority[] = ['urgent', 'high', 'medium', 'low', 'none']
-const GROUP_BY_VALUES: GroupBy[] = ['status', 'assignee', 'priority']
+const GROUP_BY_VALUES: GroupBy[] = ['status', 'assignee', 'priority', 'lead']
 
 function parseCsv(raw: string | null): string[] {
   if (!raw) return []
@@ -36,6 +36,7 @@ export interface DashboardSearchParams {
   statusFilter: TaskStatus[]
   priorityFilter: TaskPriority[]
   assigneeFilter: string[]
+  leadFilter: string[]
   tagFilter: string[]
   sprintFilter: string[]
   query: string
@@ -53,6 +54,10 @@ export interface DashboardSearchParams {
   setAssigneeFilter: (next: string[]) => void
   toggleAssignee: (id: string) => void
   clearAssignee: () => void
+
+  setLeadFilter: (next: string[]) => void
+  toggleLead: (id: string) => void
+  clearLead: () => void
 
   setTagFilter: (next: string[]) => void
   toggleTag: (tag: string) => void
@@ -77,6 +82,7 @@ export interface DashboardSearchParams {
     status?: TaskStatus[]
     priority?: TaskPriority[]
     assignee?: string[]
+    lead?: string[]
     tag?: string[]
     sprint?: string[]
     query?: string
@@ -128,6 +134,15 @@ export function useDashboardSearchParams(
   const assigneeFilter = useMemo(
     () =>
       parseCsv(searchParams.get('assignee')).map(
+        (token) => idBySlug.get(token) ?? token
+      ),
+    [searchParams, idBySlug]
+  )
+  // Lead filter mirrors assignee: same slug-to-id translation, same
+  // multi-select semantics, just a different field on the task.
+  const leadFilter = useMemo(
+    () =>
+      parseCsv(searchParams.get('lead')).map(
         (token) => idBySlug.get(token) ?? token
       ),
     [searchParams, idBySlug]
@@ -258,6 +273,21 @@ export function useDashboardSearchParams(
   )
   const clearAssignee = useCallback(() => writeCsv('assignee', []), [writeCsv])
 
+  const setLeadFilter = useCallback(
+    (next: string[]) => writeCsv('lead', serialiseAssignees(next)),
+    [writeCsv, serialiseAssignees]
+  )
+  const toggleLead = useCallback(
+    (id: string) =>
+      setLeadFilter(
+        leadFilter.includes(id)
+          ? leadFilter.filter((x) => x !== id)
+          : [...leadFilter, id]
+      ),
+    [setLeadFilter, leadFilter]
+  )
+  const clearLead = useCallback(() => writeCsv('lead', []), [writeCsv])
+
   const setTagFilter = useCallback(
     (next: string[]) => writeCsv('tag', next),
     [writeCsv]
@@ -308,6 +338,7 @@ export function useDashboardSearchParams(
     next.delete('status')
     next.delete('priority')
     next.delete('assignee')
+    next.delete('lead')
     next.delete('tag')
     next.delete('sprint')
     next.delete('q')
@@ -319,6 +350,7 @@ export function useDashboardSearchParams(
       status?: TaskStatus[]
       priority?: TaskPriority[]
       assignee?: string[]
+      lead?: string[]
       tag?: string[]
       sprint?: string[]
       query?: string
@@ -336,6 +368,10 @@ export function useDashboardSearchParams(
       writeCsvKey(
         'assignee',
         updates.assignee ? serialiseAssignees(updates.assignee) : undefined
+      )
+      writeCsvKey(
+        'lead',
+        updates.lead ? serialiseAssignees(updates.lead) : undefined
       )
       writeCsvKey('tag', updates.tag)
       writeCsvKey('sprint', updates.sprint)
@@ -357,6 +393,7 @@ export function useDashboardSearchParams(
     statusFilter,
     priorityFilter,
     assigneeFilter,
+    leadFilter,
     tagFilter,
     sprintFilter,
     query,
@@ -371,6 +408,9 @@ export function useDashboardSearchParams(
     setAssigneeFilter,
     toggleAssignee,
     clearAssignee,
+    setLeadFilter,
+    toggleLead,
+    clearLead,
     setTagFilter,
     toggleTag,
     clearTag,
