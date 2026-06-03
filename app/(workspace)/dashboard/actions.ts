@@ -40,6 +40,7 @@ import {
   cancelInvite as cancelInviteImpl,
   changeAccessTier as changeAccessTierImpl,
   inviteMember as inviteMemberImpl,
+  resendInvite as resendInviteImpl,
   listTeamRoster as listTeamRosterImpl,
   reinstateMember as reinstateMemberImpl,
   setMemberPresence as setMemberPresenceImpl,
@@ -536,6 +537,12 @@ export async function cancelInvite(
   ...args: Parameters<typeof cancelInviteImpl>
 ) {
   return cancelInviteImpl(...args)
+}
+
+export async function resendInvite(
+  ...args: Parameters<typeof resendInviteImpl>
+) {
+  return resendInviteImpl(...args)
 }
 
 export async function softRemoveMember(

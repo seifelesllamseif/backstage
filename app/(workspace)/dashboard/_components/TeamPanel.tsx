@@ -28,6 +28,7 @@ import {
 
 import {
   cancelInvite,
+  resendInvite,
   changeAccessTier,
   inviteMember,
   listTeamRoster,
@@ -284,6 +285,25 @@ export function TeamPanel({ actor }: { actor: Actor }) {
       return
     }
     toast.success(`Invite to ${invite.email} canceled.`)
+    refetch()
+  }
+
+  // Re-fires the invite email for an existing pending invite. Used
+  // when the original Resend call failed silently (no API key, rate
+  // limit, etc.) so the recipient never got the email.
+  async function onResendInvite(invite: RosterInvite) {
+    const res = await resendInvite(invite.id)
+    if ('error' in res) {
+      toast.error(res.error)
+      return
+    }
+    if (res.emailStatus.ok) {
+      toast.success(`Invite re-sent to ${invite.email}.`)
+    } else {
+      toast.warning(
+        `Re-sent attempt failed (${res.emailStatus.reason}). Check Vercel logs.`
+      )
+    }
     refetch()
   }
 
@@ -685,13 +705,22 @@ export function TeamPanel({ actor }: { actor: Actor }) {
                     </div>
                   </div>
                   {can && (
-                    <button
-                      onClick={() => onCancelInvite(inv)}
-                      title="Cancel invite"
-                      className={`flex size-7 items-center justify-center rounded border transition ${t.border} ${t.btn}`}
-                    >
-                      <X className="size-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => onResendInvite(inv)}
+                        title="Resend invite email"
+                        className={`inline-flex h-7 items-center gap-1 rounded border px-2 text-[11px] transition ${t.border} ${t.btn}`}
+                      >
+                        Resend
+                      </button>
+                      <button
+                        onClick={() => onCancelInvite(inv)}
+                        title="Cancel invite"
+                        className={`flex size-7 items-center justify-center rounded border transition ${t.border} ${t.btn}`}
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
                   )}
                 </li>
               )

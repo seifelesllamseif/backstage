@@ -242,7 +242,14 @@ async function pickLoginEmail(
 
 export async function inviteMember(
   input: z.input<typeof InviteInput>
-): Promise<{ ok: true; loginEmail: string } | { error: string }> {
+): Promise<
+  | {
+      ok: true
+      loginEmail: string
+      emailStatus: { ok: true } | { ok: false; reason: string }
+    }
+  | { error: string }
+> {
   const actor = await loadActor()
   if (!actor) return { error: 'Not signed in.' }
 
@@ -321,16 +328,141 @@ export async function inviteMember(
     expiresAt
   })
 
-  await sendEmail({
+  const emailResult = await sendInviteEmailSafely({
     to: parsed.data.contactEmail,
     subject,
     html,
-    text,
-    tag: 'invite'
-  }).catch(() => undefined)
+    text
+  })
+
+  await logActivity(
+    supabase,
+    me.companyId,
+    me.id,
+    'team.invited',
+    'team_invite',
+    invite.id,
+    {
+      email: loginEmail,
+      contactEmail: parsed.data.contactEmail,
+      fullName: parsed.data.fullName,
+      accessTier: parsed.data.accessTier,
+      emailOk: emailResult.ok,
+      emailReason: emailResult.ok ? null : emailResult.reason
+    }
+  )
 
   revalidatePath('/dashboard/team')
-  return { ok: true, loginEmail }
+  return { ok: true, loginEmail, emailStatus: emailResult }
+}
+
+// Wrapper around sendEmail that records the failure reason and prints
+// it into Vercel runtime logs instead of swallowing it. Mirrors the
+// dispatchEmail helper in meetings.ts.
+async function sendInviteEmailSafely(input: {
+  to: string
+  subject: string
+  html: string
+  text: string
+}): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    const res = await sendEmail({
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+      text: input.text,
+      tag: 'invite'
+    })
+    if (!res.ok) {
+      const reason = res.reason ?? 'unknown'
+      console.error(
+        `[team-invite] send failed to=${input.to} reason=${reason}`
+      )
+      return { ok: false, reason }
+    }
+    return { ok: true }
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : String(err).slice(0, 200)
+    console.error(`[team-invite] send threw to=${input.to}:`, err)
+    return { ok: false, reason: message }
+  }
+}
+
+// Re-fire the invite email for an existing pending invite. Useful
+// when the original Resend call silently failed (no API key, rate
+// limit, etc) and the row sits in team_invites with no email having
+// reached the recipient.
+export async function resendInvite(
+  inviteId: string
+): Promise<
+  | { ok: true; emailStatus: { ok: true } | { ok: false; reason: string } }
+  | { error: string }
+> {
+  const actor = await loadActor()
+  if (!actor) return { error: 'Not signed in.' }
+  const me = await getCurrentTeamMember()
+  if (!me) return { error: 'Not signed in.' }
+  const supabase = createAdminClient()
+  const { data: invite } = await supabase
+    .from('team_invites')
+    .select(
+      'id, email, contact_email, full_name, access_tier, token, expires_at, accepted_at, company_id'
+    )
+    .eq('id', inviteId)
+    .maybeSingle()
+  if (!invite) return { error: 'Invite not found.' }
+  if (invite.company_id !== me.companyId) {
+    return { error: 'Invite not found.' }
+  }
+  if (!canInvite(actor, invite.access_tier)) {
+    return { error: 'Only admins and leads can resend invites.' }
+  }
+  if (invite.accepted_at) {
+    return { error: 'This invite has already been accepted.' }
+  }
+
+  const { data: company } = await supabase
+    .from('companies')
+    .select('name')
+    .eq('id', invite.company_id)
+    .maybeSingle()
+
+  const { subject, html, text } = inviteMemberEmail({
+    recipientName: invite.full_name,
+    inviterName: me.fullName,
+    companyName: company?.name ?? 'Backstage',
+    accessTier: invite.access_tier,
+    loginEmail: invite.email,
+    initialPassword: INVITE_DEFAULT_PASSWORD,
+    acceptUrl: absoluteUrl(`/invite/${invite.token}`),
+    expiresAt: invite.expires_at
+  })
+
+  const emailResult = await sendInviteEmailSafely({
+    to: invite.contact_email,
+    subject,
+    html,
+    text
+  })
+
+  await logActivity(
+    supabase,
+    me.companyId,
+    me.id,
+    'team.invite_resent',
+    'team_invite',
+    invite.id,
+    {
+      email: invite.email,
+      contactEmail: invite.contact_email,
+      emailOk: emailResult.ok,
+      emailReason: emailResult.ok ? null : emailResult.reason
+    }
+  )
+
+  revalidatePath('/dashboard/team')
+  return { ok: true, emailStatus: emailResult }
 }
 
 export async function cancelInvite(
