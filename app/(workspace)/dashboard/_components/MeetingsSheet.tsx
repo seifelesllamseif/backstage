@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition
 } from 'react'
@@ -1208,6 +1209,8 @@ function RequestStatusCard({
   const queryClient = useQueryClient()
   const [busy, startBusy] = useTransition()
   const [rescheduling, setRescheduling] = useState(false)
+  const [reviewing, setReviewing] = useState(false)
+  const [justReviewed, setJustReviewed] = useState(false)
   // Tick so the timing chip re-renders ("Starts in 18m" → "Live now")
   // without waiting for a refetch.
   useMinuteTick()
@@ -1332,11 +1335,64 @@ function RequestStatusCard({
           </a>
         </div>
       )}
-      {isMeetingOver(request) && request.status === 'scheduled' && (
-        <p className={`text-[10px] italic ${t.textSubtle}`}>
-          This meeting has ended.
-        </p>
+      {isMeetingOver(request) &&
+        request.status === 'scheduled' &&
+        isParticipant &&
+        !justReviewed && (
+          reviewing ? (
+            <div
+              className={`mt-2 rounded-md border p-2 ${t.border} ${t.surfaceMuted}`}
+            >
+              <ReviewForm
+                meetingId={request.id}
+                onResolved={() => {
+                  setReviewing(false)
+                  // Mark this card as "just reviewed" so the success
+                  // panel (with share buttons) stays visible until the
+                  // user dismisses it. Otherwise the meeting status
+                  // flips to 'completed' on refetch and the card
+                  // disappears, taking the share affordance with it.
+                  setJustReviewed(true)
+                  onResolved()
+                }}
+                onCancel={() => setReviewing(false)}
+              />
+            </div>
+          ) : (
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed px-2 py-1.5">
+              <span className={`text-[10px] italic ${t.textSubtle}`}>
+                This meeting has ended.
+              </span>
+              <button
+                type="button"
+                onClick={() => setReviewing(true)}
+                className={`inline-flex h-6 items-center gap-1 rounded-md px-2 text-[10px] font-medium transition ${t.accent}`}
+              >
+                <Check className="size-3" /> Mark as done
+              </button>
+            </div>
+          )
+        )}
+      {justReviewed && (
+        <div
+          className={`mt-2 flex flex-col gap-2 rounded-md border border-teal-500/30 bg-teal-500/10 p-2 text-[11px]`}
+        >
+          <p className={`font-medium text-teal-700`}>Review saved ✓</p>
+          <p className={`text-[10px] ${t.textMuted}`}>
+            Share the recap with anyone outside the meeting.
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <ShareButtons request={request} />
+          </div>
+        </div>
       )}
+      {isMeetingOver(request) &&
+        request.status === 'scheduled' &&
+        !isParticipant && (
+          <p className={`text-[10px] italic ${t.textSubtle}`}>
+            This meeting has ended.
+          </p>
+        )}
       {request.rejectionReason && (
         <p className={`text-[10px] italic ${t.textSubtle}`}>
           Reason: {request.rejectionReason}
@@ -1411,52 +1467,134 @@ function RequestStatusCard({
   )
 }
 
-const OUTCOMES: { id: MeetingOutcome; label: string; tone: string }[] = [
+type OutcomeMeta = {
+  id: MeetingOutcome
+  label: string
+  tone: string
+  // What to ask the user to elaborate on once they've picked this
+  // outcome. Keeps the "why" question relevant - "what went wrong"
+  // for failed beats a generic "any notes?".
+  whyPrompt: string
+  whyPlaceholder: string
+}
+
+const OUTCOMES: OutcomeMeta[] = [
   {
     id: 'resolved',
     label: 'Resolved',
-    tone: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30'
+    tone: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30',
+    whyPrompt: 'How was it resolved?',
+    whyPlaceholder: 'In a sentence or two: what was agreed / what got unblocked.'
   },
   {
     id: 'partial',
     label: 'Partial',
-    tone: 'bg-amber-500/10 text-amber-700 border-amber-500/30'
+    tone: 'bg-amber-500/10 text-amber-700 border-amber-500/30',
+    whyPrompt: 'What got decided, what is still open?',
+    whyPlaceholder: 'Note the partial wins and the threads that are still open.'
   },
   {
     id: 'needs_followup',
     label: 'Needs follow-up',
-    tone: 'bg-sky-500/10 text-sky-700 border-sky-500/30'
+    tone: 'bg-sky-500/10 text-sky-700 border-sky-500/30',
+    whyPrompt: 'Why is a follow-up needed?',
+    whyPlaceholder: 'What still needs to happen, and roughly when.'
   },
   {
     id: 'failed',
     label: "Didn't deliver",
-    tone: 'bg-rose-500/10 text-rose-700 border-rose-500/30'
+    tone: 'bg-rose-500/10 text-rose-700 border-rose-500/30',
+    whyPrompt: 'What went wrong?',
+    whyPlaceholder: 'No-show, blocked, off-topic, ran out of time... a short note for next time.'
   }
 ]
 
-function ReviewCard({
-  request,
-  viewerTz,
-  onResolved
+// Auto-growing textarea. Uses CSS `field-sizing: content` when the
+// browser supports it (Chrome 123+, Firefox 137+, Safari TP). Falls
+// back to a JS height-on-input recalculation so the box always grows
+// to fit the content instead of scrolling internally.
+function AutoTextarea({
+  value,
+  onChange,
+  placeholder,
+  maxLength,
+  className,
+  minRows = 2
 }: {
-  request: MeetingRequestRow
-  viewerTz: string | null
+  value: string
+  onChange: (next: string) => void
+  placeholder?: string
+  maxLength?: number
+  className?: string
+  minRows?: number
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [value])
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      maxLength={maxLength}
+      rows={minRows}
+      style={{ fieldSizing: 'content' } as React.CSSProperties}
+      className={className}
+    />
+  )
+}
+
+// Pure review form. Used by ReviewCard (the "Awaiting your review"
+// section's standalone card) and inline on RequestStatusCard when the
+// meeting is over but not yet reviewed. Keep both surfaces in sync.
+//
+// Flow: pick an outcome -> the form expands with two contextual
+// questions: a required "why" (its prompt depends on the chosen
+// outcome) and an optional "next steps". Both are AutoTextareas that
+// grow with content. We pack the two values into a single review_notes
+// markdown blob so the column stays simple.
+function ReviewForm({
+  meetingId,
+  onResolved,
+  onCancel
+}: {
+  meetingId: string
   onResolved: () => void
+  onCancel?: () => void
 }) {
   const { t } = useDashTheme()
   const [outcome, setOutcome] = useState<MeetingOutcome | null>(null)
-  const [notes, setNotes] = useState('')
+  const [why, setWhy] = useState('')
+  const [nextSteps, setNextSteps] = useState('')
   const [busy, startBusy] = useTransition()
+  const meta = outcome ? OUTCOMES.find((o) => o.id === outcome) ?? null : null
+  const whyTrimmed = why.trim()
+  const canSave = Boolean(outcome) && whyTrimmed.length > 0
 
   function submit() {
     if (!outcome) {
       toast.error('Pick an outcome first.')
       return
     }
+    if (!whyTrimmed) {
+      toast.error('Add a short note for the "why" before saving.')
+      return
+    }
+    const stepsTrimmed = nextSteps.trim()
+    // Pack both fields into review_notes so we don't need a new
+    // column. The "Next steps:" section is omitted when empty.
+    const notesBody = stepsTrimmed
+      ? `${whyTrimmed}\n\nNext steps:\n${stepsTrimmed}`
+      : whyTrimmed
     startBusy(async () => {
-      const res = await submitMeetingReview(request.id, {
+      const res = await submitMeetingReview(meetingId, {
         outcome,
-        notes: notes.trim() || null
+        notes: notesBody.slice(0, 4000)
       })
       if ('error' in res) {
         toast.error(res.error)
@@ -1468,16 +1606,9 @@ function ReviewCard({
   }
 
   return (
-    <CardShell>
-      <div className="mb-1 flex items-start justify-between gap-2">
-        <p className={`text-xs font-medium ${t.text}`}>{request.title}</p>
-        <span className={`text-[10px] ${t.textMuted}`}>
-          {request.selectedStartsAt &&
-            fmtDateTime(request.selectedStartsAt, viewerTz)}
-        </span>
-      </div>
+    <>
       <p className={`mb-2 text-[10px] ${t.textMuted}`}>
-        How did it go? Pick one and (optionally) leave a few notes.
+        How did it go? Pick one, then answer a couple of quick prompts.
       </p>
       <div className="mb-2 flex flex-wrap gap-1">
         {OUTCOMES.map((o) => (
@@ -1493,23 +1624,89 @@ function ReviewCard({
           </button>
         ))}
       </div>
-      <textarea
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        rows={2}
-        maxLength={4000}
-        placeholder="What was decided? Any open threads?"
-        className={`mb-2 w-full resize-none rounded-md border px-2 py-1.5 text-[11px] leading-relaxed ${t.input}`}
-      />
-      <div className="flex items-center justify-end gap-1.5">
+      {meta && (
+        <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-1">
+            <span
+              className={`flex items-center gap-1 text-[9px] tracking-wider uppercase ${t.textMuted}`}
+            >
+              {meta.whyPrompt}
+              <span className="text-red-500">*</span>
+            </span>
+            <AutoTextarea
+              value={why}
+              onChange={setWhy}
+              placeholder={meta.whyPlaceholder}
+              maxLength={3000}
+              className={`min-h-[3rem] w-full resize-none rounded-md border px-2 py-1.5 text-[11px] leading-relaxed ${t.input}`}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span
+              className={`text-[9px] tracking-wider uppercase ${t.textMuted}`}
+            >
+              Next steps (optional)
+            </span>
+            <AutoTextarea
+              value={nextSteps}
+              onChange={setNextSteps}
+              placeholder="Action items, owners, dates. One per line."
+              maxLength={2000}
+              className={`min-h-[2.5rem] w-full resize-none rounded-md border px-2 py-1.5 text-[11px] leading-relaxed ${t.input}`}
+            />
+          </label>
+        </div>
+      )}
+      <div className="mt-2 flex items-center justify-end gap-1.5">
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className={`h-7 rounded-md border px-2 text-[11px] ${t.btn}`}
+          >
+            Back
+          </button>
+        )}
         <button
           onClick={submit}
-          disabled={busy || !outcome}
+          disabled={busy || !canSave}
+          title={
+            !outcome
+              ? 'Pick an outcome'
+              : !whyTrimmed
+                ? `Answer "${meta?.whyPrompt ?? 'why'}" before saving`
+                : undefined
+          }
           className={`inline-flex h-7 items-center rounded-md px-2.5 text-[11px] disabled:opacity-40 ${t.accent}`}
         >
           {busy ? 'Saving...' : 'Save review'}
         </button>
       </div>
+    </>
+  )
+}
+
+function ReviewCard({
+  request,
+  viewerTz,
+  onResolved
+}: {
+  request: MeetingRequestRow
+  viewerTz: string | null
+  onResolved: () => void
+}) {
+  const { t } = useDashTheme()
+  return (
+    <CardShell>
+      <div className="mb-1 flex items-start justify-between gap-2">
+        <p className={`text-xs font-medium ${t.text}`}>{request.title}</p>
+        <span className={`text-[10px] ${t.textMuted}`}>
+          {request.selectedStartsAt &&
+            fmtDateTime(request.selectedStartsAt, viewerTz)}
+        </span>
+      </div>
+      <ReviewForm meetingId={request.id} onResolved={onResolved} />
     </CardShell>
   )
 }

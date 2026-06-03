@@ -449,6 +449,11 @@ export interface MeetingUpdate {
   taskRef: null;
   taskTitle: null;
   meetingId: string | null;
+  // Original action string from activity_logs ("meeting.reviewed",
+  // "meeting.requested", ...). UpdatesPanel uses it to route clicks:
+  // reviewed → share page (has the recap), everything else → inbox
+  // sheet which still has the meeting in an active section.
+  meetingAction: string | null;
 }
 
 export function mapMeetingActivity(activity: DbActivity[]): MeetingUpdate[] {
@@ -466,6 +471,7 @@ export function mapMeetingActivity(activity: DbActivity[]): MeetingUpdate[] {
       taskRef: null,
       taskTitle: null,
       meetingId: a.entityId ?? null,
+      meetingAction: a.action ?? null,
     };
   });
 }
@@ -490,6 +496,21 @@ function meetingActivityTextFor(row: DbActivity): string {
       return `${who} rescheduled ${title}`;
     case "meeting.canceled":
       return `${who} canceled ${title}`;
+    case "meeting.reviewed": {
+      const outcomeLabels: Record<string, string> = {
+        resolved: "resolved",
+        partial: "partially resolved",
+        needs_followup: "needs a follow-up",
+        failed: "didn't deliver"
+      };
+      const outcome =
+        typeof meta?.outcome === "string"
+          ? outcomeLabels[meta.outcome] ?? meta.outcome
+          : null;
+      return outcome
+        ? `${who} reviewed ${title} (${outcome})`
+        : `${who} reviewed ${title}`;
+    }
     default:
       return `${who} · ${row.action}`;
   }

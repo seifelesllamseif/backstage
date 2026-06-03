@@ -1194,6 +1194,121 @@ export async function listMeetingsForTask(
   }
 }
 
+// ─── Per-member review history ───────────────────────────────────────────
+//
+// Powers the "Recent reviews" section on the PortfolioSheet so users
+// can open a teammate's profile and see how their last meetings went.
+// Returns completed meetings (status='completed' AND review_notes set)
+// where the member was the requester or an attendee, most-recent first.
+
+export interface MemberReviewSummary {
+  id: string
+  title: string
+  reviewedAt: string | null
+  selectedStartsAt: string | null
+  outcome: MeetingOutcome
+  reviewNotes: string | null
+  counterpartyName: string
+  reviewedByName: string | null
+}
+
+export async function listMemberReviews(
+  memberId: string,
+  limit = 10
+): Promise<{ reviews: MemberReviewSummary[] } | { error: string }> {
+  const viewer = await getCurrentTeamMember()
+  if (!viewer) return { error: 'Not signed in.' }
+  if (!memberId || !/^[0-9a-f-]{36}$/i.test(memberId)) {
+    return { error: 'Invalid member id.' }
+  }
+  const supabase = createAdminClient()
+  // Two cheap targeted queries (member as requester / member as
+  // attendee) merged in JS - same pattern as listMyMeetingRequests
+  // since PostgREST can't OR across a join in one shot.
+  const SELECT = `
+    id, title, status, reviewed_at, selected_starts_at, outcome, review_notes,
+    requester_id,
+    requester:team_members!meeting_requests_requester_id_fkey(full_name),
+    reviewed_by:team_members!meeting_requests_reviewed_by_id_fkey(full_name),
+    meeting_attendees(member_id, member:team_members(full_name))
+  `
+  const [{ data: requested }, { data: attending }] = await Promise.all([
+    supabase
+      .from('meeting_requests')
+      .select(SELECT)
+      .eq('company_id', viewer.companyId)
+      .eq('requester_id', memberId)
+      .eq('status', 'completed')
+      .not('review_notes', 'is', null)
+      .order('reviewed_at', { ascending: false })
+      .limit(limit),
+    supabase
+      .from('meeting_requests')
+      .select(SELECT + ', ma_self:meeting_attendees!inner(member_id)')
+      .eq('company_id', viewer.companyId)
+      .eq('ma_self.member_id', memberId)
+      .eq('status', 'completed')
+      .not('review_notes', 'is', null)
+      .order('reviewed_at', { ascending: false })
+      .limit(limit)
+  ])
+
+  type RawRow = {
+    id: string
+    title: string
+    reviewed_at: string | null
+    selected_starts_at: string | null
+    outcome: MeetingOutcome
+    review_notes: string | null
+    requester_id: string
+    requester: { full_name: string } | null
+    reviewed_by: { full_name: string } | null
+    meeting_attendees:
+      | { member_id: string; member: { full_name: string } | null }[]
+      | null
+  }
+
+  const byId = new Map<string, RawRow>()
+  for (const r of (requested ?? []) as unknown as RawRow[]) byId.set(r.id, r)
+  for (const r of (attending ?? []) as unknown as RawRow[]) byId.set(r.id, r)
+
+  const reviews: MemberReviewSummary[] = Array.from(byId.values())
+    .sort((a, b) =>
+      (b.reviewed_at ?? '').localeCompare(a.reviewed_at ?? '')
+    )
+    .slice(0, limit)
+    .map((r) => {
+      // Counterparty is "whoever isn't the focus member." For 1:1
+      // that's a single name; for groups we summarize.
+      const isFocusRequester = r.requester_id === memberId
+      let counterparty: string
+      if (isFocusRequester) {
+        const others = (r.meeting_attendees ?? []).filter(
+          (a) => a.member_id !== memberId
+        )
+        if (others.length === 0) counterparty = 'someone'
+        else if (others.length === 1)
+          counterparty = others[0].member?.full_name ?? 'someone'
+        else
+          counterparty = `${others[0].member?.full_name ?? 'someone'} + ${others.length - 1} more`
+      } else {
+        counterparty = r.requester?.full_name ?? 'someone'
+      }
+      return {
+        id: r.id,
+        title: r.title,
+        reviewedAt: r.reviewed_at,
+        selectedStartsAt: r.selected_starts_at,
+        outcome: r.outcome,
+        reviewNotes: r.review_notes,
+        counterpartyName: counterparty,
+        reviewedByName: r.reviewed_by?.full_name ?? null
+      }
+    })
+
+  return { reviews }
+}
+
 // ─── Public share view ───────────────────────────────────────────────────
 
 export interface SharedMeeting {
@@ -1221,6 +1336,11 @@ export interface SharedMeeting {
   questions: string | null
   preRead: string | null
   agenda: string | null
+  // Post-meeting review surfaces in the recap block on the share page
+  // when the meeting is 'completed'. Null on everything else.
+  outcome: MeetingOutcome | null
+  reviewNotes: string | null
+  reviewedAt: string | null
 }
 
 const SHARE_VISIBLE_STATUSES = ['pending', 'approved', 'scheduled', 'completed']
@@ -1233,7 +1353,7 @@ export async function fetchMeetingForShare(
   const { data } = await supabase
     .from('meeting_requests')
     .select(
-      `id, title, status, mode, duration_min, proposed_date, selected_starts_at, slots, meet_link, goal, context, questions, pre_read, agenda,
+      `id, title, status, mode, duration_min, proposed_date, selected_starts_at, slots, meet_link, goal, context, questions, pre_read, agenda, outcome, review_notes, reviewed_at,
        requester:team_members!meeting_requests_requester_id_fkey(full_name, avatar_url),
        meeting_attendees(member:team_members(full_name, avatar_url))`
     )
@@ -1268,7 +1388,10 @@ export async function fetchMeetingForShare(
     context: data.context,
     questions: data.questions,
     preRead: data.pre_read,
-    agenda: data.agenda
+    agenda: data.agenda,
+    outcome: data.outcome,
+    reviewNotes: data.review_notes,
+    reviewedAt: data.reviewed_at
   }
 }
 

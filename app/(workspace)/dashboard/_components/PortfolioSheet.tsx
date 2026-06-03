@@ -13,7 +13,8 @@ import {
   PRESENCE_LABEL
 } from './presence'
 import { useDashTheme } from './theme'
-import { fetchMemberPortfolio } from '../actions'
+import { fetchMemberPortfolio, listMemberReviews } from '../actions'
+import type { MemberReviewSummary } from '@/supabase/dashboard/meetings'
 
 // Lightweight side-panel view of a teammate: avatar, name, presence,
 // role / focus, headline, bio, timezone, languages, skills, socials, and
@@ -62,6 +63,7 @@ export function PortfolioSheetProvider({
   const [data, setData] = useState<MemberPortfolio | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [reviews, setReviews] = useState<MemberReviewSummary[]>([])
 
   const open = useCallback((memberId: string) => {
     setOpenId(memberId)
@@ -71,19 +73,30 @@ export function PortfolioSheetProvider({
     if (!openId) {
       setData(null)
       setError(null)
+      setReviews([])
       return
     }
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetchMemberPortfolio(openId)
-      .then((res) => {
+    setReviews([])
+    // Fetch profile and recent reviews in parallel - they're
+    // independent and either one rendering early is better than
+    // blocking on the other.
+    Promise.all([
+      fetchMemberPortfolio(openId),
+      listMemberReviews(openId, 10)
+    ])
+      .then(([portfolioRes, reviewsRes]) => {
         if (cancelled) return
-        if ('error' in res) {
-          setError(res.error ?? 'Failed to load profile.')
+        if ('error' in portfolioRes) {
+          setError(portfolioRes.error ?? 'Failed to load profile.')
           setData(null)
         } else {
-          setData(res.member)
+          setData(portfolioRes.member)
+        }
+        if (!('error' in reviewsRes)) {
+          setReviews(reviewsRes.reviews)
         }
       })
       .finally(() => {
@@ -241,6 +254,12 @@ export function PortfolioSheetProvider({
                   <Socials portfolio={data} t={t} />
                 </>
               )}
+
+              {reviews.length > 0 && (
+                <Section title={`Recent meeting reviews (${reviews.length})`} t={t}>
+                  <MeetingReviewsList reviews={reviews} t={t} />
+                </Section>
+              )}
             </div>
           </div>
         </SheetContent>
@@ -371,4 +390,106 @@ function Socials({
       </div>
     </Section>
   )
+}
+
+const REVIEW_OUTCOME_LABEL: Record<
+  MemberReviewSummary['outcome'],
+  string
+> = {
+  resolved: 'Resolved',
+  partial: 'Partial',
+  needs_followup: 'Needs follow-up',
+  failed: "Didn't deliver"
+}
+
+const REVIEW_OUTCOME_TONE: Record<
+  MemberReviewSummary['outcome'],
+  string
+> = {
+  resolved: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700',
+  partial: 'border-amber-500/30 bg-amber-500/10 text-amber-700',
+  needs_followup: 'border-sky-500/30 bg-sky-500/10 text-sky-700',
+  failed: 'border-rose-500/30 bg-rose-500/10 text-rose-700'
+}
+
+function MeetingReviewsList({
+  reviews,
+  t
+}: {
+  reviews: MemberReviewSummary[]
+  t: ReturnType<typeof useDashTheme>['t']
+}) {
+  return (
+    <ul className="flex flex-col gap-1.5">
+      {reviews.map((r) => {
+        // Pack format from ReviewForm: "<why>\n\nNext steps:\n<steps>".
+        // We only need the first non-empty line of the "why" for a
+        // single-line preview here; the share page has the full thing.
+        const why = (() => {
+          const raw = r.reviewNotes ?? ''
+          const marker = '\n\nNext steps:\n'
+          const idx = raw.indexOf(marker)
+          const body = (idx === -1 ? raw : raw.slice(0, idx)).trim()
+          const firstLine = body.split(/\r?\n/).find((l) => l.trim().length > 0)
+          return (firstLine ?? '').trim()
+        })()
+        const reviewedLabel = formatRelativeReviewed(r.reviewedAt)
+        return (
+          <li
+            key={r.id}
+            className={`rounded-md border p-2 ${t.border} ${t.surfaceMuted}`}
+          >
+            <div className="mb-1 flex items-start justify-between gap-2">
+              <a
+                href={`/share/meeting/${r.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className={`min-w-0 flex-1 truncate text-[11px] font-medium hover:underline ${t.text}`}
+                title={r.title}
+              >
+                {r.title}
+              </a>
+              <span
+                className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${REVIEW_OUTCOME_TONE[r.outcome]}`}
+              >
+                {REVIEW_OUTCOME_LABEL[r.outcome]}
+              </span>
+            </div>
+            <div
+              className={`flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[10px] ${t.textMuted}`}
+            >
+              <span className="truncate">with {r.counterpartyName}</span>
+              {reviewedLabel && (
+                <span className="tabular-nums">· {reviewedLabel}</span>
+              )}
+            </div>
+            {why && (
+              <p
+                className={`mt-1 line-clamp-2 text-[11px] leading-snug ${t.text}`}
+                title={why}
+              >
+                {why}
+              </p>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+function formatRelativeReviewed(iso: string | null): string | null {
+  if (!iso) return null
+  try {
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return null
+    const diffMs = Date.now() - d.getTime()
+    const day = 86_400_000
+    if (diffMs < day) return 'today'
+    if (diffMs < 2 * day) return 'yesterday'
+    if (diffMs < 7 * day) return `${Math.floor(diffMs / day)}d ago`
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  } catch {
+    return null
+  }
 }

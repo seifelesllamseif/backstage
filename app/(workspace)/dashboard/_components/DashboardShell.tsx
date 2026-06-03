@@ -161,6 +161,7 @@ export interface DashboardInitial {
     taskRef: null
     taskTitle: null
     meetingId: string | null
+    meetingAction: string | null
   }[]
   externalRefsByTask: Record<string, TaskExternalRef[]>
   externalRefsByProject: Record<string, ProjectExternalRef[]>
@@ -1880,14 +1881,16 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         taskId: taskId as string | null,
         taskRef: task?.ref ?? null,
         taskTitle: task?.title ?? null,
-        meetingId: null as string | null
+        meetingId: null as string | null,
+        meetingAction: null as string | null
       }))
     })
     // Team and meeting rows arrive pre-shaped from fetchInitial; concat
     // and sort everything by recency.
     const teamRows = initial.teamUpdates.map((r) => ({
       ...r,
-      meetingId: null as string | null
+      meetingId: null as string | null,
+      meetingAction: null as string | null
     }))
     const all = [...taskRows, ...teamRows, ...initial.meetingUpdates]
     return all.sort((a, b) => b.atRaw.localeCompare(a.atRaw))

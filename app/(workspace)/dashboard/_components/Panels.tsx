@@ -1655,6 +1655,11 @@ interface UpdateRow {
   // Populated for meeting rows; click opens the inbox sheet focused on
   // this meeting. Null for everything else.
   meetingId: string | null
+  // Activity-log action string for meeting rows ("meeting.reviewed",
+  // "meeting.requested", ...). Drives where the click routes: reviewed
+  // meetings open the share page (which has the recap), everything
+  // else falls back to the inbox sheet.
+  meetingAction?: string | null
 }
 
 type UpdateFilter =
@@ -2028,11 +2033,26 @@ export function UpdatesPanel({
                           <li key={a.id}>
                             <button
                               onClick={() => {
-                                // Meeting rows open the inbox sheet
-                                // focused on this meeting; task rows open
-                                // the task. Team rows are informational.
-                                if (a.taskId) onOpenTask(a.taskId)
-                                else if (a.meetingId) onOpenMeeting(a.meetingId)
+                                // Meeting rows: reviewed → share page
+                                // (has the recap), everything else →
+                                // inbox sheet. Task rows open the task.
+                                // Team rows are informational.
+                                if (a.taskId) {
+                                  onOpenTask(a.taskId)
+                                } else if (a.meetingId) {
+                                  if (
+                                    a.meetingAction === 'meeting.reviewed' &&
+                                    typeof window !== 'undefined'
+                                  ) {
+                                    window.open(
+                                      `/share/meeting/${a.meetingId}`,
+                                      '_blank',
+                                      'noopener,noreferrer'
+                                    )
+                                  } else {
+                                    onOpenMeeting(a.meetingId)
+                                  }
+                                }
                               }}
                               disabled={!clickable}
                               className={`group flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition disabled:cursor-default ${t.column} ${clickable ? t.rowHover : ''}`}

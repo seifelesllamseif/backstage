@@ -21,6 +21,7 @@ import {
   appendMeetingContext as appendMeetingContextImpl,
   submitMeetingReview as submitMeetingReviewImpl,
   resendMeetingNotification as resendMeetingNotificationImpl,
+  listMemberReviews as listMemberReviewsImpl,
   approveMeetingRequest as approveMeetingRequestImpl,
   cancelMeetingRequest as cancelMeetingRequestImpl,
   createMeetingRequest as createMeetingRequestImpl,
@@ -493,6 +494,12 @@ export async function resendMeetingNotification(
   ...args: Parameters<typeof resendMeetingNotificationImpl>
 ) {
   return resendMeetingNotificationImpl(...args)
+}
+
+export async function listMemberReviews(
+  ...args: Parameters<typeof listMemberReviewsImpl>
+) {
+  return listMemberReviewsImpl(...args)
 }
 
 export async function linkTaskToMeeting(

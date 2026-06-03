@@ -19,6 +19,17 @@ function describeAttendees(m: SharedMeeting): string {
 function descriptionFor(m: SharedMeeting): string {
   const when = formatWhen(m)
   const who = `${m.requesterName} ↔ ${describeAttendees(m)}`
+  // Completed meetings lead with the outcome - more useful in a
+  // WhatsApp preview than the date now in the past.
+  if (m.status === 'completed' && m.outcome) {
+    const outcomeLabel: Record<NonNullable<SharedMeeting['outcome']>, string> = {
+      resolved: 'Resolved',
+      partial: 'Partial',
+      needs_followup: 'Needs follow-up',
+      failed: "Didn't deliver"
+    }
+    return `${outcomeLabel[m.outcome]} · ${who}`
+  }
   return when ? `${who} · ${when}` : who
 }
 
@@ -158,6 +169,14 @@ async function SharedMeetingContent({ params }: { params: Params }) {
             />
           </div>
 
+          {meeting.status === 'completed' && meeting.outcome && (
+            <RecapBlock
+              outcome={meeting.outcome}
+              notes={meeting.reviewNotes}
+              reviewedAt={meeting.reviewedAt}
+            />
+          )}
+
           {(meeting.goal ||
             meeting.context ||
             meeting.questions ||
@@ -245,6 +264,102 @@ function BackgroundDecor() {
       />
     </>
   )
+}
+
+const OUTCOME_LABEL: Record<NonNullable<SharedMeeting['outcome']>, string> = {
+  resolved: 'Resolved',
+  partial: 'Partial',
+  needs_followup: 'Needs follow-up',
+  failed: "Didn't deliver"
+}
+
+const OUTCOME_TONE: Record<NonNullable<SharedMeeting['outcome']>, string> = {
+  resolved:
+    'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-200 dark:border-emerald-500/30',
+  partial:
+    'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-500/20 dark:text-amber-200 dark:border-amber-500/30',
+  needs_followup:
+    'bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-500/20 dark:text-sky-200 dark:border-sky-500/30',
+  failed:
+    'bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-500/20 dark:text-rose-200 dark:border-rose-500/30'
+}
+
+function RecapBlock({
+  outcome,
+  notes,
+  reviewedAt
+}: {
+  outcome: NonNullable<SharedMeeting['outcome']>
+  notes: string | null
+  reviewedAt: string | null
+}) {
+  // notes is stored as either a raw "why" body or
+  //   <why>\n\nNext steps:\n<steps>
+  // (see ReviewForm.submit). Split it cleanly so the page surfaces
+  // both sections instead of dumping the marker line.
+  const { why, nextSteps } = splitRecapNotes(notes)
+  const reviewedAtLabel = (() => {
+    if (!reviewedAt) return null
+    try {
+      const d = new Date(reviewedAt)
+      if (Number.isNaN(d.getTime())) return null
+      return d.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      })
+    } catch {
+      return null
+    }
+  })()
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-[#00A89E]/30 bg-[#00A89E]/5 p-4 dark:border-[#00A89E]/30 dark:bg-[#00A89E]/10">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[10px] tracking-[0.22em] uppercase text-zinc-500 dark:text-zinc-400">
+          Recap
+        </span>
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${OUTCOME_TONE[outcome]}`}
+        >
+          {OUTCOME_LABEL[outcome]}
+        </span>
+      </div>
+      {why && (
+        <p className="text-sm leading-relaxed whitespace-pre-wrap text-zinc-800 dark:text-zinc-100">
+          {why}
+        </p>
+      )}
+      {nextSteps && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] tracking-[0.22em] uppercase text-zinc-500 dark:text-zinc-400">
+            Next steps
+          </span>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap text-zinc-700 dark:text-zinc-200">
+            {nextSteps}
+          </p>
+        </div>
+      )}
+      {reviewedAtLabel && (
+        <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+          Reviewed {reviewedAtLabel}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function splitRecapNotes(raw: string | null): {
+  why: string
+  nextSteps: string
+} {
+  if (!raw) return { why: '', nextSteps: '' }
+  const marker = '\n\nNext steps:\n'
+  const idx = raw.indexOf(marker)
+  if (idx === -1) return { why: raw.trim(), nextSteps: '' }
+  return {
+    why: raw.slice(0, idx).trim(),
+    nextSteps: raw.slice(idx + marker.length).trim()
+  }
 }
 
 function BriefBlock({ label, body }: { label: string; body: string }) {

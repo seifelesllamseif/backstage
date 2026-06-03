@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import CountUp from 'react-countup'
+import { toast } from 'sonner'
 import { formatTimeIn } from '@/lib/timezone'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -28,7 +30,7 @@ import type { Sprint } from './boardData'
 // click handlers that route into the existing MeetingsSheet or
 // PortfolioSheet so we don't reinvent any modals.
 
-type ViewMode = 'month' | 'week' | 'list'
+type ViewMode = 'month' | 'week' | 'list' | 'history'
 
 type MeetingItem = {
   kind: 'meeting'
@@ -49,6 +51,16 @@ type MeetingItem = {
   requesterName: string
   attendees: { id: string; fullName: string }[]
   meetLink: string | null
+  // Populated on completed meetings so the History view can render
+  // the recap inline without re-fetching.
+  outcome:
+    | 'resolved'
+    | 'partial'
+    | 'needs_followup'
+    | 'failed'
+    | null
+  reviewNotes: string | null
+  reviewedAt: string | null
 }
 
 type SprintItem = {
@@ -137,7 +149,48 @@ export function MeetingsPanel({
         requesterId: r.requesterId,
         requesterName: r.requesterName,
         attendees: r.attendees.map((a) => ({ id: a.id, fullName: a.fullName })),
-        meetLink: r.meetLink
+        meetLink: r.meetLink,
+        outcome: r.outcome ?? null,
+        reviewNotes: r.reviewNotes ?? null,
+        reviewedAt: r.reviewedAt ?? null
+      })
+    }
+    return Array.from(byId.values())
+  }, [pendingQuery.data, mineQuery.data])
+
+  // History view needs every meeting the user can see - including
+  // canceled / rejected / declined / completed - and meetings without
+  // a bucketDay (slots-mode pending). Meeting calendar views drop
+  // those; HistoryList keeps them.
+  const allMeetingItems: MeetingItem[] = useMemo(() => {
+    const all = [...(pendingQuery.data ?? []), ...(mineQuery.data ?? [])]
+    const byId = new Map<string, MeetingItem>()
+    for (const r of all) {
+      const startsAt = r.selectedStartsAt ? new Date(r.selectedStartsAt) : null
+      const endsAt = startsAt
+        ? new Date(startsAt.getTime() + r.durationMin * 60_000)
+        : null
+      // bucketDay falls back to created_at-ish for history rows that
+      // have neither selectedStartsAt nor proposed_date - we never
+      // sort by it here, but keep the field type-consistent.
+      const bucketDay = startsAt
+        ? isoDateKey(startsAt)
+        : r.proposedDate ?? ''
+      byId.set(r.id, {
+        kind: 'meeting',
+        id: r.id,
+        title: r.title,
+        startsAt,
+        endsAt,
+        bucketDay,
+        status: r.status,
+        requesterId: r.requesterId,
+        requesterName: r.requesterName,
+        attendees: r.attendees.map((a) => ({ id: a.id, fullName: a.fullName })),
+        meetLink: r.meetLink,
+        outcome: r.outcome ?? null,
+        reviewNotes: r.reviewNotes ?? null,
+        reviewedAt: r.reviewedAt ?? null
       })
     }
     return Array.from(byId.values())
@@ -170,6 +223,20 @@ export function MeetingsPanel({
   }
 
   function openMeeting(id: string) {
+    // For completed meetings, route to the share page in a new tab -
+    // it renders the full recap (outcome + notes + parties), which
+    // the inbox sheet doesn't surface for inactive statuses. Active
+    // statuses keep the existing inbox-sheet behavior so the user
+    // can act on them.
+    const target =
+      allMeetingItems.find((m) => m.id === id) ??
+      meetingItems.find((m) => m.id === id)
+    if (target?.status === 'completed') {
+      if (typeof window !== 'undefined') {
+        window.open(`/share/meeting/${id}`, '_blank', 'noopener,noreferrer')
+      }
+      return
+    }
     meetingsSheet.open({ focusedRequestId: id })
   }
 
@@ -316,6 +383,15 @@ export function MeetingsPanel({
             onSelectMember={openMember}
           />
         )}
+        {view === 'history' && (
+          <HistoryList
+            allMeetings={allMeetingItems}
+            currentUserId={currentUserId}
+            viewerTz={viewerTz}
+            onSelectMeeting={openMeeting}
+            onSelectMember={openMember}
+          />
+        )}
       </div>
 
       <Legend />
@@ -385,29 +461,40 @@ function Stats({
       title: 'Show only meetings pending approval'
     }
   ]
-  if (awaitingReview > 0) {
-    cards.push({
-      label: 'Awaiting review',
-      value: awaitingReview,
-      tone: 'text-rose-600',
-      onClick: onShowReview,
-      title: 'Past meetings that need a quick outcome note'
-    })
-  }
+  // Always render Awaiting review so the admin sees the bucket exists
+  // even when it's currently zero. Tone stays muted at zero so it
+  // doesn't shout for attention until there's something to act on.
+  cards.push({
+    label: 'Awaiting review',
+    value: awaitingReview,
+    tone: awaitingReview > 0 ? 'text-rose-600' : 'text-zinc-500',
+    onClick: onShowReview,
+    title: 'Past meetings that need a quick outcome note'
+  })
   return (
-    <div className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+    <div
+      className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5"
+    >
       {cards.map((c) => (
         <button
           key={c.label}
           onClick={c.onClick}
           title={c.title}
-          className={`rounded-lg border p-3 text-left transition hover:bg-teal-500/5 hover:border-teal-500/40 ${t.border}`}
+          className={`rounded-lg border p-2.5 text-left transition hover:bg-teal-500/5 hover:border-teal-500/40 ${t.border}`}
         >
-          <div className={`text-[10px] tracking-wider uppercase ${t.textMuted}`}>
+          <div
+            className={`truncate text-[10px] tracking-wider uppercase ${t.textMuted}`}
+            title={c.label}
+          >
             {c.label}
           </div>
-          <div className={`mt-1 text-2xl font-semibold ${c.tone}`}>
-            {c.value}
+          <div className={`mt-0.5 text-xl font-semibold tabular-nums ${c.tone}`}>
+            <CountUp
+              end={c.value}
+              duration={0.6}
+              preserveValue
+              useEasing
+            />
           </div>
         </button>
       ))}
@@ -494,6 +581,12 @@ function Toolbar({
           onClick={() => setView('list')}
           icon={<LayoutList className="size-3" />}
           label="List"
+        />
+        <ToolbarTab
+          active={view === 'history'}
+          onClick={() => setView('history')}
+          icon={<Clock className="size-3" />}
+          label="History"
         />
       </div>
     </div>
@@ -998,6 +1091,361 @@ function ListView({
       </ul>
     </div>
   )
+}
+
+// ─── History view ────────────────────────────────────────────────────────
+//
+// Full audit log. Shows every meeting the viewer can see - active,
+// canceled, declined, rejected, completed - filterable by status.
+// Sorted by selected_starts_at (or created order fallback) so the
+// most recent activity sits at the top.
+
+const HISTORY_FILTERS: {
+  id: 'all' | 'scheduled' | 'completed' | 'canceled' | 'pending'
+  label: string
+  match: MeetingItem['status'][]
+}[] = [
+  { id: 'all', label: 'All', match: [] },
+  { id: 'scheduled', label: 'Scheduled', match: ['scheduled', 'approved'] },
+  { id: 'completed', label: 'Completed', match: ['completed'] },
+  { id: 'canceled', label: 'Canceled', match: ['canceled', 'rejected', 'declined'] },
+  { id: 'pending', label: 'Pending', match: ['pending'] }
+]
+
+function HistoryList({
+  allMeetings,
+  currentUserId,
+  viewerTz,
+  onSelectMeeting,
+  onSelectMember
+}: {
+  allMeetings: MeetingItem[]
+  currentUserId: string
+  viewerTz: string | null
+  onSelectMeeting: (id: string) => void
+  onSelectMember: (id: string) => void
+}) {
+  const { t } = useDashTheme()
+  const [filter, setFilter] = useState<(typeof HISTORY_FILTERS)[number]['id']>('all')
+  const [query, setQuery] = useState('')
+  // Track which rows have the recap panel expanded. Multiple at a time
+  // is fine - the panels are small and self-contained.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const toggleExpanded = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const counts = useMemo(() => {
+    const c: Record<(typeof HISTORY_FILTERS)[number]['id'], number> = {
+      all: allMeetings.length,
+      scheduled: 0,
+      completed: 0,
+      canceled: 0,
+      pending: 0
+    }
+    for (const m of allMeetings) {
+      if (m.status === 'scheduled' || m.status === 'approved') c.scheduled++
+      else if (m.status === 'completed') c.completed++
+      else if (
+        m.status === 'canceled' ||
+        m.status === 'rejected' ||
+        m.status === 'declined'
+      )
+        c.canceled++
+      else if (m.status === 'pending') c.pending++
+    }
+    return c
+  }, [allMeetings])
+
+  const filtered = useMemo(() => {
+    const match =
+      HISTORY_FILTERS.find((f) => f.id === filter)?.match ?? []
+    const q = query.trim().toLowerCase()
+    const list = allMeetings.filter((m) => {
+      if (match.length > 0 && !match.includes(m.status)) return false
+      if (!q) return true
+      const hay = [
+        m.title,
+        m.requesterName,
+        ...m.attendees.map((a) => a.fullName)
+      ]
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(q)
+    })
+    // Most recent first - selectedStartsAt when present, otherwise
+    // bucketDay (which is the proposed date for pending).
+    return list.sort((a, b) => {
+      const aT = a.startsAt?.getTime() ?? Date.parse(a.bucketDay) ?? 0
+      const bT = b.startsAt?.getTime() ?? Date.parse(b.bucketDay) ?? 0
+      return bT - aT
+    })
+  }, [allMeetings, filter, query])
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div
+          className={`inline-flex items-center rounded-md border p-0.5 ${t.border}`}
+        >
+          {HISTORY_FILTERS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setFilter(f.id)}
+              className={`inline-flex h-6 items-center gap-1 rounded px-2 text-[11px] transition ${filter === f.id ? t.tabActive : t.tab}`}
+            >
+              {f.label}
+              <span className={`tabular-nums ${t.textSubtle}`}>
+                {counts[f.id]}
+              </span>
+            </button>
+          ))}
+        </div>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search title or person..."
+          className={`h-7 flex-1 rounded-md border px-2 text-[11px] ${t.input}`}
+        />
+      </div>
+
+      {filtered.length === 0 ? (
+        <div
+          className={`rounded-lg border p-8 text-center text-[11px] ${t.border} ${t.textSubtle}`}
+        >
+          No meetings match this filter.
+        </div>
+      ) : (
+        <div className={`overflow-hidden rounded-lg border ${t.border}`}>
+          <ul className="divide-y">
+            {filtered.map((m) => {
+              const hasRecap = Boolean(m.outcome) && Boolean(m.reviewNotes)
+              const isExpanded = expanded.has(m.id)
+              return (
+                <li key={m.id} className={t.border}>
+                  <div className="flex items-start justify-between gap-3 p-3">
+                    <div className="min-w-0 flex-1">
+                      <button
+                        onClick={() => onSelectMeeting(m.id)}
+                        className={`text-left text-xs font-medium ${t.text} hover:underline`}
+                      >
+                        {m.title}
+                      </button>
+                      <div
+                        className={`mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] ${t.textMuted}`}
+                      >
+                        <MemberLink
+                          id={m.requesterId}
+                          name={m.requesterName}
+                          onSelectMember={onSelectMember}
+                        />
+                        <span>→</span>
+                        {m.attendees.slice(0, 3).map((a) => (
+                          <MemberLink
+                            key={a.id}
+                            id={a.id}
+                            name={a.fullName}
+                            onSelectMember={onSelectMember}
+                          />
+                        ))}
+                        {m.attendees.length > 3 && (
+                          <span>+{m.attendees.length - 3}</span>
+                        )}
+                        {m.startsAt && (
+                          <span className="tabular-nums">
+                            · {formatFullDateTime(m.startsAt, viewerTz)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {hasRecap && (
+                        <button
+                          type="button"
+                          onClick={() => toggleExpanded(m.id)}
+                          className={`inline-flex h-6 items-center gap-0.5 rounded-md border px-1.5 text-[10px] transition ${t.border} ${t.btn}`}
+                        >
+                          {isExpanded ? 'Hide recap' : 'View recap'}
+                        </button>
+                      )}
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${historyStatusTone(m.status)}`}
+                      >
+                        {historyStatusLabel(m.status)}
+                      </span>
+                    </div>
+                  </div>
+                  {isExpanded && hasRecap && (
+                    <HistoryRecap meeting={m} />
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+      <p className={`text-[10px] ${t.textSubtle}`}>
+        {currentUserId
+          ? `Showing every meeting you're a participant in, plus anything you can approve as an admin or lead.`
+          : ''}
+      </p>
+    </div>
+  )
+}
+
+function HistoryRecap({ meeting }: { meeting: MeetingItem }) {
+  const { t } = useDashTheme()
+  const outcome = meeting.outcome
+  if (!outcome) return null
+  // Same packing format as ReviewForm: "<why>\n\nNext steps:\n<steps>".
+  const raw = meeting.reviewNotes ?? ''
+  const marker = '\n\nNext steps:\n'
+  const idx = raw.indexOf(marker)
+  const why = (idx === -1 ? raw : raw.slice(0, idx)).trim()
+  const nextSteps = idx === -1 ? '' : raw.slice(idx + marker.length).trim()
+  const reviewedLabel = (() => {
+    if (!meeting.reviewedAt) return null
+    try {
+      const d = new Date(meeting.reviewedAt)
+      if (Number.isNaN(d.getTime())) return null
+      return d.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      })
+    } catch {
+      return null
+    }
+  })()
+  const shareUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}/share/meeting/${meeting.id}`
+      : `/share/meeting/${meeting.id}`
+  return (
+    <div
+      className={`flex flex-col gap-2 border-t bg-teal-500/5 px-3 py-2.5 ${t.border}`}
+    >
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span
+          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${historyStatusTone('completed')}`}
+        >
+          {OUTCOME_LABEL[outcome]}
+        </span>
+        {reviewedLabel && (
+          <span className={`text-[10px] ${t.textMuted}`}>
+            Reviewed {reviewedLabel}
+          </span>
+        )}
+        <span className="flex-1" />
+        <a
+          href={`/share/meeting/${meeting.id}`}
+          target="_blank"
+          rel="noreferrer"
+          className={`text-[10px] underline ${t.textMuted}`}
+        >
+          Open share page
+        </a>
+      </div>
+      {why && (
+        <p className={`text-[11px] leading-snug whitespace-pre-wrap ${t.text}`}>
+          {why}
+        </p>
+      )}
+      {nextSteps && (
+        <div className="flex flex-col gap-0.5">
+          <span
+            className={`text-[9px] tracking-wider uppercase ${t.textMuted}`}
+          >
+            Next steps
+          </span>
+          <p
+            className={`text-[11px] leading-snug whitespace-pre-wrap ${t.text}`}
+          >
+            {nextSteps}
+          </p>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => {
+            if (typeof window === 'undefined') return
+            void navigator.clipboard.writeText(shareUrl)
+            toast.success('Share link copied.')
+          }}
+          className={`inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[10px] ${t.border} ${t.btn}`}
+        >
+          Copy share link
+        </button>
+        <a
+          href={`https://wa.me/?text=${encodeURIComponent(
+            `${meeting.title} - ${OUTCOME_LABEL[outcome]}\n${shareUrl}`
+          )}`}
+          target="_blank"
+          rel="noreferrer"
+          className={`inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[10px] ${t.border} ${t.btn}`}
+        >
+          WhatsApp
+        </a>
+      </div>
+    </div>
+  )
+}
+
+const OUTCOME_LABEL: Record<
+  NonNullable<MeetingItem['outcome']>,
+  string
+> = {
+  resolved: 'Resolved',
+  partial: 'Partial',
+  needs_followup: 'Needs follow-up',
+  failed: "Didn't deliver"
+}
+
+function historyStatusLabel(status: MeetingItem['status']): string {
+  switch (status) {
+    case 'pending':
+      return 'Pending'
+    case 'approved':
+      return 'Awaiting pick'
+    case 'scheduled':
+      return 'Scheduled'
+    case 'completed':
+      return 'Completed'
+    case 'rejected':
+      return 'Rejected'
+    case 'declined':
+      return 'Declined'
+    case 'canceled':
+      return 'Canceled'
+    default:
+      return status
+  }
+}
+
+function historyStatusTone(status: MeetingItem['status']): string {
+  switch (status) {
+    case 'pending':
+      return 'border-amber-500/30 bg-amber-500/10 text-amber-700'
+    case 'approved':
+      return 'border-sky-500/30 bg-sky-500/10 text-sky-700'
+    case 'scheduled':
+      return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700'
+    case 'completed':
+      return 'border-teal-500/30 bg-teal-500/10 text-teal-700'
+    case 'rejected':
+    case 'declined':
+    case 'canceled':
+      return 'border-zinc-300 bg-zinc-100 text-zinc-600'
+    default:
+      return 'border-zinc-200 bg-zinc-50 text-zinc-500'
+  }
 }
 
 // ─── Reusable bits ───────────────────────────────────────────────────────
