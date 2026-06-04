@@ -1,7 +1,7 @@
 'use client'
 
 import { useSearchParams } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import DashboardShell from './DashboardShell'
 import DashboardSkeleton from './DashboardSkeleton'
 import { fetchInitial } from '../actions'
@@ -14,7 +14,9 @@ import { fetchInitial } from '../actions'
 //
 // Data fetch goes through React Query keyed on the project search param, so
 // switching tabs within the same project is a cache hit (instant, no
-// skeleton). Switching projects refetches.
+// skeleton). Switching projects keeps the previous data on screen while the
+// new project's data loads, so the shell never falls back to the skeleton
+// once the first fetch has succeeded.
 
 export function DashboardChrome() {
   const params = useSearchParams()
@@ -23,9 +25,7 @@ export function DashboardChrome() {
   const { data } = useQuery({
     queryKey: ['dashboardInitial', project ?? null],
     queryFn: () => fetchInitial(project),
-    // Poll while the tab is foregrounded so edits from teammates land
-    // without a manual refresh. Background tabs skip the poll and pick
-    // changes up on the existing window-focus refetch.
+    placeholderData: keepPreviousData,
     refetchInterval: 15_000,
     refetchIntervalInBackground: false
   })

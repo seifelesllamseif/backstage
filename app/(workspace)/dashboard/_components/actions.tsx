@@ -7,6 +7,12 @@ export interface TaskActions {
   changeStatus: (id: string, s: TaskStatus) => void
   changePriority: (id: string, p: TaskPriority) => void
   changeAssignee: (id: string, assigneeId: string | null) => void
+  // Opens a confirmation dialog. Server-side renumbers the task ref and
+  // drops it from any sprint that belongs to the old project.
+  changeProject: (id: string, projectId: string) => void
+  // Projects available to the current member, used to populate the
+  // submenu on task cards. Archived projects are filtered out upstream.
+  projects: { id: string; name: string }[]
   duplicate: (id: string) => void
   remove: (id: string) => void
   copyRef: (ref: string) => void

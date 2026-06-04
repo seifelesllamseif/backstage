@@ -336,6 +336,18 @@ function activityTextFor(row: DbActivity): string {
       return `${who} duplicated this task`;
     case "task.deleted":
       return `${who} deleted the task`;
+    case "task.project_changed": {
+      const fromName = meta?.fromName ?? null;
+      const toName = meta?.toName ?? null;
+      const fromRef = meta?.fromRef ?? null;
+      const toRef = meta?.toRef ?? null;
+      if (fromName && toName) {
+        const refLine = fromRef && toRef ? ` (${fromRef} -> ${toRef})` : "";
+        return `${who} moved this from ${fromName} to ${toName}${refLine}`;
+      }
+      if (toName) return `${who} moved this to ${toName}`;
+      return `${who} moved this to a new project`;
+    }
     case "task.tags_changed": {
       const tags = Array.isArray(meta?.tags) ? meta.tags : null;
       if (!tags || tags.length === 0) return `${who} cleared the tags`;

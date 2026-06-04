@@ -148,6 +148,8 @@ export default function NewTaskModal({
             defaultDueDate={defaultDueDate}
             members={members}
             labels={labels}
+            projects={projects}
+            defaultProjectId={defaultProjectId}
             onClose={onClose}
             onCreate={onCreate}
           />
@@ -177,6 +179,8 @@ function ManualTab({
   defaultDueDate,
   members,
   labels,
+  projects,
+  defaultProjectId,
   onClose,
   onCreate
 }: {
@@ -186,6 +190,8 @@ function ManualTab({
   defaultDueDate: string | null
   members: BoardAssignee[]
   labels: { id: string; name: string }[]
+  projects: { id: string; name: string }[]
+  defaultProjectId: string | null
   onClose: () => void
   onCreate: (
     task: Omit<BoardTask, 'id' | 'ref' | 'createdAt' | 'updatedAt'> & {
@@ -194,6 +200,11 @@ function ManualTab({
   ) => void
 }) {
   const { t } = useDashTheme()
+  const [projectId, setProjectId] = useState<string | null>(
+    defaultProjectId && projects.some((p) => p.id === defaultProjectId)
+      ? defaultProjectId
+      : null
+  )
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [status, setStatus] = useState<TaskStatus>(defaultStatus)
@@ -206,8 +217,14 @@ function ManualTab({
   const [leadId, setLeadId] = useState<string | null>(null)
   const [due, setDue] = useState(defaultDueDate ?? '')
   const [tagsInput, setTagsInput] = useState('')
+  const [showProjectError, setShowProjectError] = useState(false)
 
   const reset = () => {
+    setProjectId(
+      defaultProjectId && projects.some((p) => p.id === defaultProjectId)
+        ? defaultProjectId
+        : null
+    )
     setTitle('')
     setDescription('')
     setStatus(defaultStatus)
@@ -216,6 +233,7 @@ function ManualTab({
     setLeadId(null)
     setDue(defaultDueDate ?? '')
     setTagsInput('')
+    setShowProjectError(false)
   }
 
   const selectedTags = useMemo(
@@ -262,12 +280,17 @@ function ManualTab({
   }
 
   const submit = () => {
+    if (!projectId) {
+      setShowProjectError(true)
+      return
+    }
     if (!title.trim()) return
     onCreate({
       title: title.trim(),
       description: description.trim() || null,
       status,
       priority,
+      projectId,
       assignee: assigneeId
         ? members.find((m) => m.id === assigneeId)
         : undefined,
@@ -281,8 +304,44 @@ function ManualTab({
 
   return (
     <div className="flex flex-col gap-4 p-5">
+      <Field label="Project *">
+        {projects.length === 0 ? (
+          <p className={`text-xs ${t.textMuted}`}>
+            No projects yet. Ask an admin to create one.
+          </p>
+        ) : (
+          <>
+            <select
+              autoFocus={!projectId}
+              value={projectId ?? ''}
+              onChange={(e) => {
+                setProjectId(e.target.value || null)
+                if (e.target.value) setShowProjectError(false)
+              }}
+              className={`h-9 w-full rounded-md border px-2 text-xs focus:outline-none ${t.input} ${
+                showProjectError && !projectId ? 'border-rose-500' : ''
+              }`}
+            >
+              <option value="" disabled>
+                Pick a project…
+              </option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            {showProjectError && !projectId && (
+              <p className="mt-1 text-[11px] text-rose-500">
+                Pick a project before creating the task.
+              </p>
+            )}
+          </>
+        )}
+      </Field>
+
       <input
-        autoFocus
+        autoFocus={Boolean(projectId)}
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         onKeyDown={(e) => {
@@ -359,12 +418,23 @@ function ManualTab({
       </div>
 
       <Field label="Due">
-        <input
-          value={due}
-          onChange={(e) => setDue(e.target.value)}
-          placeholder="May 28"
-          className={`h-9 w-full rounded-md border px-2 text-xs focus:outline-none ${t.input}`}
-        />
+        <div className="flex items-center gap-2">
+          <input
+            type="date"
+            value={due}
+            onChange={(e) => setDue(e.target.value)}
+            className={`h-9 flex-1 rounded-md border px-2 text-xs focus:outline-none ${t.input}`}
+          />
+          {due && (
+            <button
+              type="button"
+              onClick={() => setDue('')}
+              className={`h-9 rounded-md border px-2 text-[11px] transition ${t.btn}`}
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </Field>
 
       <Field label="Tags">
@@ -429,7 +499,8 @@ function ManualTab({
           </button>
           <button
             onClick={submit}
-            disabled={!title.trim()}
+            disabled={!title.trim() || !projectId}
+            title={!projectId ? 'Pick a project first.' : undefined}
             className={`h-9 rounded-md px-3 text-xs transition disabled:opacity-40 ${t.accent}`}
           >
             Create
@@ -487,7 +558,7 @@ function AiTab({
   const [projectId, setProjectId] = useState<string | null>(
     defaultProjectId && projects.some((p) => p.id === defaultProjectId)
       ? defaultProjectId
-      : (projects[0]?.id ?? null)
+      : null
   )
   const selectedProject = projectId
     ? (projects.find((p) => p.id === projectId) ?? null)
@@ -637,7 +708,7 @@ function AiTab({
   const noProject = !projectId
   return (
     <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto p-5">
-      <Field label="Target project">
+      <Field label="Target project *">
         {projects.length === 0 ? (
           <p className={`text-xs ${t.textMuted}`}>
             No projects yet. Ask an admin to create one.
@@ -646,8 +717,13 @@ function AiTab({
           <select
             value={projectId ?? ''}
             onChange={(e) => setProjectId(e.target.value || null)}
-            className={`h-9 w-full rounded-md border px-2 text-xs focus:outline-none ${t.input}`}
+            className={`h-9 w-full rounded-md border px-2 text-xs focus:outline-none ${
+              !projectId ? 'border-rose-500' : ''
+            } ${t.input}`}
           >
+            <option value="" disabled>
+              Pick a project…
+            </option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}

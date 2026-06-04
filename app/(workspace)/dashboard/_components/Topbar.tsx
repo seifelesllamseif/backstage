@@ -22,8 +22,6 @@ import type { GroupBy } from './DashboardShell'
 export type QuickFilter = 'open' | 'due' | 'review' | 'done'
 
 interface TopbarProps {
-  query: string
-  onQuery: (q: string) => void
   tab: 'board' | 'list' | 'timeline' | 'sprints' | 'meetings'
   totals: { open: number; due: number; review: number; done: number }
   onNewTask: () => void
@@ -59,6 +57,9 @@ interface TopbarProps {
   // at the start of the topbar visible at <md that toggles the Sidebar
   // sheet. Omit on desktop-only contexts.
   onOpenMobileNav?: () => void
+  // Opens the workspace command palette. Replaces the inline search input;
+  // exposes a single button (icon + label on wide screens).
+  onOpenSearch?: () => void
 }
 
 const FEED_VIEWS: {
@@ -91,8 +92,6 @@ const GROUPS: { id: GroupBy; label: string }[] = [
 ]
 
 export default function Topbar({
-  query,
-  onQuery,
   tab,
   totals,
   onNewTask,
@@ -112,7 +111,8 @@ export default function Topbar({
   feedView,
   onFeedViewChange,
   copySlot,
-  onOpenMobileNav
+  onOpenMobileNav,
+  onOpenSearch
 }: TopbarProps) {
   const { t } = useDashTheme()
   const searchParams = useSearchParams()
@@ -301,7 +301,7 @@ export default function Topbar({
       </div>
 
       <div className="flex items-center gap-1.5 sm:gap-2">
-        <div className="mr-1 hidden items-center gap-1 md:mr-2 md:flex">
+        <div className="mr-1 hidden items-center gap-1 xl:mr-2 xl:flex">
           <StatButton
             kind="open"
             label="Open"
@@ -337,15 +337,18 @@ export default function Topbar({
           />
         </div>
 
-        <label className="relative hidden items-center sm:flex">
-          <Search className={`absolute left-2 size-3 ${t.textSubtle}`} />
-          <input
-            value={query}
-            onChange={(e) => onQuery(e.target.value)}
-            placeholder="Search…"
-            className={`h-8 w-28 rounded-md border pr-2 pl-6 text-xs transition-[width,border-color] duration-500 ease-out focus:w-44 focus:border-zinc-400 focus:outline-none 2xl:w-44 2xl:focus:w-56 dark:focus:border-white/30 ${t.input}`}
-          />
-        </label>
+        {onOpenSearch && (
+          <button
+            type="button"
+            onClick={onOpenSearch}
+            aria-label="Open search"
+            title="Search (Cmd/Ctrl + K)"
+            className={`flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs transition ${t.btn}`}
+          >
+            <Search className={`size-3.5 ${t.textSubtle}`} />
+            <span className={`hidden 2xl:inline ${t.textMuted}`}>Search</span>
+          </button>
+        )}
 
         <button
           onClick={onToggleFilter}
@@ -381,7 +384,7 @@ export default function Topbar({
           >
             <SlidersHorizontal className="size-3.5" />
             <span className="hidden 2xl:inline">
-              Group: {GROUPS.find((g) => g.id === groupBy)?.label}
+              {GROUPS.find((g) => g.id === groupBy)?.label}
             </span>
             <span className={`inline 2xl:hidden ${t.textMuted}`}>
               {GROUPS.find((g) => g.id === groupBy)?.label.charAt(0)}
@@ -407,10 +410,10 @@ export default function Topbar({
         </div>
 
         <AnimatedThemeToggler
-          className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${t.btn}`}
+          className={`hidden h-8 w-8 items-center justify-center rounded-md border transition xl:flex ${t.btn}`}
         />
 
-        {copySlot}
+        {copySlot && <div className="hidden xl:block">{copySlot}</div>}
 
         <button
           data-tour="new-task"
@@ -463,11 +466,7 @@ function StatButton({
       >
         {value}
       </span>
-      <span
-        className={`hidden text-[10px] tracking-wider uppercase 2xl:inline ${t.textSubtle}`}
-      >
-        {label}
-      </span>
+      <span className="sr-only">{label}</span>
     </button>
   )
 }

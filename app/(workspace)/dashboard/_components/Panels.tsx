@@ -22,6 +22,7 @@ import {
   List as ListIcon,
   MessageCircleQuestion,
   MessageSquare,
+  Moon,
   MoreHorizontal,
   MoveRight,
   Paperclip,
@@ -30,6 +31,7 @@ import {
   Rabbit,
   Search,
   Sparkles,
+  Sun,
   Table as TableIcon,
   UserCog,
   X
@@ -2129,7 +2131,7 @@ export function SettingsPanel({
   // Admin-only sections (Google Calendar connect) gate on this.
   accessTier: 'admin' | 'lead' | 'member'
 }) {
-  const { t } = useDashTheme()
+  const { t, mode, toggle } = useDashTheme()
   const router = useRouter()
   const push = usePushSubscription()
   const install = useInstallPrompt()
@@ -2229,6 +2231,26 @@ export function SettingsPanel({
             </button>
           </Row>
         )}
+
+        <Row label="Theme">
+          <button
+            onClick={toggle}
+            aria-label={
+              mode === 'light' ? 'Switch to dark theme' : 'Switch to light theme'
+            }
+            className={`inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs transition ${t.border} ${t.tab}`}
+          >
+            {mode === 'light' ? (
+              <>
+                <Moon className="size-3.5" /> Switch to dark
+              </>
+            ) : (
+              <>
+                <Sun className="size-3.5" /> Switch to light
+              </>
+            )}
+          </button>
+        </Row>
 
         <Row label="Card density">
           <ToggleGroup

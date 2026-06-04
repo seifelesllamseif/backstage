@@ -11,6 +11,7 @@ import {
   CalendarPlus,
   Check,
   ChevronDown,
+  Folder,
   LogOut,
   Rocket,
   RotateCcw,
@@ -51,6 +52,7 @@ import {
   updateDashboardTaskTags,
   updateDashboardTaskLead,
   updateDashboardTaskPriority,
+  updateDashboardTaskProject,
   updateDashboardTaskStatus,
   addTaskDependency,
   removeTaskDependency
@@ -69,6 +71,17 @@ import TaskCard from './TaskCard'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { VisuallyHidden } from 'radix-ui'
 import Sidebar from './Sidebar'
+import CommandPalette from './CommandPalette'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog'
 import Topbar from './Topbar'
 import TaskDetail, { TaskActivity, TaskComment } from './TaskDetail'
 import type { ProjectExternalRef, TaskExternalRef } from './boardData'
@@ -95,7 +108,7 @@ import { DashboardThemeProvider, useDashTheme } from './theme'
 import { ContextMenuProvider, useContextMenu } from './ContextMenu'
 import { TaskActionsProvider } from './actions'
 import { TeamProvider } from './TeamContext'
-import { PortfolioSheetProvider } from './PortfolioSheet'
+import { PortfolioSheetProvider, usePortfolioSheet } from './PortfolioSheet'
 import { QuickNoteSheetProvider } from './QuickNoteSheet'
 import { MeetingRequestSheetProvider } from './MeetingRequestSheet'
 import { MeetingsSheetProvider, useMeetingsSheet } from './MeetingsSheet'
@@ -456,6 +469,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   const { open: openMenu } = useContextMenu()
   const meetingWizard = useMeetingCreateWizard()
   const meetingsSheet = useMeetingsSheet()
+  const { open: openPortfolio } = usePortfolioSheet()
   const router = useRouter()
   const currentSearchParams = useSearchParams()
   const queryClient = useQueryClient()
@@ -981,6 +995,73 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     })
   }
 
+  const changeProject = (taskId: string, projectId: string) => {
+    const task = tasks.find((t) => t.id === taskId)
+    if (!task || task.projectId === projectId) return
+    const toProject = initial.projects.find((p) => p.id === projectId)
+    if (!toProject) return
+    const fromProject = task.projectId
+      ? initial.projects.find((p) => p.id === task.projectId)
+      : null
+    const inSprint = sprints.some(
+      (s) => s.projectId === task.projectId && s.taskIds.includes(taskId)
+    )
+    setPendingProjectMove({
+      taskId,
+      taskRef: task.ref,
+      taskTitle: task.title,
+      fromProjectName: fromProject?.name ?? null,
+      toProjectId: projectId,
+      toProjectName: toProject.name,
+      inSprint
+    })
+  }
+
+  const confirmProjectMove = () => {
+    const pending = pendingProjectMove
+    if (!pending) return
+    setPendingProjectMove(null)
+    let snapshot: BoardTask[] | null = null
+    setTasks((cur) => {
+      snapshot = cur
+      return cur.map((t) =>
+        t.id === pending.taskId
+          ? { ...t, projectId: pending.toProjectId }
+          : t
+      )
+    })
+    startTransition(async () => {
+      const res = await updateDashboardTaskProject(
+        pending.taskId,
+        pending.toProjectId
+      )
+      if ('error' in res) {
+        if (snapshot) setTasks(snapshot)
+        toast.error(res.error || "Couldn't move task.")
+        return
+      }
+      setTasks((cur) =>
+        cur.map((t) =>
+          t.id === pending.taskId && res.ref
+            ? { ...t, ref: res.ref }
+            : t
+        )
+      )
+      const fromLabel = pending.fromProjectName ?? 'previous project'
+      logActivityLocal(
+        pending.taskId,
+        `Moved from ${fromLabel} to ${pending.toProjectName}${
+          res.ref ? ` (${pending.taskRef} -> ${res.ref})` : ''
+        }`
+      )
+      toast.success(
+        `Moved to ${pending.toProjectName}${
+          res.ref ? ` as ${res.ref}` : ''
+        }`
+      )
+    })
+  }
+
   const addRelation = (
     taskId: string,
     rel: { kind: import('./status').RelationKind; ref: string }
@@ -1473,17 +1554,28 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       description?: string | null
     }
   ) => {
-    const targetProjectId = initial.currentProjectId ?? initial.defaultProjectId
+    const targetProjectId =
+      draft.projectId ?? initial.currentProjectId ?? initial.defaultProjectId
     if (!targetProjectId) {
-      console.error('createTask: no project available; create a project first.')
+      toast.error('Pick a project before creating the task.')
       return
     }
 
+    const dueIso = draft.due?.trim() || null
+    const dueDisplay = dueIso
+      ? new Date(`${dueIso}T00:00:00`).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric'
+        })
+      : undefined
     const tempId = nextId('t')
     const optimistic: BoardTask = {
       ...draft,
       id: tempId,
+      projectId: targetProjectId,
       ref: 'NEW…',
+      due: dueDisplay,
+      dueAt: dueIso ?? undefined,
       createdAt: new Date().toISOString().slice(0, 10),
       updatedAt: new Date().toISOString()
     }
@@ -1515,7 +1607,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         projectId: targetProjectId,
         assigneeId: draft.assignee?.id ?? null,
         leadId: draft.lead?.id ?? null,
-        dueDate: null,
+        dueDate: dueIso,
         labelIds,
         relations: draft.relations?.map((rel) => ({
           kind: rel.kind,
@@ -1938,6 +2030,17 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     return globalActivity.filter((a) => a.atRaw > updatesSeenAt).length
   }, [globalActivity, updatesSeenAt])
 
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [pendingProjectMove, setPendingProjectMove] = useState<{
+    taskId: string
+    taskRef: string
+    taskTitle: string
+    fromProjectName: string | null
+    toProjectId: string
+    toProjectName: string
+    inSprint: boolean
+  } | null>(null)
+
   // Mac shows the Option glyph (⌥); everything else spells out "Alt+".
   // Detected once on mount so SSR markup stays platform-neutral.
   const [isMac, setIsMac] = useState(false)
@@ -1966,6 +2069,13 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   })
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Cmd/Ctrl+K opens the command palette. Allowed even when focus is in
+      // an input so users can summon search mid-typing, just like Vercel.
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.code === 'KeyK') {
+        e.preventDefault()
+        setPaletteOpen((o) => !o)
+        return
+      }
       if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
       const t = e.target as HTMLElement | null
       if (t) {
@@ -1978,8 +2088,6 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         )
           return
       }
-      // macOS Option-key remaps Alt+letter to glyphs like ˜ (Option+N),
-      // so checking `e.key` alone misses it. `e.code` is the physical key.
       const code = e.code
       if (code === 'KeyN') {
         e.preventDefault()
@@ -2061,6 +2169,10 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     changeStatus: updateStatus,
     changePriority: updatePriority,
     changeAssignee: updateAssignee,
+    changeProject,
+    projects: initial.projects
+      .filter((p) => !p.isArchived)
+      .map((p) => ({ id: p.id, name: p.name })),
     duplicate: duplicateTask,
     remove: deleteTask,
     copyRef,
@@ -2329,6 +2441,9 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               currentIsOwner={initial.currentMember.isOwner}
               hasActiveSprint={activeSprintTaskIdSet !== null}
               updatesUnread={updatesUnread}
+              projects={initial.projects.filter((p) => !p.isArchived)}
+              currentProjectId={initial.currentProjectId}
+              onProjectChange={onProjectChange}
             />
           </div>
 
@@ -2374,6 +2489,12 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 currentIsOwner={initial.currentMember.isOwner}
                 hasActiveSprint={activeSprintTaskIdSet !== null}
                 updatesUnread={updatesUnread}
+                projects={initial.projects.filter((p) => !p.isArchived)}
+                currentProjectId={initial.currentProjectId}
+                onProjectChange={(id) => {
+                  onProjectChange(id)
+                  setMobileNavOpen(false)
+                }}
               />
             </SheetContent>
           </Sheet>
@@ -2388,8 +2509,6 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
               </div>
             )}
             <Topbar
-              query={query}
-              onQuery={setQuery}
               tab={tab}
               totals={totals}
               onNewTask={() => openNewTask()}
@@ -2460,6 +2579,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 />
               }
               onOpenMobileNav={() => setMobileNavOpen(true)}
+              onOpenSearch={() => setPaletteOpen(true)}
             />
 
             <FilterPanel
@@ -2518,7 +2638,42 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   'button[data-card]'
                 )
                 if (targetIsCard) return
+                const activeProjects = initial.projects.filter(
+                  (p) => !p.isArchived
+                )
+                const projectSubmenu = [
+                  {
+                    id: 'project-all',
+                    label: 'All Projects',
+                    trailingIcon:
+                      initial.currentProjectId === null ? (
+                        <Check className="size-3.5" />
+                      ) : undefined,
+                    onSelect: () => onProjectChange(null)
+                  },
+                  ...activeProjects.map((p) => ({
+                    id: `project-${p.id}`,
+                    label: p.name,
+                    trailingIcon:
+                      p.id === initial.currentProjectId ? (
+                        <Check className="size-3.5" />
+                      ) : undefined,
+                    onSelect: () => onProjectChange(p.id)
+                  }))
+                ]
+                const scopedSprints = sprints.filter(
+                  (c) =>
+                    !initial.currentProjectId ||
+                    c.projectId === initial.currentProjectId
+                )
                 openMenu(e, [
+                  {
+                    id: 'project',
+                    label: 'Project',
+                    icon: <Folder className="size-3.5" />,
+                    submenu: projectSubmenu
+                  },
+                  { id: 'sep-project', label: '', separator: true },
                   {
                     id: 'add',
                     label: 'New Task',
@@ -2575,6 +2730,47 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   (() => {
                     const projectForSprints =
                       initial.currentProjectId ?? initial.defaultProjectId
+                    const goToSprintsView = () => {
+                      if (!projectForSprints) return
+                      if (initial.currentProjectId) {
+                        setTab('sprints')
+                        return
+                      }
+                      const params = new URLSearchParams(
+                        currentSearchParams.toString()
+                      )
+                      params.set('project', projectForSprints)
+                      router.push(`/dashboard/sprints?${params.toString()}`)
+                    }
+                    const sprintsForMenu = scopedSprints.slice(0, 8)
+                    const disabled =
+                      tab === 'sprints' || projectForSprints === null
+                    const submenu =
+                      !disabled && sprintsForMenu.length > 0
+                        ? [
+                            {
+                              id: 'sprints-all',
+                              label: 'Open sprints view',
+                              icon: <Rocket className="size-3.5" />,
+                              onSelect: goToSprintsView
+                            },
+                            { id: 'sprints-sep', label: '', separator: true },
+                            ...sprintsForMenu.map((c) => ({
+                              id: `sprint-${c.id}`,
+                              label: c.name,
+                              trailingIcon:
+                                c.status === 'current' ? (
+                                  <span className="text-[9px] tracking-wider uppercase text-teal-500">
+                                    Now
+                                  </span>
+                                ) : undefined,
+                              onSelect: () => {
+                                setSprintFilter([c.id])
+                                goToSprintsView()
+                              }
+                            }))
+                          ]
+                        : undefined
                     return {
                       id: 'switch-sprints',
                       label: 'Sprints view',
@@ -2583,25 +2779,15 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                         tab === 'sprints' ? (
                           <Check className="size-3.5" />
                         ) : undefined,
-                      disabled: tab === 'sprints' || projectForSprints === null,
+                      disabled,
                       title:
                         tab === 'sprints'
                           ? "You're already on the sprints view."
                           : projectForSprints === null
                             ? 'Create a project first to plan sprints.'
                             : undefined,
-                      onSelect: () => {
-                        if (!projectForSprints) return
-                        if (initial.currentProjectId) {
-                          setTab('sprints')
-                          return
-                        }
-                        const params = new URLSearchParams(
-                          currentSearchParams.toString()
-                        )
-                        params.set('project', projectForSprints)
-                        router.push(`/dashboard/sprints?${params.toString()}`)
-                      }
+                      submenu,
+                      onSelect: submenu ? undefined : goToSprintsView
                     }
                   })(),
                   {
@@ -3153,6 +3339,67 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           onClose={() => setNewTaskOpen(false)}
           onCreate={createTask}
           onCreateBulk={createBulkTasks}
+        />
+        <AlertDialog
+          open={pendingProjectMove !== null}
+          onOpenChange={(o) => {
+            if (!o) setPendingProjectMove(null)
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Move to {pendingProjectMove?.toProjectName}?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {pendingProjectMove && (
+                  <>
+                    <span className="block">
+                      {pendingProjectMove.taskRef} . {pendingProjectMove.taskTitle}
+                    </span>
+                    <span className="mt-2 block">
+                      The reference will change (e.g. {pendingProjectMove.taskRef}{' '}
+                      becomes a new {pendingProjectMove.toProjectName} reference).
+                      Old links to {pendingProjectMove.taskRef} will not resolve.
+                    </span>
+                    {pendingProjectMove.inSprint && (
+                      <span className="mt-2 block">
+                        The task will leave its current sprint, since sprints
+                        belong to a single project.
+                      </span>
+                    )}
+                  </>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => {
+                  e.preventDefault()
+                  confirmProjectMove()
+                }}
+              >
+                Move
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        <CommandPalette
+          open={paletteOpen}
+          onClose={() => setPaletteOpen(false)}
+          tasks={tasks}
+          projects={initial.projects
+            .filter((p) => !p.isArchived)
+            .map((p) => ({ id: p.id, name: p.name }))}
+          currentProjectId={initial.currentProjectId}
+          members={team}
+          currentUserId={currentUserId}
+          onSelectTask={(id) => setSelectedId(id)}
+          onSelectProject={(id) => onProjectChange(id)}
+          onSelectTab={(t) => setTab(t)}
+          onSelectView={(v) => setView(v)}
+          onSelectMember={(id) => openPortfolio(id)}
         />
       </div>
     </TaskActionsProvider>

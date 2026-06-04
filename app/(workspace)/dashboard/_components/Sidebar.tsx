@@ -1,10 +1,13 @@
 'use client'
 
+import { useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   AtSign,
+  Check,
+  ChevronDown,
   Info,
   LayoutGrid,
   MoreHorizontal,
@@ -110,6 +113,11 @@ interface SidebarProps {
   // Notification-style badge for the Updates entry. Count of activity rows
   // newer than the member's stored "seen" cursor.
   updatesUnread: number
+  // Project filter switcher. Same source of truth as the topbar breadcrumb;
+  // both surfaces call onProjectChange so the URL/state stay in sync.
+  projects: { id: string; name: string }[]
+  currentProjectId: string | null
+  onProjectChange: (projectId: string | null) => void
 }
 
 export default function Sidebar({
@@ -129,7 +137,10 @@ export default function Sidebar({
   currentAccessTier,
   currentIsOwner,
   hasActiveSprint,
-  updatesUnread
+  updatesUnread,
+  projects,
+  currentProjectId,
+  onProjectChange
 }: SidebarProps) {
   const { t } = useDashTheme()
   const { open } = useContextMenu()
@@ -142,6 +153,21 @@ export default function Sidebar({
   const meetings = useMeetingsSheet()
   const meetingsBadge =
     meetings.pendingApprovalCount + meetings.awaitingPickCount
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false)
+  const projectMenuRef = useRef<HTMLDivElement>(null)
+  const currentProject = currentProjectId
+    ? (projects.find((p) => p.id === currentProjectId) ?? null)
+    : null
+  useEffect(() => {
+    if (!projectMenuOpen) return
+    const onDocClick = (e: MouseEvent) => {
+      if (!projectMenuRef.current?.contains(e.target as Node)) {
+        setProjectMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [projectMenuOpen])
   // Self first; remaining members ordered by how reachable they look right
   // now (online > active today > away > on vacation). Soft-removed members
   // (activity_status='left') drop off the sidebar entirely - they only
@@ -257,6 +283,75 @@ export default function Sidebar({
             <span className={`text-xs ${t.text}`}>Workspace</span>
           </div>
         </Link>
+
+        <div className="relative -mt-2" ref={projectMenuRef}>
+          <div
+            className={`mb-1 px-2 text-[10px] tracking-[0.22em] uppercase ${t.textMuted}`}
+          >
+            Project
+          </div>
+          <button
+            type="button"
+            onClick={() => setProjectMenuOpen((o) => !o)}
+            aria-haspopup="menu"
+            aria-expanded={projectMenuOpen}
+            title="Switch project"
+            className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs transition ${t.tab}`}
+          >
+            <Folder className={`size-3.5 ${t.textSubtle}`} />
+            <span className={`min-w-0 flex-1 truncate text-left ${t.text}`}>
+              {currentProject?.name ?? 'All Projects'}
+            </span>
+            <ChevronDown
+              className={`size-3 ${t.textSubtle} transition-transform ${
+                projectMenuOpen ? 'rotate-180' : ''
+              }`}
+            />
+          </button>
+          {projectMenuOpen && (
+            <div
+              role="menu"
+              className={`absolute top-full left-2 right-2 z-40 mt-1 max-h-72 overflow-auto rounded-md border py-1 shadow-xl ${t.detail}`}
+            >
+              <button
+                onClick={() => {
+                  onProjectChange(null)
+                  setProjectMenuOpen(false)
+                }}
+                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs ${
+                  currentProjectId === null ? t.btnActive : t.tab
+                }`}
+              >
+                <Check
+                  className={`size-3 ${
+                    currentProjectId === null ? '' : 'opacity-0'
+                  }`}
+                />
+                All Projects
+              </button>
+              <div className={`my-1 border-t ${t.borderSoft}`} />
+              {projects.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    onProjectChange(p.id)
+                    setProjectMenuOpen(false)
+                  }}
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs ${
+                    p.id === currentProjectId ? t.btnActive : t.tab
+                  }`}
+                >
+                  <Check
+                    className={`size-3 shrink-0 ${
+                      p.id === currentProjectId ? '' : 'opacity-0'
+                    }`}
+                  />
+                  <span className="truncate">{p.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         <nav className="flex flex-col gap-0.5">
           <SidebarItem

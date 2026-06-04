@@ -91,6 +91,7 @@ import {
   updateDashboardTaskLead as updateDashboardTaskLeadImpl,
   updateDashboardTaskPriority as updateDashboardTaskPriorityImpl,
   updateDashboardTaskDueDate as updateDashboardTaskDueDateImpl,
+  updateDashboardTaskProject as updateDashboardTaskProjectImpl,
   updateTaskTags as updateTaskTagsImpl,
   updateDashboardTaskStatus as updateDashboardTaskStatusImpl,
   updateProjectExternalRefLabel as updateProjectExternalRefLabelImpl,
@@ -171,6 +172,12 @@ export async function updateDashboardTaskDueDate(
   ...args: Parameters<typeof updateDashboardTaskDueDateImpl>
 ) {
   return updateDashboardTaskDueDateImpl(...args)
+}
+
+export async function updateDashboardTaskProject(
+  ...args: Parameters<typeof updateDashboardTaskProjectImpl>
+) {
+  return updateDashboardTaskProjectImpl(...args)
 }
 
 export async function updateDashboardTaskTags(

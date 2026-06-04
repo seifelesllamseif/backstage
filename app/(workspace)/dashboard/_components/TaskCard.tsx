@@ -2,6 +2,7 @@
 
 import {
   Copy,
+  Folder,
   Trash2,
   ExternalLink,
   Files,
@@ -151,6 +152,19 @@ export default function TaskCard({
             onSelect: () => a.changeAssignee(task.id, m.id)
           }))
         ]
+      },
+      {
+        id: 'project',
+        label: 'Change project',
+        icon: <Folder className="size-3.5" />,
+        submenu: a.projects
+          .filter((p) => p.id !== task.projectId)
+          .map((p) => ({
+            id: `project-${p.id}`,
+            label: p.name,
+            icon: <Folder className="size-3.5" />,
+            onSelect: () => a.changeProject(task.id, p.id)
+          }))
       },
       { id: 'sep1', label: '', separator: true },
       {

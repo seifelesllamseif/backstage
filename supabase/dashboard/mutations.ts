@@ -179,18 +179,40 @@ const CreateBulkInputSchema = z.object({
 
 // ─── Task mutations ───────────────────────────────────────────────────────
 
-export async function createDashboardTask(data: {
-  title: string
-  description?: string | null
-  status?: TaskStatus
-  priority?: TaskPriority
-  projectId: string
-  assigneeId?: string | null
-  leadId?: string | null
-  dueDate?: string | null
-  labelIds?: string[]
-  relations?: { kind: RelationKind; ref: string }[]
-}) {
+const CreateTaskInputSchema = z.object({
+  title: z.string().trim().min(1, 'Title is required.').max(280),
+  description: z.string().nullable().optional(),
+  status: TaskStatusEnum.optional(),
+  priority: TaskPriorityEnum.optional(),
+  projectId: z
+    .string({ error: 'Pick a project.' })
+    .uuid('Pick a project.'),
+  assigneeId: z.string().uuid().nullable().optional(),
+  leadId: z.string().uuid().nullable().optional(),
+  dueDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Due date must be YYYY-MM-DD.')
+    .nullable()
+    .optional(),
+  labelIds: z.array(z.string().uuid()).optional(),
+  relations: z
+    .array(
+      z.object({
+        kind: RelationKindEnum,
+        ref: z.string().trim().min(1)
+      })
+    )
+    .optional()
+})
+
+export async function createDashboardTask(
+  data: z.input<typeof CreateTaskInputSchema>
+) {
+  const parsed = CreateTaskInputSchema.safeParse(data)
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
+  }
+  data = parsed.data
   const member = await getCurrentTeamMember()
   if (!member) return { error: 'Not signed in.' }
   const supabase = createAdminClient()
@@ -817,6 +839,105 @@ export async function updateDashboardTaskDetails(
   }
   revalidatePath('/dashboard')
   return { ok: true }
+}
+
+export async function updateDashboardTaskProject(
+  taskId: string,
+  newProjectId: string
+) {
+  const idCheck = z
+    .object({
+      taskId: z.string().uuid(),
+      newProjectId: z.string().uuid()
+    })
+    .safeParse({ taskId, newProjectId })
+  if (!idCheck.success) return { error: 'Invalid input.' }
+  const gate = await ensureTaskAccess(taskId, 'planner')
+  if ('error' in gate) return { error: gate.error }
+  const { member } = gate
+  const supabase = createAdminClient()
+
+  const [{ data: task }, { data: newProject }] = await Promise.all([
+    supabase
+      .from('tasks')
+      .select('id, project_id, ref')
+      .eq('id', taskId)
+      .eq('company_id', member.companyId)
+      .maybeSingle(),
+    supabase
+      .from('projects')
+      .select('id, name')
+      .eq('id', newProjectId)
+      .eq('company_id', member.companyId)
+      .maybeSingle()
+  ])
+  if (!task) return { error: 'Task not found.' }
+  if (!newProject) return { error: 'Project not found.' }
+  if (task.project_id === newProjectId) return { ok: true as const }
+
+  const { data: oldProject } = await supabase
+    .from('projects')
+    .select('name')
+    .eq('id', task.project_id)
+    .maybeSingle()
+
+  const { data: lastTask } = await supabase
+    .from('tasks')
+    .select('seq_number')
+    .eq('project_id', newProjectId)
+    .order('seq_number', { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle()
+  const nextSeq = (lastTask?.seq_number ?? 0) + 1
+  const prefix = newProject.name.split(/\s+/)[0].toUpperCase().slice(0, 4)
+  const newRef = `${prefix}-${nextSeq}`
+  const oldRef = task.ref
+  const oldProjectId = task.project_id
+
+  const { error: updateErr } = await supabase
+    .from('tasks')
+    .update({
+      project_id: newProjectId,
+      ref: newRef,
+      seq_number: nextSeq
+    })
+    .eq('id', task.id)
+  if (updateErr) return { error: updateErr.message }
+
+  const { data: oldSprintMemberships } = await supabase
+    .from('sprint_tasks')
+    .select('sprint_id, sprints!inner(project_id)')
+    .eq('task_id', task.id)
+  const staleSprintIds = (oldSprintMemberships ?? [])
+    .filter((row) => row.sprints?.project_id === oldProjectId)
+    .map((row) => row.sprint_id)
+  if (staleSprintIds.length > 0) {
+    await supabase
+      .from('sprint_tasks')
+      .delete()
+      .eq('task_id', task.id)
+      .in('sprint_id', staleSprintIds)
+  }
+
+  await logActivity(
+    supabase,
+    member.companyId,
+    member.id,
+    'task.project_changed',
+    'task',
+    task.id,
+    {
+      fromProjectId: oldProjectId,
+      toProjectId: newProjectId,
+      fromName: oldProject?.name ?? null,
+      toName: newProject.name,
+      fromRef: oldRef,
+      toRef: newRef
+    }
+  )
+
+  revalidatePath('/dashboard')
+  return { ok: true as const, ref: newRef }
 }
 
 export async function updateDashboardTaskDueDate(
