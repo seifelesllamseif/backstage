@@ -22,6 +22,9 @@ export interface BoardAssignee {
   activityStatus?: 'active' | 'away' | 'on_vacation' | 'left'
   // IANA timezone for the quiet-hours indicator.
   timezone?: string | null
+  // When the member joined the workspace. Drives the "Welcome <name>"
+  // rotation on the topbar wordmark for anyone joined recently.
+  joinedAt?: string | null
 }
 
 export interface TaskRelation {

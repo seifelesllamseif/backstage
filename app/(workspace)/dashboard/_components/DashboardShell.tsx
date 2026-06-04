@@ -1,6 +1,14 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition
+} from 'react'
+import { createClient as createBrowserSupabase } from '@/supabase/client'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
@@ -12,6 +20,7 @@ import {
   Check,
   ChevronDown,
   Folder,
+  Inbox,
   LogOut,
   Rocket,
   RotateCcw,
@@ -503,15 +512,42 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   }
   const greeting = useGreeting()
   const firstName = currentUser.name.split(/\s+/)[0]
-  // Alternates the centered wordmark between the time-banded greeting and
-  // the static "Verbivore · Task Handoff" mark. Slow cadence so the swap
-  // feels ambient, not animated; bump this constant to taste.
+  // Cap the welcome rotation to the N most-recent active joiners. A
+  // sliding date window doesn't work when a workspace is seeded in a
+  // single batch (every original member would count as "new" for two
+  // weeks). Capping to top-N picks only the true recent additions and
+  // stays stable as the team grows.
+  const NEW_JOINER_CAP = 3
+  const newJoinerNames = useMemo(() => {
+    return team
+      .filter((m) => {
+        if (m.id === currentUserId) return false
+        if (m.activityStatus === 'left') return false
+        if (m.activityStatus === 'on_vacation') return false
+        if (!m.joinedAt) return false
+        return true
+      })
+      .sort((a, b) => (b.joinedAt ?? '').localeCompare(a.joinedAt ?? ''))
+      .slice(0, NEW_JOINER_CAP)
+      .map((m) => m.name.split(/\s+/)[0])
+  }, [team, currentUserId])
+  // Cycles the centered wordmark through phases: time-banded greeting,
+  // the static Verbivore mark, and a "Welcome, <name>!" beat for each
+  // recent joiner. Slow cadence so the swap feels ambient.
+  const wordmarkPhases = useMemo(
+    () => 2 + newJoinerNames.length,
+    [newJoinerNames]
+  )
   const [wordmarkPhase, setWordmarkPhase] = useState(0)
   useEffect(() => {
     const id = setInterval(() => setWordmarkPhase((i) => i + 1), 180_000)
     return () => clearInterval(id)
   }, [])
-  const showGreetingPhase = wordmarkPhase % 2 === 0
+  const phaseIndex = wordmarkPhase % wordmarkPhases
+  const showGreetingPhase = phaseIndex === 0
+  const showWordmarkPhase = phaseIndex === 1
+  const welcomeName =
+    phaseIndex >= 2 ? newJoinerNames[phaseIndex - 2] ?? null : null
 
   const [tasks, setTasks] = useState<BoardTask[]>(initial.tasks)
   const [comments, setComments] = useState<Record<string, TaskComment[]>>(
@@ -2032,6 +2068,207 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     return globalActivity.filter((a) => a.atRaw > updatesSeenAt).length
   }, [globalActivity, updatesSeenAt])
 
+  // Live actionable count: starts at 0 every session and only rises when
+  // a genuine update arrives via Supabase Realtime. Clears when the user
+  // opens the Updates panel or clicks "Mark seen" on a toast. Replaces
+  // the prior "show a red dot for any pre-existing mention" behavior,
+  // which surfaced stale state and was misleading.
+  const [liveUnread, setLiveUnread] = useState(0)
+  const liveToastIdsRef = useRef<Set<string | number>>(new Set())
+  const seenLiveKeysRef = useRef<Set<string>>(new Set())
+
+  const dismissAllLiveToasts = useCallback(() => {
+    for (const id of liveToastIdsRef.current) toast.dismiss(id)
+    liveToastIdsRef.current.clear()
+    setLiveUnread(0)
+  }, [])
+
+  const popLiveToast = useCallback(
+    (
+      kind: 'mention' | 'assigned' | 'created',
+      taskId: string,
+      ref: string,
+      title: string,
+      actorName: string
+    ) => {
+      // Stable per-event key prevents double-fires from realtime retries
+      // and from React StrictMode mounting effects twice in dev.
+      const key = `${kind}:${taskId}:${Date.now()}`
+      if (seenLiveKeysRef.current.has(key)) return
+      seenLiveKeysRef.current.add(key)
+      setLiveUnread((c) => c + 1)
+      const headline =
+        kind === 'mention'
+          ? `${actorName} mentioned you on ${ref}`
+          : kind === 'assigned'
+            ? `${actorName} assigned ${ref} to you`
+            : `${actorName} created ${ref}`
+      const id = toast(headline, {
+        description: title,
+        duration: Infinity,
+        action: {
+          label: 'Open',
+          onClick: () => {
+            setSelectedId(taskId)
+            liveToastIdsRef.current.delete(id)
+            setLiveUnread((c) => Math.max(0, c - 1))
+          }
+        },
+        cancel: {
+          label: 'Mark seen',
+          onClick: () => {
+            liveToastIdsRef.current.delete(id)
+            setLiveUnread((c) => Math.max(0, c - 1))
+          }
+        }
+      })
+      liveToastIdsRef.current.add(id)
+    },
+    []
+  )
+
+  // Reset whenever the user lands on the Updates view - that's our
+  // canonical "I've seen everything" signal. Also dismisses any
+  // live toasts that are still on screen so nothing lingers.
+  useEffect(() => {
+    if (view !== 'updates') return
+    dismissAllLiveToasts()
+  }, [view, dismissAllLiveToasts])
+
+  // Tasks ref so the realtime subscription doesn't tear down + reconnect
+  // every time the local tasks list mutates (which is constantly: drag,
+  // edit, comment, etc). The handler reads through the ref instead.
+  // Same trick for the team list so we can resolve actor names without
+  // re-subscribing on every team mutation.
+  const tasksRef = useRef(tasks)
+  useEffect(() => {
+    tasksRef.current = tasks
+  }, [tasks])
+  const teamRef = useRef(team)
+  useEffect(() => {
+    teamRef.current = team
+  }, [team])
+  const lookupName = useCallback((memberId: string | null | undefined) => {
+    if (!memberId) return 'Someone'
+    return teamRef.current.find((m) => m.id === memberId)?.name ?? 'Someone'
+  }, [])
+
+  // Supabase Realtime subscription. Two channels:
+  //   1. task_comments INSERT - if the mentions array contains me and
+  //      I'm not the author, pop a "you were mentioned" toast.
+  //   2. activity_logs INSERT with action = 'task.assignee_changed' -
+  //      if metadata.to is me and actor isn't me, pop "assigned" toast.
+  //      Using activity_logs over `tasks` UPDATE because the latter
+  //      doesn't carry "who did the update" on the realtime payload,
+  //      so self-assignments couldn't be muted cleanly.
+  //
+  // Mentions filter is client-side because postgres_changes filters
+  // don't support `mentions @> ARRAY[uuid]` on text[] columns.
+  useEffect(() => {
+    if (!currentUserId) return
+    const supabase = createBrowserSupabase()
+    const channel = supabase
+      .channel(`live-updates:${currentUserId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'task_comments' },
+        (payload) => {
+          const row = payload.new as {
+            task_id: string
+            mentions: string[] | null
+            author_id: string | null
+          }
+          if (row.author_id === currentUserId) return
+          if (!row.mentions?.includes(currentUserId)) return
+          const task = tasksRef.current.find((t) => t.id === row.task_id)
+          if (!task) return
+          popLiveToast(
+            'mention',
+            task.id,
+            task.ref,
+            task.title,
+            lookupName(row.author_id)
+          )
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'activity_logs',
+          filter: 'action=eq.task.assignee_changed'
+        },
+        (payload) => {
+          const row = payload.new as {
+            actor_id: string | null
+            entity_id: string | null
+            metadata: { to?: string | null } | null
+          }
+          if (row.actor_id === currentUserId) return
+          if (row.metadata?.to !== currentUserId) return
+          if (!row.entity_id) return
+          const task = tasksRef.current.find((t) => t.id === row.entity_id)
+          if (!task) return
+          popLiveToast(
+            'assigned',
+            task.id,
+            task.ref,
+            task.title,
+            lookupName(row.actor_id)
+          )
+        }
+      )
+    // task.created is a workspace-activity feed (X created BACK-12) and
+    // only makes sense for users who can see all company tasks. Members
+    // are scoped to their own assignments + watches, so they wouldn't
+    // see most of these creations anyway and would only get duplicates
+    // with the assigned toast.
+    if (
+      initial.currentMember.accessTier === 'admin' ||
+      initial.currentMember.accessTier === 'lead'
+    ) {
+      channel.on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'activity_logs',
+          filter: 'action=eq.task.created'
+        },
+        async (payload) => {
+          const row = payload.new as {
+            actor_id: string | null
+            entity_id: string | null
+          }
+          if (row.actor_id === currentUserId) return
+          if (!row.entity_id) return
+          const { data: task } = await supabase
+            .from('tasks')
+            .select('id, ref, title, assignee_id')
+            .eq('id', row.entity_id)
+            .maybeSingle()
+          if (!task || !task.ref || !task.title) return
+          // Tasks created with me as assignee already trigger the
+          // assigned toast via task.assignee_changed; skip here to avoid
+          // double-toasting for the same event.
+          if (task.assignee_id === currentUserId) return
+          popLiveToast(
+            'created',
+            task.id,
+            task.ref,
+            task.title,
+            lookupName(row.actor_id)
+          )
+        }
+      )
+    }
+    channel.subscribe()
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [currentUserId, popLiveToast, lookupName, initial.currentMember.accessTier])
+
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [pendingProjectMove, setPendingProjectMove] = useState<{
     taskId: string
@@ -2349,11 +2586,18 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   </span>
                   {greeting.text}, {firstName}
                 </>
-              ) : (
+              ) : showWordmarkPhase ? (
                 <span className="tracking-[0.25em] uppercase">
                   Verbivore · Task Handoff
                 </span>
-              )}
+              ) : welcomeName ? (
+                <>
+                  <span aria-hidden className="mr-1">
+                    👋
+                  </span>
+                  Welcome to the team, {welcomeName}
+                </>
+              ) : null}
             </span>
           </span>
           <div className="flex items-center gap-3">
@@ -2408,7 +2652,11 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 <X className={`size-3 ${t.textSubtle}`} />
               </button>
             )}
-            <CurrentUserMenu user={currentUser} />
+            <CurrentUserMenu
+              user={currentUser}
+              updatesUnread={liveUnread}
+              onOpenUpdates={() => setView('updates')}
+            />
           </div>
         </div>
 
@@ -3417,7 +3665,15 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   )
 }
 
-function CurrentUserMenu({ user }: { user: BoardAssignee }) {
+function CurrentUserMenu({
+  user,
+  updatesUnread,
+  onOpenUpdates
+}: {
+  user: BoardAssignee
+  updatesUnread: number
+  onOpenUpdates: () => void
+}) {
   const isAdmin = user.role === 'admin'
   const isLead = user.role === 'lead'
   const { t } = useDashTheme()
@@ -3434,6 +3690,7 @@ function CurrentUserMenu({ user }: { user: BoardAssignee }) {
   }, [open])
 
   const roleLabel = isAdmin ? 'Admin' : isLead ? 'Lead' : 'Member'
+  const badgeText = updatesUnread > 9 ? '9+' : String(updatesUnread)
 
   return (
     <div className="relative" ref={ref}>
@@ -3442,12 +3699,27 @@ function CurrentUserMenu({ user }: { user: BoardAssignee }) {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={
+          updatesUnread > 0
+            ? `${user.name}, ${updatesUnread} unread update${updatesUnread === 1 ? '' : 's'}`
+            : user.name
+        }
         title={user.name}
         className={`flex items-center gap-2 rounded-full border px-2 py-1 transition ${
           open ? t.btnActive : t.btn
         }`}
       >
-        <Avatar user={user} size={22} />
+        <span className="relative inline-flex">
+          <Avatar user={user} size={22} />
+          {updatesUnread > 0 && (
+            <span
+              className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-semibold text-white ring-2 ring-white dark:ring-zinc-900"
+              aria-hidden
+            >
+              {badgeText}
+            </span>
+          )}
+        </span>
         <span className={`text-xs ${t.text} hidden sm:inline`}>
           {user.name}
         </span>
@@ -3486,6 +3758,23 @@ function CurrentUserMenu({ user }: { user: BoardAssignee }) {
               </span>
             </div>
           </div>
+          <div className={`my-1 border-t ${t.borderSoft}`} />
+          <button
+            type="button"
+            onClick={() => {
+              onOpenUpdates()
+              setOpen(false)
+            }}
+            className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs ${t.tab} ${t.text}`}
+          >
+            <Inbox className="size-3.5" />
+            <span className="flex-1">Updates</span>
+            {updatesUnread > 0 && (
+              <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                {badgeText}
+              </span>
+            )}
+          </button>
           <div className={`my-1 border-t ${t.borderSoft}`} />
           <form action={signOut}>
             <button

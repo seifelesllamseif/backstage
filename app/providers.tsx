@@ -14,9 +14,22 @@ function ThemedToaster() {
     <Toaster
       position="bottom-right"
       richColors
-      closeButton
-      expand
+      visibleToasts={6}
       theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
+      // Sit below modals/sheets (shadcn sheet defaults to z-50) so an
+      // opened task detail covers the stack instead of fighting with
+      // the comment composer over the same screen real estate.
+      style={{ zIndex: 45 } as React.CSSProperties}
+      toastOptions={{
+        classNames: {
+          // Wraps the toast title so very long task titles don't overflow
+          // or get cut off. Soft cap at 3 lines.
+          title:
+            'text-[13px] font-medium leading-snug break-words [overflow-wrap:anywhere] line-clamp-3',
+          description:
+            'text-[11px] leading-snug break-words [overflow-wrap:anywhere] line-clamp-3'
+        }
+      }}
     />
   )
 }

@@ -63,6 +63,7 @@ export function mapMember(
     lastSeenAt: member.lastSeenAt,
     activityStatus: member.activityStatus,
     timezone: member.timezone,
+    joinedAt: member.joinedAt,
   };
 }
 

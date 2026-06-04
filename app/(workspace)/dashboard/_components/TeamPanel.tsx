@@ -527,14 +527,8 @@ export function TeamPanel({ actor }: { actor: Actor }) {
           const canReinstateRow = canActPresence && isLeft
           // Same authz as the original invite send: admins/leads only,
           // and not for left members (nothing to re-welcome).
-          const canResendWelcome =
-            !isLeft && canInvite(actor, m.accessTier)
-          if (
-            !canEdit &&
-            !canDelete &&
-            !canReinstateRow &&
-            !canResendWelcome
-          )
+          const canResendWelcome = !isLeft && canInvite(actor, m.accessTier)
+          if (!canEdit && !canDelete && !canReinstateRow && !canResendWelcome)
             return null
           return (
             <div className="flex justify-end">
@@ -979,7 +973,7 @@ function RowActionsMenu({
               className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${t.text}`}
             >
               <Mail className="size-3.5" />
-              Resend welcome
+              welcome
             </button>
           )}
           {canReinstate && (
