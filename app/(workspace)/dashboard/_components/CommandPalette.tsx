@@ -647,9 +647,9 @@ export default function CommandPalette({
                     ? `${t.btnActive} ${t.borderSoft}`
                     : `${t.borderSoft} ${t.textMuted} hover:${t.text}`
                 }`}
-                title="Tasks I watch but don't own"
+                title="Tasks I spectate but don't own"
               >
-                Watching
+                Spectating
               </button>
             )}
           </div>
