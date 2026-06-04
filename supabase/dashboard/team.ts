@@ -325,6 +325,7 @@ export async function inviteMember(
     loginEmail,
     initialPassword: INVITE_DEFAULT_PASSWORD,
     acceptUrl: absoluteUrl(`/invite/${token}`),
+    loginUrl: absoluteUrl('/login'),
     expiresAt
   })
 
@@ -436,6 +437,7 @@ export async function resendInvite(
     loginEmail: invite.email,
     initialPassword: INVITE_DEFAULT_PASSWORD,
     acceptUrl: absoluteUrl(`/invite/${invite.token}`),
+    loginUrl: absoluteUrl('/login'),
     expiresAt: invite.expires_at
   })
 

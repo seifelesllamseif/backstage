@@ -51,9 +51,8 @@ export default async function InvitePage({
             {invite.loginEmail}
           </p>
           <p className="mt-2 text-[11px] text-zinc-600">
-            Once you accept, the password will be sent in the welcome email (or
-            check the one we already sent to{' '}
-            <span className="font-medium text-zinc-800">{invite.contactEmail}</span>).
+            Use the password from the invite email we sent to{' '}
+            <span className="font-medium text-zinc-800">{invite.contactEmail}</span>.
           </p>
         </div>
 

@@ -8,6 +8,7 @@ import { getCurrentTeamMember } from "@/lib/dal";
 import { createAdminClient } from "@/supabase/admin";
 import { createClient } from "@/supabase/server";
 import { DEFAULT_REDIRECT_ROUTE } from "@/routes";
+import { INVITE_DEFAULT_PASSWORD } from "@/supabase/dashboard/team";
 
 // Decision 0029: onboarding writes go through @supabase/supabase-js with the
 // user's session (RLS policies in migration 20260531_avatars_and_onboarding_*
@@ -43,7 +44,10 @@ async function bumpStep(memberId: string, step: number) {
 // (or what admin set as the temp / invite password).
 const passwordSchema = z
   .object({
-    oldPassword: z.string().min(1, "Enter your current password."),
+    // Optional on the first-time invite flow: when the member is still on
+    // onboarding step 0 the action falls back to verifying against the
+    // shared INVITE_DEFAULT_PASSWORD instead of asking them to retype it.
+    oldPassword: z.string().min(1).nullable().optional(),
     password: z.string().min(8, "Password must be at least 8 characters."),
     confirm: z.string(),
   })
@@ -51,7 +55,7 @@ const passwordSchema = z
     message: "Passwords do not match.",
     path: ["confirm"],
   })
-  .refine((d) => d.password !== d.oldPassword, {
+  .refine((d) => !d.oldPassword || d.password !== d.oldPassword, {
     message: "New password must be different from the current one.",
     path: ["password"],
   });
@@ -69,15 +73,34 @@ export async function updatePassword(formData: FormData): Promise<ActionResult> 
   }
 
   const supabase = await createClient();
-  // Verify the current password by attempting a fresh sign-in. Supabase
-  // returns an Invalid login credentials error when it doesn't match.
-  // Re-signs the same user in (no session disruption).
+  // First-time onboarding has no "old password" input - the user just
+  // signed in with INVITE_DEFAULT_PASSWORD, so we verify against that.
+  // Subsequent changes (member already past step 0) still require the
+  // current password to defend against session hijack.
+  const { data: stepRow } = await supabase
+    .from("team_members")
+    .select("onboarding_step")
+    .eq("id", member.id)
+    .maybeSingle();
+  const isFirstTimeFlow = (stepRow?.onboarding_step ?? 0) === 0;
+  const verifyPassword = parsed.data.oldPassword ?? (isFirstTimeFlow ? INVITE_DEFAULT_PASSWORD : null);
+  if (!verifyPassword) {
+    return { ok: false, error: "Enter your current password." };
+  }
+  if (parsed.data.password === verifyPassword) {
+    return { ok: false, error: "New password must be different from the current one." };
+  }
   const { error: verifyErr } = await supabase.auth.signInWithPassword({
     email: member.email,
-    password: parsed.data.oldPassword,
+    password: verifyPassword,
   });
   if (verifyErr) {
-    return { ok: false, error: "Current password is wrong." };
+    return {
+      ok: false,
+      error: isFirstTimeFlow
+        ? "Couldn't verify the starter password. Try signing out and back in."
+        : "Current password is wrong.",
+    };
   }
 
   const { error } = await supabase.auth.updateUser({ password: parsed.data.password });

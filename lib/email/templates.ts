@@ -646,6 +646,7 @@ export interface InviteMemberEmailInput {
   loginEmail: string
   initialPassword: string
   acceptUrl: string
+  loginUrl: string
   expiresAt: string
 }
 
@@ -677,7 +678,8 @@ export function inviteMemberEmail(input: InviteMemberEmailInput): {
       `<p style="margin:0 0 8px">Hi ${escape(input.recipientName.split(' ')[0] || input.recipientName)},</p>` +
       `<p style="margin:0 0 12px"><strong>${escape(input.inviterName)}</strong> invited you to join <strong>${escape(input.companyName)}</strong> on Backstage as ${escape(tierLabel)}.</p>` +
       credsHtml +
-      `<p style="margin:0 0 12px;color:#444">Click below to accept the invite and sign in. You will be asked to change your password on first sign-in. The link expires on ${escape(expiresPretty)}.</p>`,
+      `<p style="margin:0 0 12px;color:#444">Click below to accept the invite and sign in. You will be asked to change your password on first sign-in. The link expires on ${escape(expiresPretty)}.</p>` +
+      `<p style="margin:0 0 12px;font-size:12px;color:#71717a">Already accepted, or the link above doesn't work? Sign in directly at <a href="${escape(input.loginUrl)}" style="color:#0f766e;text-decoration:underline">${escape(input.loginUrl)}</a> with the credentials above.</p>`,
     ctaLabel: 'Accept invite',
     ctaUrl: input.acceptUrl
   })
@@ -691,6 +693,7 @@ export function inviteMemberEmail(input: InviteMemberEmailInput): {
     `  Password: ${input.initialPassword}`,
     '',
     `Accept here: ${input.acceptUrl}`,
+    `Or sign in directly at: ${input.loginUrl}`,
     `You will be asked to change your password on first sign-in.`,
     `Link expires on ${expiresPretty}.`
   ].join('\n')
