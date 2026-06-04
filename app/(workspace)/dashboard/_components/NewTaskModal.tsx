@@ -236,6 +236,18 @@ function ManualTab({
     setShowProjectError(false)
   }
 
+  // Hide teammates who are on vacation or have left the team from the
+  // Assignee / Lead pickers - they shouldn't pick up fresh work. Keep
+  // active and away members (away just means offline at the moment).
+  const assignableMembers = useMemo(
+    () =>
+      members.filter(
+        (m) =>
+          m.activityStatus !== 'left' && m.activityStatus !== 'on_vacation'
+      ),
+    [members]
+  )
+
   const selectedTags = useMemo(
     () =>
       tagsInput
@@ -392,7 +404,7 @@ function ManualTab({
             className={`h-9 w-full rounded-md border px-2 text-xs focus:outline-none ${t.input}`}
           >
             <option value="">Unassigned</option>
-            {members.map((m) => (
+            {assignableMembers.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
               </option>
@@ -406,7 +418,7 @@ function ManualTab({
             className={`h-9 w-full rounded-md border px-2 text-xs focus:outline-none ${t.input}`}
           >
             <option value="">No lead</option>
-            {members
+            {assignableMembers
               .filter((m) => m.role === 'admin' || m.role === 'lead')
               .map((m) => (
                 <option key={m.id} value={m.id}>
@@ -893,11 +905,17 @@ function DraftRow({
           className={`h-8 rounded-md border px-2 text-[11px] ${t.input}`}
         >
           <option value="">Unassigned</option>
-          {members.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.name}
-            </option>
-          ))}
+          {members
+            .filter(
+              (m) =>
+                m.activityStatus !== 'left' &&
+                m.activityStatus !== 'on_vacation'
+            )
+            .map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
         </select>
         <input
           value={draft.dueDate ?? ''}

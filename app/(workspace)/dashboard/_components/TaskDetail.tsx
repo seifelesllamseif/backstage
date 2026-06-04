@@ -1946,12 +1946,21 @@ function LinkedMeetingsSection({
   const meetingRequest = useMeetingRequestSheet()
   const meetings = useMeetingsSheet()
   const [items, setItems] = useState<LinkedMeeting[]>([])
-  const [loading, setLoading] = useState(true)
+  // hasFetched flips true after the first server reply for this taskId.
+  // We only render the "Loading…" placeholder while that's false; later
+  // refreshes (refreshTick or background polls) keep the prior list
+  // visible until the new one arrives, so the section doesn't flicker
+  // through Loading -> empty -> list on every refetch.
+  const [hasFetched, setHasFetched] = useState(false)
   const [refreshTick, setRefreshTick] = useState(0)
 
   useEffect(() => {
+    setHasFetched(false)
+    setItems([])
+  }, [taskId])
+
+  useEffect(() => {
     let alive = true
-    setLoading(true)
     listMeetingsForTask(taskId).then((res) => {
       if (!alive) return
       if ('requests' in res) {
@@ -1972,7 +1981,7 @@ function LinkedMeetingsSection({
           }))
         )
       }
-      setLoading(false)
+      setHasFetched(true)
     })
     return () => {
       alive = false
@@ -2030,7 +2039,7 @@ function LinkedMeetingsSection({
           </button>
         )}
       </div>
-      {loading ? (
+      {!hasFetched && items.length === 0 ? (
         <p className={`text-[11px] italic ${t.textSubtle}`}>Loading...</p>
       ) : items.length === 0 ? (
         <p className={`text-[11px] italic ${t.textSubtle}`}>
