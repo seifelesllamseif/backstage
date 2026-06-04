@@ -41,6 +41,7 @@ import {
   changeAccessTier as changeAccessTierImpl,
   inviteMember as inviteMemberImpl,
   resendInvite as resendInviteImpl,
+  resendWelcomeToMember as resendWelcomeToMemberImpl,
   listTeamRoster as listTeamRosterImpl,
   reinstateMember as reinstateMemberImpl,
   setMemberPresence as setMemberPresenceImpl,
@@ -550,6 +551,12 @@ export async function resendInvite(
   ...args: Parameters<typeof resendInviteImpl>
 ) {
   return resendInviteImpl(...args)
+}
+
+export async function resendWelcomeToMember(
+  ...args: Parameters<typeof resendWelcomeToMemberImpl>
+) {
+  return resendWelcomeToMemberImpl(...args)
 }
 
 export async function softRemoveMember(

@@ -467,6 +467,95 @@ export async function resendInvite(
   return { ok: true, emailStatus: emailResult }
 }
 
+// Re-send the welcome email to an existing member, even if their original
+// invite was already accepted. Used when a member loses their original
+// credentials email or never received it. Looks up the matching invite
+// row by login email to recover the original token + access tier.
+export async function resendWelcomeToMember(
+  memberId: string
+): Promise<
+  | { ok: true; emailStatus: { ok: true } | { ok: false; reason: string } }
+  | { error: string }
+> {
+  const actor = await loadActor()
+  if (!actor) return { error: 'Not signed in.' }
+  const me = await getCurrentTeamMember()
+  if (!me) return { error: 'Not signed in.' }
+  const supabase = createAdminClient()
+
+  const { data: member } = await supabase
+    .from('team_members')
+    .select(
+      'id, email, contact_email, full_name, access_tier, company_id'
+    )
+    .eq('id', memberId)
+    .maybeSingle()
+  if (!member || member.company_id !== me.companyId) {
+    return { error: 'Member not found.' }
+  }
+  if (!canInvite(actor, member.access_tier as AccessTier)) {
+    return { error: 'Only admins and leads can resend the welcome email.' }
+  }
+  if (!member.contact_email) {
+    return { error: 'Member has no contact email on file.' }
+  }
+
+  const { data: invite } = await supabase
+    .from('team_invites')
+    .select('id, token, expires_at')
+    .eq('company_id', me.companyId)
+    .eq('email', member.email)
+    .order('invited_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (!invite) {
+    return { error: 'No invite record found for this member.' }
+  }
+
+  const { data: company } = await supabase
+    .from('companies')
+    .select('name')
+    .eq('id', member.company_id)
+    .maybeSingle()
+
+  const { subject, html, text } = inviteMemberEmail({
+    recipientName: member.full_name,
+    inviterName: me.fullName,
+    companyName: company?.name ?? 'Backstage',
+    accessTier: member.access_tier as AccessTier,
+    loginEmail: member.email,
+    initialPassword: INVITE_DEFAULT_PASSWORD,
+    acceptUrl: absoluteUrl(`/invite/${invite.token}`),
+    loginUrl: absoluteUrl('/login'),
+    expiresAt: invite.expires_at
+  })
+
+  const emailResult = await sendInviteEmailSafely({
+    to: member.contact_email,
+    subject,
+    html,
+    text
+  })
+
+  await logActivity(
+    supabase,
+    me.companyId,
+    me.id,
+    'team.welcome_resent',
+    'team_member',
+    member.id,
+    {
+      email: member.email,
+      contactEmail: member.contact_email,
+      emailOk: emailResult.ok,
+      emailReason: emailResult.ok ? null : emailResult.reason
+    }
+  )
+
+  revalidatePath('/dashboard/team')
+  return { ok: true, emailStatus: emailResult }
+}
+
 export async function cancelInvite(
   inviteId: string
 ): Promise<{ ok: true } | { error: string }> {

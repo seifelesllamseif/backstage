@@ -29,6 +29,7 @@ import {
 import {
   cancelInvite,
   resendInvite,
+  resendWelcomeToMember,
   changeAccessTier,
   inviteMember,
   listTeamRoster,
@@ -307,6 +308,24 @@ export function TeamPanel({ actor }: { actor: Actor }) {
     refetch()
   }
 
+  // Re-sends the same welcome/credentials email to a member whose
+  // original invite was already accepted - covers "lost the original
+  // email" cases. Looks up the matching invite row by login email.
+  async function onResendWelcome(member: RosterMember) {
+    const res = await resendWelcomeToMember(member.id)
+    if ('error' in res) {
+      toast.error(res.error)
+      return
+    }
+    if (res.emailStatus.ok) {
+      toast.success(`Welcome email re-sent to ${member.fullName}.`)
+    } else {
+      toast.warning(
+        `Re-send attempt failed (${res.emailStatus.reason}). Check Vercel logs.`
+      )
+    }
+  }
+
   const allFilteredChecked =
     actionableIds.length > 0 && actionableIds.every((id) => selected.has(id))
 
@@ -506,16 +525,28 @@ export function TeamPanel({ actor }: { actor: Actor }) {
           const canActPresence = canSoftRemove(actor, target)
           const canDelete = canActPresence && !isLeft
           const canReinstateRow = canActPresence && isLeft
-          if (!canEdit && !canDelete && !canReinstateRow) return null
+          // Same authz as the original invite send: admins/leads only,
+          // and not for left members (nothing to re-welcome).
+          const canResendWelcome =
+            !isLeft && canInvite(actor, m.accessTier)
+          if (
+            !canEdit &&
+            !canDelete &&
+            !canReinstateRow &&
+            !canResendWelcome
+          )
+            return null
           return (
             <div className="flex justify-end">
               <RowActionsMenu
                 canEdit={canEdit}
                 canDelete={canDelete}
                 canReinstate={canReinstateRow}
+                canResendWelcome={canResendWelcome}
                 onEdit={() => setEditing(m)}
                 onDelete={() => setDeleteConfirm(m)}
                 onReinstate={() => onChangePresence(m, 'active')}
+                onResendWelcome={() => onResendWelcome(m)}
               />
             </div>
           )
@@ -875,16 +906,20 @@ function RowActionsMenu({
   canEdit,
   canDelete,
   canReinstate,
+  canResendWelcome,
   onEdit,
   onDelete,
-  onReinstate
+  onReinstate,
+  onResendWelcome
 }: {
   canEdit: boolean
   canDelete: boolean
   canReinstate: boolean
+  canResendWelcome: boolean
   onEdit: () => void
   onDelete: () => void
   onReinstate: () => void
+  onResendWelcome: () => void
 }) {
   const { t } = useDashTheme()
   const [open, setOpen] = useState(false)
@@ -932,6 +967,19 @@ function RowActionsMenu({
             >
               <Pencil className="size-3.5" />
               Edit
+            </button>
+          )}
+          {canResendWelcome && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false)
+                onResendWelcome()
+              }}
+              className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${t.text}`}
+            >
+              <Mail className="size-3.5" />
+              Resend welcome
             </button>
           )}
           {canReinstate && (
