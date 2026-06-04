@@ -37,6 +37,10 @@ export interface RelationPickerProps {
   selfRef?: string
   onAdd: (rel: TaskRelation) => void
   onRemove: (rel: TaskRelation) => void
+  // When present, the rendered relation chip becomes a button that
+  // jumps to the linked task. Wired from TaskDetail; NewTaskModal
+  // leaves it undefined since the relations aren't created yet.
+  onSelectRef?: (ref: string) => void
   // Visual variant: "compact" tightens spacing for inline use inside
   // a field grid. "spacious" gives breathing room for a standalone
   // section (NewTaskModal).
@@ -50,6 +54,7 @@ export default function RelationPicker({
   selfRef,
   onAdd,
   onRemove,
+  onSelectRef,
   variant = 'compact',
   disabled = false
 }: RelationPickerProps) {
@@ -97,30 +102,46 @@ export default function RelationPicker({
             No relations yet
           </span>
         )}
-        {relations.map((rel, i) => (
-          <span
-            key={`${rel.kind}-${rel.ref}-${i}`}
-            className={`group inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] ${t.metaTag}`}
-          >
-            <RelationIcon kind={rel.kind} className="size-3.5" />
-            <span className={t.textMuted}>{RELATION_LABEL[rel.kind]}</span>
+        {relations.map((rel, i) => {
+          const target = candidates.find((c) => c.ref === rel.ref)
+          const canJump = !!(onSelectRef && target)
+          return (
             <span
-              className={`text-[10px] tracking-wider uppercase ${t.text}`}
+              key={`${rel.kind}-${rel.ref}-${i}`}
+              className={`group inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] ${t.metaTag}`}
             >
-              {rel.ref}
+              <RelationIcon kind={rel.kind} className="size-3.5" />
+              <span className={t.textMuted}>{RELATION_LABEL[rel.kind]}</span>
+              {canJump ? (
+                <button
+                  type="button"
+                  onClick={() => onSelectRef!(rel.ref)}
+                  aria-label={`Open ${rel.ref}`}
+                  title={target?.title ?? `Open ${rel.ref}`}
+                  className={`rounded text-[10px] tracking-wider uppercase underline-offset-2 hover:underline ${t.text}`}
+                >
+                  {rel.ref}
+                </button>
+              ) : (
+                <span
+                  className={`text-[10px] tracking-wider uppercase ${t.text}`}
+                >
+                  {rel.ref}
+                </span>
+              )}
+              {!disabled && (
+                <button
+                  type="button"
+                  onClick={() => onRemove(rel)}
+                  aria-label={`Remove ${RELATION_LABEL[rel.kind]} ${rel.ref}`}
+                  className={`flex size-4 items-center justify-center rounded opacity-0 transition group-hover:opacity-100 ${t.tab}`}
+                >
+                  <X className="size-3" />
+                </button>
+              )}
             </span>
-            {!disabled && (
-              <button
-                type="button"
-                onClick={() => onRemove(rel)}
-                aria-label={`Remove ${RELATION_LABEL[rel.kind]} ${rel.ref}`}
-                className={`flex size-4 items-center justify-center rounded opacity-0 transition group-hover:opacity-100 ${t.tab}`}
-              >
-                <X className="size-3" />
-              </button>
-            )}
-          </span>
-        ))}
+          )
+        })}
 
         {!adding && !disabled && (
           <button

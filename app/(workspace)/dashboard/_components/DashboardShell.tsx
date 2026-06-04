@@ -178,12 +178,14 @@ export interface DashboardInitial {
   }[]
   externalRefsByTask: Record<string, TaskExternalRef[]>
   externalRefsByProject: Record<string, ProjectExternalRef[]>
+  projectAssigneeIds: Record<string, string[]>
   currentMember: {
     id: string
     fullName: string
     accessTier: 'admin' | 'lead' | 'member'
     onboardingComplete: boolean
     isOwner: boolean
+    watcherTaskIds: string[]
   }
   currentProjectId: string | null
   defaultProjectId: string | null
@@ -3031,6 +3033,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   currentUserId={currentUserId}
                   accessTier={initial.currentMember.accessTier}
                   allMembers={team}
+                  projectAssigneeIds={initial.projectAssigneeIds}
                   onOpenProject={onOpenProject}
                   refsByProject={projectExternalRefs}
                   onAddProjectRef={addProjectExternalRef}
@@ -3395,11 +3398,19 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           currentProjectId={initial.currentProjectId}
           members={team}
           currentUserId={currentUserId}
+          currentUserAccessTier={initial.currentMember.accessTier}
+          currentUserWatcherTaskIds={initial.currentMember.watcherTaskIds}
+          activeSprintTaskIds={
+            activeSprintTaskIdSet ? [...activeSprintTaskIdSet] : []
+          }
           onSelectTask={(id) => setSelectedId(id)}
           onSelectProject={(id) => onProjectChange(id)}
           onSelectTab={(t) => setTab(t)}
           onSelectView={(v) => setView(v)}
           onSelectMember={(id) => openPortfolio(id)}
+          onSelectMeeting={(id) =>
+            meetingsSheet.open({ focusedRequestId: id })
+          }
         />
       </div>
     </TaskActionsProvider>

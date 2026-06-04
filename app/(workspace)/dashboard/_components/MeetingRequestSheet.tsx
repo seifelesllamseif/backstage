@@ -709,7 +709,11 @@ function AttendeePicker({
     [team]
   )
   const addable = team.filter(
-    (m) => m.id !== primaryId && !attendeeIds.includes(m.id)
+    (m) =>
+      m.id !== primaryId &&
+      !attendeeIds.includes(m.id) &&
+      m.activityStatus !== 'on_vacation' &&
+      m.activityStatus !== 'left'
   )
   return (
     <div className="flex flex-wrap items-center gap-1.5">

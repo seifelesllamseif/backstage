@@ -79,12 +79,14 @@ export async function fetchInitial(
     meetingUpdates,
     externalRefsByTask,
     externalRefsByProject,
+    projectAssigneeIds: data.projectAssigneeIds,
     currentMember: {
       id: data.currentMember.id,
       fullName: data.currentMember.fullName,
       accessTier: data.currentMember.accessTier,
       onboardingComplete: data.currentMember.onboardingComplete,
-      isOwner: data.currentMember.isOwner
+      isOwner: data.currentMember.isOwner,
+      watcherTaskIds: data.currentMember.watcherTaskIds
     },
     currentProjectId,
     defaultProjectId

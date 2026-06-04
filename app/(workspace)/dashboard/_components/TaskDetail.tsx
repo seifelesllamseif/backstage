@@ -544,6 +544,10 @@ export default function TaskDetail({
             disabled={!canEditPlanner}
             onAdd={(rel) => onAddRelation(task.id, rel)}
             onRemove={(rel) => onRemoveRelation(task.id, rel)}
+            onSelectRef={(ref) => {
+              const hit = candidateTasks.find((c) => c.ref === ref)
+              if (hit) taskActions.openDetail(hit.id)
+            }}
             variant="compact"
           />
         </div>

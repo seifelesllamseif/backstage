@@ -187,6 +187,11 @@ export interface DashboardData {
   meetingActivity: DashboardActivityRow[]
   externalRefs: DashboardTaskExternalRefRow[]
   projectExternalRefs: DashboardProjectExternalRefRow[]
+  // Distinct assignee ids per project, computed across all tasks (not
+  // scoped to the viewer's visible-task slice). Lets the Projects panel
+  // show the real roster on each card even for members whose `tasks`
+  // array only contains their own assignments.
+  projectAssigneeIds: Record<string, string[]>
   currentMember: {
     id: string
     companyId: string
@@ -194,6 +199,7 @@ export interface DashboardData {
     accessTier: AccessTier
     onboardingComplete: boolean
     isOwner: boolean
+    watcherTaskIds: string[]
   }
 }
 
@@ -238,31 +244,30 @@ export async function fetchDashboardData(
   const seesAllProjects =
     member.accessTier === 'admin' || member.accessTier === 'lead'
   let myProjectIds: string[] | null = null
-  // Tasks the member is explicitly invited to watch. Used both in the task
-  // query (`assignee_id == me OR id IN watcherTaskIds`) and to pull the
-  // hosting projects into the scope.
-  let watcherTaskIds: string[] = []
+  // Always fetch the viewer's watched task ids: members need them for
+  // task scope (`assignee = me OR id IN watched`) and every role needs
+  // them on the payload so the palette can offer a "watching" filter.
+  const watcherRes = await supabase
+    .from('task_watchers')
+    .select('task_id, task:tasks!task_watchers_task_id_fkey(project_id)')
+    .eq('member_id', member.id)
+  if (watcherRes.error) throw watcherRes.error
+  const watcherTaskIds: string[] = []
+  const watcherProjectIds = new Set<string>()
+  for (const r of watcherRes.data ?? []) {
+    watcherTaskIds.push(r.task_id)
+    const t = Array.isArray(r.task) ? r.task[0] : r.task
+    if (t?.project_id) watcherProjectIds.add(t.project_id)
+  }
   if (!seesAllProjects) {
-    const [assignedRes, watcherRes] = await Promise.all([
-      supabase
-        .from('tasks')
-        .select('project_id')
-        .eq('company_id', member.companyId)
-        .eq('assignee_id', member.id),
-      supabase
-        .from('task_watchers')
-        .select('task_id, task:tasks!task_watchers_task_id_fkey(project_id)')
-        .eq('member_id', member.id)
-    ])
+    const assignedRes = await supabase
+      .from('tasks')
+      .select('project_id')
+      .eq('company_id', member.companyId)
+      .eq('assignee_id', member.id)
     if (assignedRes.error) throw assignedRes.error
-    if (watcherRes.error) throw watcherRes.error
-    const ids = new Set<string>()
+    const ids = new Set<string>(watcherProjectIds)
     for (const r of assignedRes.data ?? []) ids.add(r.project_id)
-    for (const r of watcherRes.data ?? []) {
-      watcherTaskIds.push(r.task_id)
-      const t = Array.isArray(r.task) ? r.task[0] : r.task
-      if (t?.project_id) ids.add(t.project_id)
-    }
     myProjectIds = [...ids]
     if (projectId && !myProjectIds.includes(projectId)) {
       myProjectIds = []
@@ -334,7 +339,8 @@ export async function fetchDashboardData(
     meetingActivityRes,
     externalRefsRes,
     projectExternalRefsRes,
-    refTasksRes
+    refTasksRes,
+    projectAssigneesRes
   ] = await Promise.all([
     // members - always the full company team. Members previously got a
     // narrow slice (just the assignees / leads of their visible tasks),
@@ -483,7 +489,21 @@ export async function fetchDashboardData(
     supabase
       .from('tasks')
       .select('id, ref, title')
-      .eq('company_id', member.companyId)
+      .eq('company_id', member.companyId),
+    // Per-project assignee roster. Covers every assignee on every
+    // project in scope, ignoring the viewer's task-level filter, so the
+    // Projects panel can render the real team on each card.
+    (() => {
+      let q = supabase
+        .from('tasks')
+        .select('project_id, assignee_id')
+        .eq('company_id', member.companyId)
+        .not('assignee_id', 'is', null)
+      if (myProjectIds !== null) {
+        q = q.in('project_id', safeProjectIds(myProjectIds))
+      }
+      return q
+    })()
   ])
 
   // Surface the first non-null error so we don't ship a half-populated payload.
@@ -504,7 +524,8 @@ export async function fetchDashboardData(
     meetingActivityRes.error,
     externalRefsRes.error,
     projectExternalRefsRes.error,
-    refTasksRes.error
+    refTasksRes.error,
+    projectAssigneesRes.error
   ].filter((e): e is NonNullable<typeof e> => !!e)
   if (errors.length > 0) throw errors[0]
 
@@ -513,6 +534,23 @@ export async function fetchDashboardData(
   const taskRefById = new Map<string, TaskRefSummary>()
   for (const r of refTasksRes.data ?? []) {
     taskRefById.set(r.id, { id: r.id, ref: r.ref, title: r.title })
+  }
+
+  // Per-project assignee roster: distinct assignee ids per project_id,
+  // built once and surfaced on the payload so the Projects panel can
+  // render the real team on each card.
+  const projectAssigneeIds: Record<string, string[]> = {}
+  {
+    const grouped = new Map<string, Set<string>>()
+    for (const row of projectAssigneesRes.data ?? []) {
+      if (!row.assignee_id) continue
+      const set = grouped.get(row.project_id) ?? new Set<string>()
+      set.add(row.assignee_id)
+      grouped.set(row.project_id, set)
+    }
+    for (const [projectId, set] of grouped) {
+      projectAssigneeIds[projectId] = [...set]
+    }
   }
 
   // Sprint links per task id (for mapTask's sprint chip)
@@ -754,6 +792,7 @@ export async function fetchDashboardData(
     meetingActivity,
     externalRefs,
     projectExternalRefs,
+    projectAssigneeIds,
     currentMember: {
       id: member.id,
       companyId: member.companyId,
@@ -763,7 +802,11 @@ export async function fetchDashboardData(
       // saves or is skipped. Used by the dashboard to hide the sidebar
       // "Finish your profile" entry and move it into Settings.
       onboardingComplete: member.onboardingStep >= 6,
-      isOwner: ownerId === member.id
+      isOwner: ownerId === member.id,
+      // Surfaced so the client can enforce the same assignee/watcher scope
+      // as the server when searching (e.g. command palette). Empty for
+      // admins/leads since they see every task and don't need the union.
+      watcherTaskIds
     }
   }
 }

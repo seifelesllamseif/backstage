@@ -102,6 +102,7 @@ export function ProjectsPanel({
   currentUserId,
   accessTier,
   allMembers,
+  projectAssigneeIds,
   onOpenProject,
   refsByProject,
   onAddProjectRef,
@@ -113,10 +114,13 @@ export function ProjectsPanel({
   projects: ProjectRow[]
   currentUserId: string
   accessTier: 'admin' | 'lead' | 'member'
-  // Full company team. Used as the project member roster for members
-  // (whose visible task slice is just their own assignments, which would
-  // otherwise render "1 member" on every project card).
+  // Full company team. Looked up by id to resolve project rosters into
+  // BoardAssignee objects.
   allMembers: BoardAssignee[]
+  // Distinct assignee ids per project, computed server-side across all
+  // tasks (not the viewer's visible slice). Drives the avatar stack on
+  // each project card.
+  projectAssigneeIds: Record<string, string[]>
   onOpenProject: (id: string) => void
   refsByProject: Record<string, ProjectExternalRef[]>
   onAddProjectRef: (projectId: string, url: string) => void
@@ -162,34 +166,25 @@ export function ProjectsPanel({
     return map
   }, [tasks])
 
-  // Distinct assignees per project, derived from the task assignee chips.
-  // Sorted by name so the avatar order is stable across renders.
-  //
-  // Members only see their own tasks, so deriving from `byProject` would
-  // render "1 member" everywhere. For them we fall back to the full
-  // company team on every project; admins / leads keep the precise list.
+  // Distinct assignees per project. Resolved from the server-provided
+  // `projectAssigneeIds` map so every role (including members, whose
+  // visible-task slice would otherwise show "just me") sees the real
+  // team on each card. Sorted by name so avatar order is stable.
   const membersByProject = useMemo(() => {
+    const byId = new Map(allMembers.map((m) => [m.id, m]))
     const map = new Map<string, BoardAssignee[]>()
-    const fullTeam = [...allMembers].sort((a, b) =>
-      a.name.localeCompare(b.name)
-    )
     for (const project of projects) {
-      if (!canEdit) {
-        map.set(project.id, fullTeam)
-        continue
+      const ids = projectAssigneeIds[project.id] ?? []
+      const roster: BoardAssignee[] = []
+      for (const id of ids) {
+        const m = byId.get(id)
+        if (m) roster.push(m)
       }
-      const list = byProject.get(project.id) ?? []
-      const seen = new Map<string, BoardAssignee>()
-      for (const task of list) {
-        if (task.assignee) seen.set(task.assignee.id, task.assignee)
-      }
-      map.set(
-        project.id,
-        [...seen.values()].sort((a, b) => a.name.localeCompare(b.name))
-      )
+      roster.sort((a, b) => a.name.localeCompare(b.name))
+      map.set(project.id, roster)
     }
     return map
-  }, [byProject, projects, canEdit, allMembers])
+  }, [projects, projectAssigneeIds, allMembers])
 
   // Members only see projects where they have at least one assigned task.
   const visibleProjects = canEdit

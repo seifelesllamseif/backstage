@@ -31,11 +31,8 @@ import { createMeetingRequest } from '../actions'
 import type { BoardTask } from './boardData'
 import { formatTzDiff, formatTimeIn } from '@/lib/timezone'
 import {
-  MEETING_BRIEF_FIELDS,
   MEETING_BRIEF_FIELD_HINTS,
-  MEETING_BRIEF_FIELD_LABELS,
-  countMissingBriefFields,
-  type MeetingBriefValues
+  MEETING_BRIEF_FIELD_LABELS
 } from '@/lib/meetingBrief'
 
 // Step-by-step alternative to MeetingRequestSheet. Same underlying
@@ -147,20 +144,9 @@ export function MeetingCreateWizardProvider({
     setOpenSheet(true)
   }, [])
 
-  const briefValues: MeetingBriefValues = useMemo(
-    () => ({
-      goal: goal.trim() || null,
-      context: context.trim() || null,
-      questions: questions.trim() || null,
-      preRead: preRead.trim() || null
-    }),
-    [goal, context, questions, preRead]
-  )
-  const missingBrief = countMissingBriefFields(briefValues)
-
   const canProceed = useMemo(() => {
     if (step === 1) return attendeeIds.length > 0
-    if (step === 2) return title.trim().length > 0 && missingBrief === 0
+    if (step === 2) return title.trim().length > 0
     if (step === 3) {
       if (isGroup) {
         return groupTime.length > 0 && !Number.isNaN(new Date(groupTime).getTime())
@@ -177,7 +163,6 @@ export function MeetingCreateWizardProvider({
     step,
     attendeeIds.length,
     title,
-    missingBrief,
     isGroup,
     groupTime,
     mode,
@@ -286,7 +271,6 @@ export function MeetingCreateWizardProvider({
                   setQuestions={setQuestions}
                   preRead={preRead}
                   setPreRead={setPreRead}
-                  missingBrief={missingBrief}
                   tasks={tasks}
                   currentUserId={currentUserId}
                   attendeeIds={attendeeIds}
@@ -431,7 +415,12 @@ function StepAttendees({
 }) {
   const { t } = useDashTheme()
   const team = useTeam()
-  const candidates = team.filter((m) => m.id !== currentUserId)
+  const candidates = team.filter(
+    (m) =>
+      m.id !== currentUserId &&
+      m.activityStatus !== 'on_vacation' &&
+      m.activityStatus !== 'left'
+  )
   const [query, setQuery] = useState('')
   const filtered = candidates.filter(
     (m) =>
@@ -465,7 +454,7 @@ function StepAttendees({
         <h3 className={`text-sm font-medium ${t.text}`}>Who are you meeting with?</h3>
         <p className={`mt-0.5 text-[11px] ${t.textMuted}`}>
           Pick one teammate for a 1:1, or several for a group. Members on
-          vacation or who have left are skipped from &quot;everyone&quot;.
+          vacation or who have left are hidden.
         </p>
       </div>
 
@@ -585,7 +574,6 @@ function StepTopic({
   setQuestions,
   preRead,
   setPreRead,
-  missingBrief,
   tasks,
   currentUserId,
   attendeeIds,
@@ -604,7 +592,6 @@ function StepTopic({
   setQuestions: (v: string) => void
   preRead: string
   setPreRead: (v: string) => void
-  missingBrief: number
   tasks: BoardTask[]
   currentUserId: string
   attendeeIds: string[]
@@ -620,19 +607,10 @@ function StepTopic({
             What&apos;s this meeting about?
           </h3>
           <p className={`mt-0.5 text-[11px] ${t.textMuted}`}>
-            The brief is required so attendees walk in prepared.
+            Only a title is required; the brief is optional but helps
+            attendees walk in prepared.
           </p>
         </div>
-        <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${
-            missingBrief === 0
-              ? 'bg-teal-500/10 text-teal-700'
-              : `${t.surfaceMuted} ${t.textMuted}`
-          }`}
-        >
-          {MEETING_BRIEF_FIELDS.length - missingBrief}/
-          {MEETING_BRIEF_FIELDS.length} filled
-        </span>
       </div>
 
       <label className="flex flex-col gap-1">
@@ -659,7 +637,6 @@ function StepTopic({
               className={`flex items-center gap-1 text-[9px] tracking-wider uppercase ${t.textMuted}`}
             >
               {MEETING_BRIEF_FIELD_LABELS[f]}
-              <span className="text-red-500">*</span>
             </span>
             <textarea
               value={value}

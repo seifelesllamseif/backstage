@@ -58,9 +58,9 @@ const BaseCreate = z.object({
     z.literal(60),
     z.literal(90)
   ]),
-  goal: z.string().trim().min(1).max(2000),
-  context: z.string().trim().min(1).max(4000),
-  questions: z.string().trim().min(1).max(4000),
+  goal: z.string().trim().max(2000).optional().nullable(),
+  context: z.string().trim().max(4000).optional().nullable(),
+  questions: z.string().trim().max(4000).optional().nullable(),
   preRead: z.string().trim().max(2000).optional().nullable(),
   linkedTaskId: z.string().uuid().optional().nullable()
 })
@@ -283,9 +283,9 @@ export async function createMeetingRequest(
       input.mode === 'slots' ? (input.slots as unknown as Json) : null,
     selected_slot_index: null,
     selected_starts_at: lockedStartsAt,
-    goal: input.goal,
-    context: input.context,
-    questions: input.questions,
+    goal: input.goal?.trim() || null,
+    context: input.context?.trim() || null,
+    questions: input.questions?.trim() || null,
     pre_read: input.preRead?.trim() || null
   }
 
