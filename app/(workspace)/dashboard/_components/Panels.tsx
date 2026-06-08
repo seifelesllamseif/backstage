@@ -46,6 +46,7 @@ import {
   getGoogleConnectionStatus,
   getMyEmailPrefs,
   sendSelfTestPush,
+  setQuickMeetUrl,
   updateMyEmailPrefs
 } from '../actions'
 import {
@@ -1657,6 +1658,9 @@ interface UpdateRow {
   // meetings open the share page (which has the recap), everything
   // else falls back to the inbox sheet.
   meetingAction?: string | null
+  // For room.invite team rows: Meet URL captured from the activity's
+  // metadata, opened in a new tab on click.
+  meetUrl?: string | null
 }
 
 type UpdateFilter =
@@ -2025,15 +2029,13 @@ export function UpdatesPanel({
                       {grouped[b.id].map((a) => {
                         const Icon = kindIcon(a.kind)
                         const tone = kindTone(a.kind, mode)
-                        const clickable = Boolean(a.taskId || a.meetingId)
+                        const clickable = Boolean(
+                          a.taskId || a.meetingId || a.meetUrl
+                        )
                         return (
                           <li key={a.id}>
                             <button
                               onClick={() => {
-                                // Meeting rows: reviewed → share page
-                                // (has the recap), everything else →
-                                // inbox sheet. Task rows open the task.
-                                // Team rows are informational.
                                 if (a.taskId) {
                                   onOpenTask(a.taskId)
                                 } else if (a.meetingId) {
@@ -2049,6 +2051,15 @@ export function UpdatesPanel({
                                   } else {
                                     onOpenMeeting(a.meetingId)
                                   }
+                                } else if (
+                                  a.meetUrl &&
+                                  typeof window !== 'undefined'
+                                ) {
+                                  window.open(
+                                    a.meetUrl,
+                                    '_blank',
+                                    'noopener,noreferrer'
+                                  )
                                 }
                               }}
                               disabled={!clickable}
@@ -2111,7 +2122,8 @@ export function SettingsPanel({
   showHints,
   setShowHints,
   onboardingComplete,
-  accessTier
+  accessTier,
+  initialQuickMeetUrl
 }: {
   density: 'compact' | 'cozy'
   setDensity: (d: 'compact' | 'cozy') => void
@@ -2125,6 +2137,7 @@ export function SettingsPanel({
   onboardingComplete: boolean
   // Admin-only sections (Google Calendar connect) gate on this.
   accessTier: 'admin' | 'lead' | 'member'
+  initialQuickMeetUrl: string | null
 }) {
   const { t, mode, toggle } = useDashTheme()
   const router = useRouter()
@@ -2213,6 +2226,10 @@ export function SettingsPanel({
         <EmailNotifications />
 
         {accessTier === 'admin' && <GoogleCalendarConnection />}
+
+        {accessTier === 'admin' && (
+          <QuickMeetUrlSetting initialUrl={initialQuickMeetUrl} />
+        )}
 
         {onboardingComplete && (
           <Row label="Profile">
@@ -2477,6 +2494,60 @@ function GoogleCalendarConnection() {
         </button>
       </div>
     </Row>
+  )
+}
+
+function QuickMeetUrlSetting({
+  initialUrl
+}: {
+  initialUrl: string | null
+}) {
+  const { t } = useDashTheme()
+  const [value, setValue] = useState(initialUrl ?? '')
+  const [savedValue, setSavedValue] = useState(initialUrl ?? '')
+  const [saving, startSaving] = useTransition()
+
+  const dirty = value.trim() !== savedValue.trim()
+
+  function save() {
+    startSaving(async () => {
+      const res = await setQuickMeetUrl(value)
+      if ('error' in res) {
+        toast.error(res.error)
+        return
+      }
+      const next = res.url ?? ''
+      setSavedValue(next)
+      setValue(next)
+      toast.success(next ? 'Quick room URL saved.' : 'Quick room URL cleared.')
+    })
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between gap-4">
+        <span className={`text-sm ${t.text}`}>Quick meeting room</span>
+        <button
+          onClick={save}
+          disabled={!dirty || saving}
+          className={`h-7 rounded-md border px-2 text-[11px] disabled:opacity-40 ${t.btn}`}
+        >
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+      <input
+        type="url"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="https://meet.google.com/abc-defg-hij"
+        className={`h-8 w-full rounded-md border px-2 text-xs ${t.input}`}
+      />
+      <p className={`text-[10px] leading-relaxed ${t.textSubtle}`}>
+        Always-on Google Meet room joinable from the topbar Mon-Fri,
+        7:00-18:00 Malta time. Paste a Meet link you keep open in the
+        background or one that auto-admits members.
+      </p>
+    </div>
   )
 }
 

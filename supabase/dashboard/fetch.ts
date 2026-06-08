@@ -203,6 +203,8 @@ export interface DashboardData {
     onboardingComplete: boolean
     isOwner: boolean
     watcherTaskIds: string[]
+    quickMeetUrl: string | null
+    timezone: string | null
   }
 }
 
@@ -235,10 +237,11 @@ export async function fetchDashboardData(
   // (used by the team management page to unlock owner-only powers).
   const { data: ownerRow } = await supabase
     .from('companies')
-    .select('owner_id')
+    .select('owner_id, quick_meet_url')
     .eq('id', member.companyId)
     .maybeSingle()
   const ownerId = ownerRow?.owner_id ?? null
+  const quickMeetUrl = ownerRow?.quick_meet_url ?? null
 
   // Admins and leads see everything in the company. Members see only "their
   // projects" - projects where they have >=1 assigned task OR where they're
@@ -450,14 +453,14 @@ export async function fetchDashboardData(
       .eq('entity_type', 'task')
       .in('entity_id', safeTaskIds)
       .order('created_at', { ascending: true }),
-    // team-management activity (presence flips, tier changes, etc).
-    // Not scoped to a task so we just take everything in the company
-    // and let the UI render them as informational rows.
+    // team-management activity (presence flips, tier changes, etc) plus
+    // quick-room invites. Not scoped to a task so we just take everything
+    // in the company and let the UI render them as informational rows.
     supabase
       .from('activity_logs')
       .select('*, actor:team_members!activity_log_actor_id_fkey(id, full_name)')
       .eq('company_id', member.companyId)
-      .in('entity_type', ['team_member', 'team_invite'])
+      .in('entity_type', ['team_member', 'team_invite', 'room'])
       .order('created_at', { ascending: true }),
     // Meeting lifecycle events (requested/approved/scheduled/declined/
     // rejected/rescheduled/canceled). Same shape as team activity but
@@ -810,7 +813,9 @@ export async function fetchDashboardData(
       // Surfaced so the client can enforce the same assignee/watcher scope
       // as the server when searching (e.g. command palette). Empty for
       // admins/leads since they see every task and don't need the union.
-      watcherTaskIds
+      watcherTaskIds,
+      quickMeetUrl,
+      timezone: member.timezone
     }
   }
 }

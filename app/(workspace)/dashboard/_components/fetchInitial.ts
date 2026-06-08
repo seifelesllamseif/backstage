@@ -36,7 +36,8 @@ export async function fetchInitial(
   )
   const teamUpdates: TeamUpdate[] = mapTeamActivity(
     data.teamActivity,
-    memberNamesById
+    memberNamesById,
+    data.currentMember.id
   )
   const meetingUpdates: MeetingUpdate[] = mapMeetingActivity(
     data.meetingActivity
@@ -82,11 +83,14 @@ export async function fetchInitial(
     projectAssigneeIds: data.projectAssigneeIds,
     currentMember: {
       id: data.currentMember.id,
+      companyId: data.currentMember.companyId,
       fullName: data.currentMember.fullName,
       accessTier: data.currentMember.accessTier,
       onboardingComplete: data.currentMember.onboardingComplete,
       isOwner: data.currentMember.isOwner,
-      watcherTaskIds: data.currentMember.watcherTaskIds
+      watcherTaskIds: data.currentMember.watcherTaskIds,
+      quickMeetUrl: data.currentMember.quickMeetUrl,
+      timezone: data.currentMember.timezone
     },
     currentProjectId,
     defaultProjectId

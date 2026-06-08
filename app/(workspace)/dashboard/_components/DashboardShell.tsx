@@ -113,6 +113,8 @@ import type { ExportContext } from '@/lib/export/types'
 import SymbolsPanel from './SymbolsPanel'
 import ArchivePanel from './ArchivePanel'
 import Avatar from './Avatar'
+import QuickRoomButton from './QuickRoomButton'
+import TimezoneGate from './TimezoneGate'
 import { DashboardThemeProvider, useDashTheme } from './theme'
 import { ContextMenuProvider, useContextMenu } from './ContextMenu'
 import { TaskActionsProvider } from './actions'
@@ -170,6 +172,7 @@ export interface DashboardInitial {
     taskId: null
     taskRef: null
     taskTitle: null
+    meetUrl: string | null
   }[]
   // Meeting lifecycle activity. taskId stays null; meetingId opens the
   // meetings sheet on click.
@@ -190,11 +193,14 @@ export interface DashboardInitial {
   projectAssigneeIds: Record<string, string[]>
   currentMember: {
     id: string
+    companyId: string
     fullName: string
     accessTier: 'admin' | 'lead' | 'member'
     onboardingComplete: boolean
     isOwner: boolean
     watcherTaskIds: string[]
+    quickMeetUrl: string | null
+    timezone: string | null
   }
   currentProjectId: string | null
   defaultProjectId: string | null
@@ -498,6 +504,11 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   const isAdmin = initial.currentMember.accessTier === 'admin'
 
   const team = initial.members
+  // Local copy of the viewer's saved timezone so TimezoneGate can dismiss
+  // itself after a successful save without triggering a server refetch.
+  const [savedTimezone, setSavedTimezone] = useState(
+    initial.currentMember.timezone
+  )
   // Ensure the signed-in user is always discoverable even if they have no
   // tasks in this slice (mapMembers returns everyone, but we fall back to a
   // synthesized record so role/avatar still render).
@@ -1592,8 +1603,11 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       description?: string | null
     }
   ) => {
-    const targetProjectId =
-      draft.projectId ?? initial.currentProjectId ?? initial.defaultProjectId
+    // Only fall back to the current view's project (when the user is
+     // looking at a specific project). Never silently default to the
+     // workspace-wide "first active project" - that's how tasks ended
+     // up in the wrong project by accident.
+    const targetProjectId = draft.projectId ?? initial.currentProjectId
     if (!targetProjectId) {
       toast.error('Pick a project before creating the task.')
       return
@@ -1891,13 +1905,19 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           onClick: () => {
             if (!removed) return
             setTasks((cur) => [removed, ...cur])
+            // Recreate in the same project the task lived in, not
+            // wherever the user happens to be looking now.
+            const recreateProjectId = removed.projectId
+            if (!recreateProjectId) {
+              toast.error("Can't restore: original project unknown.")
+              return
+            }
             startTransition(async () => {
               await createDashboardTask({
                 title: removed.title,
                 status: removed.status,
                 priority: removed.priority,
-                projectId:
-                  initial.currentProjectId ?? initial.defaultProjectId ?? '',
+                projectId: recreateProjectId,
                 assigneeId: removed.assignee?.id ?? null,
                 dueDate: null,
                 labelIds: []
@@ -1999,6 +2019,13 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     ]
   )
 
+  // Realtime-arrived team rows (currently just room.invite). Prepended
+  // to globalActivity so the Updates panel reflects them live without
+  // waiting for a refetch.
+  const [liveTeamUpdates, setLiveTeamUpdates] = useState<
+    DashboardInitial['teamUpdates']
+  >([])
+
   const globalActivity = useMemo(() => {
     const taskRows = Object.entries(activity).flatMap(([taskId, list]) => {
       const task = tasks.find((task) => task.id === taskId)
@@ -2017,14 +2044,14 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     })
     // Team and meeting rows arrive pre-shaped from fetchInitial; concat
     // and sort everything by recency.
-    const teamRows = initial.teamUpdates.map((r) => ({
+    const teamRows = [...liveTeamUpdates, ...initial.teamUpdates].map((r) => ({
       ...r,
       meetingId: null as string | null,
       meetingAction: null as string | null
     }))
     const all = [...taskRows, ...teamRows, ...initial.meetingUpdates]
     return all.sort((a, b) => b.atRaw.localeCompare(a.atRaw))
-  }, [activity, tasks, initial.teamUpdates, initial.meetingUpdates])
+  }, [activity, tasks, liveTeamUpdates, initial.teamUpdates, initial.meetingUpdates])
 
   // Notification-style unread counter for the sidebar Updates entry.
   // We persist the timestamp of the most recent activity row the member
@@ -2263,7 +2290,79 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
         }
       )
     }
-    channel.subscribe()
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'activity_logs',
+        filter: 'action=eq.room.invite'
+      },
+      (payload) => {
+        const row = payload.new as {
+          id: string
+          actor_id: string | null
+          created_at: string
+          metadata: {
+            to?: string[] | null
+            meetUrl?: string | null
+            inviterName?: string | null
+          } | null
+        }
+        if (row.actor_id === currentUserId) return
+        const to = row.metadata?.to ?? []
+        if (!Array.isArray(to) || !to.includes(currentUserId)) return
+        const meetUrl = row.metadata?.meetUrl ?? null
+        if (!meetUrl) return
+        const inviter =
+          row.metadata?.inviterName ?? lookupName(row.actor_id)
+        // Prepend to the Updates feed so this invite is reachable later
+        // even if the user dismisses the toast.
+        const createdRaw = row.created_at ?? new Date().toISOString()
+        setLiveTeamUpdates((rows) => {
+          if (rows.some((r) => r.id === row.id)) return rows
+          return [
+            {
+              id: row.id,
+              kind: 'team' as const,
+              text: `${inviter} invited you to the quick room`,
+              at: 'just now',
+              atRaw: createdRaw,
+              taskId: null,
+              taskRef: null,
+              taskTitle: null,
+              meetUrl
+            },
+            ...rows
+          ]
+        })
+        setLiveUnread((c) => c + 1)
+        const id = toast(`${inviter} invited you to the quick room`, {
+          duration: Infinity,
+          action: {
+            label: 'Join',
+            onClick: () => {
+              if (typeof window !== 'undefined') {
+                window.open(meetUrl, '_blank', 'noopener,noreferrer')
+              }
+              liveToastIdsRef.current.delete(id)
+              setLiveUnread((c) => Math.max(0, c - 1))
+            }
+          },
+          cancel: {
+            label: 'Dismiss',
+            onClick: () => {
+              liveToastIdsRef.current.delete(id)
+              setLiveUnread((c) => Math.max(0, c - 1))
+            }
+          }
+        })
+        liveToastIdsRef.current.add(id)
+      }
+    )
+    channel.subscribe((status, err) => {
+      console.log('[realtime] live-updates status:', status, err ?? '')
+    })
     return () => {
       supabase.removeChannel(channel)
     }
@@ -2550,6 +2649,10 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
 
   return (
     <TaskActionsProvider value={actions}>
+      <TimezoneGate
+        savedTimezone={savedTimezone}
+        onSaved={setSavedTimezone}
+      />
       <div
         className={`fixed inset-0 flex flex-col overflow-hidden font-(--font-favorit) ${t.page}`}
       >
@@ -2652,6 +2755,14 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                 <X className={`size-3 ${t.textSubtle}`} />
               </button>
             )}
+            <QuickRoomButton
+              companyId={initial.currentMember.companyId}
+              meetUrl={initial.currentMember.quickMeetUrl}
+              me={currentUser}
+              team={team}
+              isAdmin={initial.currentMember.accessTier === 'admin'}
+              onOpenSettings={() => setView('settings')}
+            />
             <CurrentUserMenu
               user={currentUser}
               updatesUnread={liveUnread}
@@ -3422,6 +3533,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                   setShowHints={setShowHints}
                   onboardingComplete={initial.currentMember.onboardingComplete}
                   accessTier={initial.currentMember.accessTier}
+                  initialQuickMeetUrl={initial.currentMember.quickMeetUrl}
                 />
               )}
             </main>
@@ -3559,17 +3671,14 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           members={team}
           labels={initial.labels}
           projects={initial.allActiveProjects}
-          defaultProjectId={
-            initial.currentProjectId ?? initial.defaultProjectId
-          }
+          defaultProjectId={initial.currentProjectId}
           // Pre-fill due date with the active sprint's end so tasks created
           // inside a running sprint inherit its deadline. Prefer the
           // 'current' sprint; fall back to the soonest 'upcoming' one;
           // otherwise no default. Scoped to the project the modal will
           // create into.
           defaultDueDate={(() => {
-            const targetProjectId =
-              initial.currentProjectId ?? initial.defaultProjectId
+            const targetProjectId = initial.currentProjectId
             if (!targetProjectId) return null
             const projectSprints = sprints.filter(
               (s) => s.projectId === targetProjectId

@@ -384,27 +384,44 @@ export interface TeamUpdate {
   taskId: null;
   taskRef: null;
   taskTitle: null;
+  // For room.invite rows: the Meet URL captured in metadata so the
+  // Updates panel can open it on click. Null for other team events.
+  meetUrl: string | null;
 }
 
 export function mapTeamActivity(
   activity: DbActivity[],
   memberNamesById: Map<string, string>,
+  viewerId: string,
 ): TeamUpdate[] {
-  return activity.map((a) => {
-    const created = a.createdAt instanceof Date
-      ? a.createdAt
-      : new Date(a.createdAt);
-    return {
-      id: a.id,
-      kind: "team" as const,
-      text: teamActivityTextFor(a, memberNamesById),
-      at: formatTimestamp(a.createdAt),
-      atRaw: created.toISOString(),
-      taskId: null,
-      taskRef: null,
-      taskTitle: null,
-    };
-  });
+  return activity
+    .filter((a) => {
+      if (a.action !== "room.invite") return true;
+      const meta = (a.metadata as Record<string, unknown> | null) ?? null;
+      const to = Array.isArray(meta?.to) ? (meta.to as string[]) : [];
+      return to.includes(viewerId);
+    })
+    .map((a) => {
+      const created = a.createdAt instanceof Date
+        ? a.createdAt
+        : new Date(a.createdAt);
+      const meta = (a.metadata as Record<string, unknown> | null) ?? null;
+      const meetUrl =
+        a.action === "room.invite" && typeof meta?.meetUrl === "string"
+          ? (meta.meetUrl as string)
+          : null;
+      return {
+        id: a.id,
+        kind: "team" as const,
+        text: teamActivityTextFor(a, memberNamesById),
+        at: formatTimestamp(a.createdAt),
+        atRaw: created.toISOString(),
+        taskId: null,
+        taskRef: null,
+        taskTitle: null,
+        meetUrl,
+      };
+    });
 }
 
 function teamActivityTextFor(
@@ -444,6 +461,8 @@ function teamActivityTextFor(
       return `${who} invited a new member`;
     case "team.invite_canceled":
       return `${who} canceled an invite`;
+    case "room.invite":
+      return `${who} invited you to the quick room`;
     default:
       return `${who} · ${row.action}`;
   }

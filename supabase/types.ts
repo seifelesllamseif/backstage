@@ -89,6 +89,7 @@ export type Database = {
           id: string
           name: string
           owner_id: string | null
+          quick_meet_url: string | null
           slug: string
         }
         Insert: {
@@ -96,6 +97,7 @@ export type Database = {
           id?: string
           name: string
           owner_id?: string | null
+          quick_meet_url?: string | null
           slug: string
         }
         Update: {
@@ -103,6 +105,7 @@ export type Database = {
           id?: string
           name?: string
           owner_id?: string | null
+          quick_meet_url?: string | null
           slug?: string
         }
         Relationships: [
@@ -664,6 +667,42 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "push_subscriptions_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quick_room_presence: {
+        Row: {
+          company_id: string
+          joined_at: string
+          last_heartbeat: string
+          member_id: string
+        }
+        Insert: {
+          company_id: string
+          joined_at?: string
+          last_heartbeat?: string
+          member_id: string
+        }
+        Update: {
+          company_id?: string
+          joined_at?: string
+          last_heartbeat?: string
+          member_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quick_room_presence_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quick_room_presence_member_id_fkey"
             columns: ["member_id"]
             isOneToOne: false
             referencedRelation: "team_members"

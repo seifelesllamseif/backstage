@@ -47,7 +47,15 @@ import {
   setMemberPresence as setMemberPresenceImpl,
   softRemoveMember as softRemoveMemberImpl,
   updateMemberProfileByAdmin as updateMemberProfileByAdminImpl,
+  updateMyTimezone as updateMyTimezoneImpl,
 } from '@/supabase/dashboard/team'
+import {
+  setQuickMeetUrl as setQuickMeetUrlImpl,
+  inviteToQuickRoom as inviteToQuickRoomImpl,
+  joinQuickRoom as joinQuickRoomImpl,
+  heartbeatQuickRoom as heartbeatQuickRoomImpl,
+  leaveQuickRoom as leaveQuickRoomImpl,
+} from '@/supabase/dashboard/quickRoom'
 import { fetchInitial as fetchInitialImpl } from './_components/fetchInitial'
 import {
   addChecklistItem as addChecklistItemImpl,
@@ -587,4 +595,40 @@ export async function setMemberPresence(
   ...args: Parameters<typeof setMemberPresenceImpl>
 ) {
   return setMemberPresenceImpl(...args)
+}
+
+export async function updateMyTimezone(
+  ...args: Parameters<typeof updateMyTimezoneImpl>
+) {
+  return updateMyTimezoneImpl(...args)
+}
+
+export async function setQuickMeetUrl(
+  ...args: Parameters<typeof setQuickMeetUrlImpl>
+) {
+  return setQuickMeetUrlImpl(...args)
+}
+
+export async function inviteToQuickRoom(
+  ...args: Parameters<typeof inviteToQuickRoomImpl>
+) {
+  return inviteToQuickRoomImpl(...args)
+}
+
+export async function joinQuickRoom(
+  ...args: Parameters<typeof joinQuickRoomImpl>
+) {
+  return joinQuickRoomImpl(...args)
+}
+
+export async function heartbeatQuickRoom(
+  ...args: Parameters<typeof heartbeatQuickRoomImpl>
+) {
+  return heartbeatQuickRoomImpl(...args)
+}
+
+export async function leaveQuickRoom(
+  ...args: Parameters<typeof leaveQuickRoomImpl>
+) {
+  return leaveQuickRoomImpl(...args)
 }

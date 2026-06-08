@@ -875,6 +875,37 @@ export async function updateMemberProfileByAdmin(
   return { ok: true }
 }
 
+// ── Self-service timezone update ──────────────────────────────────────────
+
+export async function updateMyTimezone(
+  tz: string
+): Promise<{ ok: true; timezone: string } | { error: string }> {
+  const me = await getCurrentTeamMember()
+  if (!me) return { error: 'Not signed in.' }
+  const trimmed = tz.trim()
+  if (!trimmed) return { error: 'Pick a timezone.' }
+  // Reject anything that isn't a real IANA zone the runtime knows.
+  let supported: string[]
+  try {
+    supported = (Intl as unknown as {
+      supportedValuesOf: (k: string) => string[]
+    }).supportedValuesOf('timeZone')
+  } catch {
+    supported = []
+  }
+  if (supported.length > 0 && !supported.includes(trimmed)) {
+    return { error: 'Unknown timezone.' }
+  }
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from('team_members')
+    .update({ timezone: trimmed })
+    .eq('id', me.id)
+  if (error) return { error: error.message }
+  revalidatePath('/dashboard')
+  return { ok: true, timezone: trimmed }
+}
+
 // ── Accept invite (called from the public /invite/[token] route) ──────────
 
 export async function acceptInvite(input: {
