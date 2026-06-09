@@ -74,13 +74,21 @@ export default function TaskImageDropZone({
 
   const handleFiles = useCallback(
     async (files: File[]) => {
+      if (files.length === 0) return
       const images = files.filter((f) => IMG_MIMES.includes(f.type))
-      if (images.length === 0) {
-        if (files.length > 0) {
-          toast.error('Only PNG, JPEG, WebP, or GIF images are accepted.')
-        }
-        return
+      const rejected = files.length - images.length
+      if (rejected > 0) {
+        const sampleName =
+          files.find((f) => !IMG_MIMES.includes(f.type))?.name ?? ''
+        toast.error(
+          rejected === files.length
+            ? 'Only PNG, JPEG, WebP, or GIF images are accepted.'
+            : `Skipped ${rejected} non-image file${
+                rejected === 1 ? '' : 's'
+              }${sampleName ? ` (e.g. ${sampleName})` : ''}. Only images are allowed.`
+        )
       }
+      if (images.length === 0) return
       for (const file of images) {
         const localId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
         setPending((cur) => [
