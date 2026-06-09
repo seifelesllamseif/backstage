@@ -156,6 +156,19 @@ export interface DashboardActivityRow {
   actor: { id: string; fullName: string } | null
 }
 
+export interface DashboardAttachmentRow {
+  id: string
+  taskId: string
+  fileName: string
+  mimeType: string
+  sizeBytes: number
+  width: number | null
+  height: number | null
+  createdAt: string
+  driveFileId: string
+  uploadedBy: { id: string; fullName: string } | null
+}
+
 export interface DashboardTaskExternalRefRow {
   id: string
   taskId: string
@@ -190,6 +203,7 @@ export interface DashboardData {
   meetingActivity: DashboardActivityRow[]
   externalRefs: DashboardTaskExternalRefRow[]
   projectExternalRefs: DashboardProjectExternalRefRow[]
+  attachments: DashboardAttachmentRow[]
   // Distinct assignee ids per project, computed across all tasks (not
   // scoped to the viewer's visible-task slice). Lets the Projects panel
   // show the real roster on each card even for members whose `tasks`
@@ -280,8 +294,10 @@ export async function fetchDashboardData(
     }
   }
 
-  // Effective project filter for the tasks query: URL projectId narrows
-  // further within the scope; for non-admins, scope is myProjectIds.
+  // Tasks query: scope by role (members get only projects they're in)
+  // but NOT by the URL ?project= filter. The dashboard filters down to
+  // the active project client-side via visibleTasks, while command-palette
+  // search and cross-project relations need the full role-scoped list.
   let taskQuery = supabase
     .from('tasks')
     .select('*')
@@ -289,9 +305,7 @@ export async function fetchDashboardData(
     .order('sort_order', { ascending: true, nullsFirst: false })
     .order('created_at', { ascending: false })
 
-  if (projectId) {
-    taskQuery = taskQuery.eq('project_id', projectId)
-  } else if (myProjectIds !== null) {
+  if (myProjectIds !== null) {
     if (myProjectIds.length === 0) {
       taskQuery = taskQuery.in('project_id', ['00000000-0000-0000-0000-000000000000'])
     } else {
@@ -346,7 +360,8 @@ export async function fetchDashboardData(
     externalRefsRes,
     projectExternalRefsRes,
     refTasksRes,
-    projectAssigneesRes
+    projectAssigneesRes,
+    attachmentsRes
   ] = await Promise.all([
     // members - always the full company team. Members previously got a
     // narrow slice (just the assignees / leads of their visible tasks),
@@ -509,7 +524,17 @@ export async function fetchDashboardData(
         q = q.in('project_id', safeProjectIds(myProjectIds))
       }
       return q
-    })()
+    })(),
+    // Image attachments scoped to visible tasks. Inline-join the uploader
+    // so the UI can render "X uploaded this" without a roster lookup.
+    supabase
+      .from('task_attachments')
+      .select(
+        '*, uploader:team_members!task_attachments_uploaded_by_fkey(id, full_name)'
+      )
+      .eq('company_id', member.companyId)
+      .in('task_id', safeTaskIds)
+      .order('created_at', { ascending: true })
   ])
 
   // Surface the first non-null error so we don't ship a half-populated payload.
@@ -531,7 +556,8 @@ export async function fetchDashboardData(
     externalRefsRes.error,
     projectExternalRefsRes.error,
     refTasksRes.error,
-    projectAssigneesRes.error
+    projectAssigneesRes.error,
+    attachmentsRes.error
   ].filter((e): e is NonNullable<typeof e> => !!e)
   if (errors.length > 0) throw errors[0]
 
@@ -786,6 +812,26 @@ export async function fetchDashboardData(
     createdAt: r.created_at
   }))
 
+  const attachments: DashboardAttachmentRow[] = (
+    attachmentsRes.data ?? []
+  ).map((a) => {
+    const uploader = a.uploader as { id: string; full_name: string } | null
+    return {
+      id: a.id,
+      taskId: a.task_id,
+      fileName: a.file_name,
+      mimeType: a.mime_type,
+      sizeBytes: a.size_bytes,
+      width: a.width,
+      height: a.height,
+      createdAt: a.created_at,
+      driveFileId: a.drive_file_id,
+      uploadedBy: uploader
+        ? { id: uploader.id, fullName: uploader.full_name }
+        : null
+    }
+  })
+
   return {
     tasks,
     members,
@@ -799,6 +845,7 @@ export async function fetchDashboardData(
     meetingActivity,
     externalRefs,
     projectExternalRefs,
+    attachments,
     projectAssigneeIds,
     currentMember: {
       id: member.id,

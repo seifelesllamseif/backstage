@@ -56,6 +56,10 @@ import {
   heartbeatQuickRoom as heartbeatQuickRoomImpl,
   leaveQuickRoom as leaveQuickRoomImpl,
 } from '@/supabase/dashboard/quickRoom'
+import {
+  uploadTaskImage as uploadTaskImageImpl,
+  deleteTaskAttachment as deleteTaskAttachmentImpl,
+} from '@/supabase/dashboard/taskAttachments'
 import { fetchInitial as fetchInitialImpl } from './_components/fetchInitial'
 import {
   addChecklistItem as addChecklistItemImpl,
@@ -631,4 +635,16 @@ export async function leaveQuickRoom(
   ...args: Parameters<typeof leaveQuickRoomImpl>
 ) {
   return leaveQuickRoomImpl(...args)
+}
+
+export async function uploadTaskImage(
+  ...args: Parameters<typeof uploadTaskImageImpl>
+) {
+  return uploadTaskImageImpl(...args)
+}
+
+export async function deleteTaskAttachment(
+  ...args: Parameters<typeof deleteTaskAttachmentImpl>
+) {
+  return deleteTaskAttachmentImpl(...args)
 }

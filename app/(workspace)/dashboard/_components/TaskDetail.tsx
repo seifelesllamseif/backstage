@@ -37,6 +37,9 @@ import {
 } from '../actions'
 import { toast } from 'sonner'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import TaskImageDropZone, {
+  type TaskAttachmentView
+} from './TaskImageDropZone'
 import { VisuallyHidden } from 'radix-ui'
 import {
   HANDOFF_FIELDS,
@@ -159,6 +162,14 @@ interface TaskDetailProps {
   // panel uses this both for the "Edit handoff" button on a completed
   // task and as an entry point before the task is Done.
   onOpenHandoff: (task: BoardTask) => void
+  // Image attachments for this task plus add/remove callbacks owned by
+  // DashboardShell so the dropzone can update the shared store.
+  attachments: TaskAttachmentView[]
+  onAttachmentAdded: (a: TaskAttachmentView) => void
+  onAttachmentRemoved: (attachmentId: string) => void
+  // Opener for the workspace Settings view; the dropzone surfaces a
+  // "Reconnect Google to enable Drive uploads" prompt when needed.
+  onOpenSettings: () => void
   // Optional copy-button slot. DashboardShell owns the export context and
   // injects a CopyButton here so the task header gets a Copy task action
   // without TaskDetail having to know about lib/export.
@@ -194,6 +205,10 @@ export default function TaskDetail({
   onAddRelation,
   onRemoveRelation,
   onOpenHandoff,
+  attachments,
+  onAttachmentAdded,
+  onAttachmentRemoved,
+  onOpenSettings,
   copySlot
 }: TaskDetailProps) {
   const { t } = useDashTheme()
@@ -348,6 +363,16 @@ export default function TaskDetail({
           onSave={(next) =>
             onChangeDescription(task.id, next.trim() ? next : null)
           }
+        />
+
+        <TaskImageDropZone
+          taskId={task.id}
+          attachments={attachments}
+          currentUserId={currentUserId}
+          isAdmin={isAdmin}
+          onAttachmentAdded={onAttachmentAdded}
+          onAttachmentRemoved={onAttachmentRemoved}
+          onOpenSettings={onOpenSettings}
         />
 
         <div className="grid grid-cols-[88px_1fr] items-center gap-y-2.5 text-xs">

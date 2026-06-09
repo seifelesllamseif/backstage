@@ -106,6 +106,7 @@ Rules:
 - If an assignee is mentioned by first name only and unambiguous, use the full name from the list.
 - For labels: prefer names from the list below, but new short labels (1-2 words) are OK if they genuinely fit. The user reviews them before they get created.
 - For relations: only reference existing task refs from the list below. Leave the array empty if nothing relates. Use "parent" / "sub_issue" for hierarchy, "blocks" / "blocked_by" for dependency, "triage" only when the task explicitly needs categorization.
+- IMPORTANT: every " quote inside a string value MUST be escaped as \\". HTML like <a href=\\"/\\"> would otherwise break the JSON parser.
 
 Available assignees:
 ${memberLines}
@@ -170,11 +171,19 @@ export function parseBulkTaskJson(
   let parsedJson: unknown
   try {
     parsedJson = JSON.parse(trimmed)
-  } catch {
+  } catch (e) {
+    // Surface the actual parser error so users can find the bad line.
+    // The single most common cause is unescaped double-quotes inside a
+    // string value (e.g. HTML like <a href="/"> pasted into a title),
+    // so we lead with that hint when the message points at a string.
+    const detail =
+      e instanceof Error ? e.message : 'unknown parse error'
+    const hint = /Expected ['",}] /.test(detail)
+      ? ' Often this means a string contains an unescaped " quote. Escape it as \\" or wrap the value in single quotes.'
+      : ''
     return {
       ok: false,
-      error:
-        'Not valid JSON. Make sure the AI returned a single JSON object with no extra text.'
+      error: `Not valid JSON: ${detail}.${hint}`
     }
   }
 

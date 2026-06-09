@@ -797,6 +797,70 @@ export type Database = {
           },
         ]
       }
+      task_attachments: {
+        Row: {
+          id: string
+          task_id: string
+          company_id: string
+          uploaded_by: string | null
+          drive_file_id: string
+          file_name: string
+          mime_type: string
+          size_bytes: number
+          width: number | null
+          height: number | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          task_id: string
+          company_id: string
+          uploaded_by?: string | null
+          drive_file_id: string
+          file_name: string
+          mime_type: string
+          size_bytes: number
+          width?: number | null
+          height?: number | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          task_id?: string
+          company_id?: string
+          uploaded_by?: string | null
+          drive_file_id?: string
+          file_name?: string
+          mime_type?: string
+          size_bytes?: number
+          width?: number | null
+          height?: number | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_attachments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_attachments_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_attachments_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       task_checklist_items: {
         Row: {
           id: string

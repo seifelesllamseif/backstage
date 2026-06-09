@@ -10,11 +10,21 @@ import { createAdminClient } from '@/supabase/admin'
 
 export const GOOGLE_OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
+  // drive.file gives us write access ONLY to files this app creates
+  // (task attachments). It cannot read anything else in the user's
+  // Drive, which is the strictest scope that still lets us upload.
+  'https://www.googleapis.com/auth/drive.file',
   // userinfo.email so we can display "Connected as foo@gmail.com" in
   // Settings without needing another API call.
   'https://www.googleapis.com/auth/userinfo.email',
   'openid'
 ].join(' ')
+
+// String we look for in a stored token's `scope` column to know whether
+// the connected admin has granted Drive upload access. Existing
+// connections from before we added this scope will return false here
+// and the UI prompts a re-connect.
+export const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
 
 const AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'

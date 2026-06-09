@@ -1,6 +1,7 @@
 import 'server-only'
 import { createAdminClient } from '@/supabase/admin'
 import { getCurrentTeamMember } from '@/lib/dal'
+import { driveFullUrl, driveThumbnailUrl } from '@/lib/google/drive'
 import { fetchDashboardData } from '../actions'
 import {
   groupActivityByTask,
@@ -15,7 +16,10 @@ import {
   type TeamUpdate,
   type MeetingUpdate
 } from './mappers'
-import type { DashboardInitial } from './DashboardShell'
+import type {
+  DashboardInitial,
+  TaskAttachmentInitial
+} from './DashboardShell'
 
 export async function fetchInitial(
   projectParam: string | undefined
@@ -31,6 +35,24 @@ export async function fetchInitial(
   const externalRefsByProject = groupExternalRefsByProject(
     data.projectExternalRefs
   )
+  const attachmentsByTask: Record<string, TaskAttachmentInitial[]> = {}
+  for (const row of data.attachments) {
+    const list = attachmentsByTask[row.taskId] ?? []
+    list.push({
+      id: row.id,
+      taskId: row.taskId,
+      fileName: row.fileName,
+      mimeType: row.mimeType,
+      sizeBytes: row.sizeBytes,
+      width: row.width,
+      height: row.height,
+      createdAt: row.createdAt,
+      uploadedBy: row.uploadedBy,
+      thumbnailUrl: driveThumbnailUrl(row.driveFileId, 480),
+      fullUrl: driveFullUrl(row.driveFileId)
+    })
+    attachmentsByTask[row.taskId] = list
+  }
   const memberNamesById = new Map(
     data.members.map((m) => [m.id, m.fullName])
   )
@@ -80,6 +102,7 @@ export async function fetchInitial(
     meetingUpdates,
     externalRefsByTask,
     externalRefsByProject,
+    attachmentsByTask,
     projectAssigneeIds: data.projectAssigneeIds,
     currentMember: {
       id: data.currentMember.id,

@@ -143,6 +143,20 @@ export type View =
   | 'meetings'
   | 'archive'
 
+export interface TaskAttachmentInitial {
+  id: string
+  taskId: string
+  fileName: string
+  mimeType: string
+  sizeBytes: number
+  width: number | null
+  height: number | null
+  createdAt: string
+  uploadedBy: { id: string; fullName: string } | null
+  thumbnailUrl: string
+  fullUrl: string
+}
+
 export interface DashboardInitial {
   tasks: BoardTask[]
   members: BoardAssignee[]
@@ -190,6 +204,7 @@ export interface DashboardInitial {
   }[]
   externalRefsByTask: Record<string, TaskExternalRef[]>
   externalRefsByProject: Record<string, ProjectExternalRef[]>
+  attachmentsByTask: Record<string, TaskAttachmentInitial[]>
   projectAssigneeIds: Record<string, string[]>
   currentMember: {
     id: string
@@ -574,6 +589,9 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   const [projectExternalRefs, setProjectExternalRefs] = useState<
     Record<string, ProjectExternalRef[]>
   >(initial.externalRefsByProject)
+  const [attachmentsByTask, setAttachmentsByTask] = useState<
+    Record<string, TaskAttachmentInitial[]>
+  >(initial.attachmentsByTask)
 
   // Resync local state when the server hands us fresh data via router.refresh
   // (bulk create, "reset board", project switch). Per-mutation flows update
@@ -589,6 +607,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     setSprints(initial.sprints)
     setExternalRefs(initial.externalRefsByTask)
     setProjectExternalRefs(initial.externalRefsByProject)
+    setAttachmentsByTask(initial.attachmentsByTask)
   }
 
   // The active tab + view + feed are all derived from the URL (pathname for
@@ -779,7 +798,16 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   // Server-side scoping in fetchDashboardData already narrows non-admin
   // tasks to "tasks in projects where I have ≥1 assignment". The 'mine'
   // view further narrows to just my-assignee tasks below.
-  const visibleTasks = tasks
+  // Tasks come unfiltered by URL project (the palette needs to search
+  // across everything); narrow to the active project here for the views
+  // that render board/list/sprint UI.
+  const visibleTasks = useMemo(
+    () =>
+      initial.currentProjectId
+        ? tasks.filter((t) => t.projectId === initial.currentProjectId)
+        : tasks,
+    [tasks, initial.currentProjectId]
+  )
 
   // Task IDs where the current user is @mentioned AND hasn't replied yet.
   // The rule: a task stays in the Mentions feed until the user posts a
@@ -1431,6 +1459,28 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       }
     })
   }
+
+  const onAttachmentAdded = useCallback(
+    (a: TaskAttachmentInitial) => {
+      setAttachmentsByTask((cur) => {
+        const list = cur[a.taskId] ?? []
+        if (list.some((x) => x.id === a.id)) return cur
+        return { ...cur, [a.taskId]: [...list, a] }
+      })
+    },
+    []
+  )
+
+  const onAttachmentRemoved = useCallback((attachmentId: string) => {
+    setAttachmentsByTask((cur) => {
+      const next: Record<string, TaskAttachmentInitial[]> = {}
+      for (const [taskId, list] of Object.entries(cur)) {
+        const filtered = list.filter((a) => a.id !== attachmentId)
+        if (filtered.length > 0) next[taskId] = filtered
+      }
+      return next
+    })
+  }, [])
 
   const addExternalRef = (taskId: string, url: string) => {
     // Optimistic temp row — gets replaced by the server row on refresh.
@@ -3594,6 +3644,10 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                         title: task.title
                       })
                     }
+                    attachments={attachmentsByTask[selected.id] ?? []}
+                    onAttachmentAdded={onAttachmentAdded}
+                    onAttachmentRemoved={onAttachmentRemoved}
+                    onOpenSettings={() => setView('settings')}
                     copySlot={
                       <CopyButton
                         primaryLabel="Copy"
