@@ -9,11 +9,13 @@ import { logActivity } from '@/supabase/dashboard/mutations'
 import { config } from '@/lib/config'
 import bundledRegistry from '@/marketplace/registry.json'
 
-// Canonical catalog lives in marketplace/registry.json on the main repo,
-// so every self-hosted install sees new plugins without updating. The
-// bundled copy is the offline/failure fallback.
+// Canonical catalog is served by the marketplace site (browse + votes at
+// backstage-marketplace.vercel.app), so every self-hosted install sees new
+// plugins without updating. The bundled copy is the offline/failure
+// fallback. The endpoint may include extra fields (score, votes) — the
+// non-strict zod schema below strips them.
 const DEFAULT_REGISTRY_URL =
-  'https://raw.githubusercontent.com/SEIFSEIF4/backstage/main/marketplace/registry.json'
+  'https://backstage-marketplace.vercel.app/api/registry'
 
 const CatalogEntry = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]{1,30}$/),

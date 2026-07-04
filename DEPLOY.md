@@ -40,6 +40,12 @@ stays interchangeable with the build-time runner.
 
 ## Installing plugins
 
+The catalog is served by the public marketplace site
+([backstage-marketplace.vercel.app](https://backstage-marketplace.vercel.app))
+— browse and vote on plugins there. Point a fork at your own catalog
+with `MARKETPLACE_REGISTRY_URL`; if the endpoint is unreachable the app
+falls back to the bundled `marketplace/registry.json`.
+
 Browse the in-app Marketplace (`/dashboard/marketplace`). Plugins that
 ship with the repo (like Team Polls) just need an admin to click
 Enable. Installing a third-party plugin means adding its code to your

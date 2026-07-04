@@ -8,6 +8,10 @@ day-to-day work feel less clunky.
 Built for a small studio, then genericized and open-sourced as a
 self-host template.
 
+**[Live demo](https://backstage-www.vercel.app/dashboard)** (fully
+interactive, in-browser data) ·
+**[Plugin marketplace](https://backstage-marketplace.vercel.app)**
+
 ![Sprint board hero](screenshots/board.png)
 
 ## Deploy
