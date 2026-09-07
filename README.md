@@ -16,7 +16,7 @@ interactive, in-browser data) ·
 
 ## Deploy
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FSEIFSEIF4%2Fbackstage&integration-ids=oac_VqOgBHqhEoFTPzGkPd7L0iH6&env=NEXT_PUBLIC_APP_NAME,NEXT_PUBLIC_APP_URL,NEXT_PUBLIC_APP_EMAIL_DOMAIN,NEXT_PUBLIC_TIMEZONE&envDescription=Branding%20and%20timezone.%20Supabase%20variables%20are%20provisioned%20automatically%20by%20the%20integration.)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fseifelesllamseif%2Fbackstage&integration-ids=oac_VqOgBHqhEoFTPzGkPd7L0iH6&env=NEXT_PUBLIC_APP_NAME,NEXT_PUBLIC_APP_URL,NEXT_PUBLIC_APP_EMAIL_DOMAIN,NEXT_PUBLIC_TIMEZONE&envDescription=Branding%20and%20timezone.%20Supabase%20variables%20are%20provisioned%20automatically%20by%20the%20integration.)
 
 One click wires a fresh Supabase project via the Vercel + Supabase
 integration, provisions env vars per environment, and deploys. See

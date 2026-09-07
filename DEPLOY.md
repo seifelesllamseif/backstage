@@ -7,7 +7,7 @@ One click gets you a live Backstage tied to a fresh Supabase project.
 Use the Deploy button in the repo README, or paste this URL:
 
 ```
-https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FSEIFSEIF4%2Fbackstage&integration-ids=oac_VqOgBHqhEoFTPzGkPd7L0iH6&env=NEXT_PUBLIC_APP_NAME&envDescription=Your%20app%20name%20(e.g.%20Backstage).%20Everything%20else%20is%20configured%20post-deploy.
+https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fseifelesllamseif%2Fbackstage&integration-ids=oac_VqOgBHqhEoFTPzGkPd7L0iH6&env=NEXT_PUBLIC_APP_NAME&envDescription=Your%20app%20name%20(e.g.%20Backstage).%20Everything%20else%20is%20configured%20post-deploy.
 ```
 
 What happens when you click:

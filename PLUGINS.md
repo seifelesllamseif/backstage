@@ -99,7 +99,7 @@ handler still owns input validation and any tier checks
 ## Publishing to the Marketplace catalog
 
 The catalog every install browses is `marketplace/registry.json` on
-`SEIFSEIF4/backstage` `main`. Open a PR adding your entry:
+`seifelesllamseif/backstage` `main`. Open a PR adding your entry:
 
 ```json
 {
