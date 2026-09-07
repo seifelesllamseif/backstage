@@ -20,10 +20,11 @@ plugins/<id>/
     0001_<slug>.sql
 ```
 
-Install from the in-app Marketplace with one click when the deployment sets
-`GITHUB_INSTALL_REPO` and `GITHUB_INSTALL_TOKEN`: the button commits the
-plugin folder plus the two lines below into your repo and the platform
-rebuilds. Without those set, do it by hand.
+Install from the in-app Marketplace with one click: the button commits the
+plugin folder plus the two lines below into your deployment's own repo, and
+the platform rebuilds. The repo is derived from `VERCEL_GIT_REPO_*`, so the
+only setup is an admin connecting a GitHub token under Settings → Plugin
+installs. Until that is connected, the panel shows these manual steps.
 
 Install = two lines, then redeploy:
 

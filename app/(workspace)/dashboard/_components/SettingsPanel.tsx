@@ -1,5 +1,7 @@
 'use client'
 
+import { useQuery } from '@tanstack/react-query'
+
 import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -17,6 +19,11 @@ import {
 } from '../actions'
 import { useCompanyLogoUrl } from '@/lib/features/client'
 import { clearCompanyLogo, uploadCompanyLogo } from '../features-actions'
+import {
+  clearInstallToken,
+  getInstallStatus,
+  setInstallToken
+} from '../install-actions'
 import { config } from '@/lib/config'
 import { useDashTheme } from './theme'
 
@@ -132,6 +139,8 @@ export function SettingsPanel({
         <EmailNotifications />
 
         {accessTier === 'admin' && <GoogleCalendarConnection />}
+
+        {accessTier === 'admin' && <PluginInstallConnection />}
 
         {accessTier === 'admin' && (
           <QuickMeetUrlSetting initialUrl={initialQuickMeetUrl} />
@@ -305,6 +314,99 @@ function EmailNotifications() {
         )
       })}
     </>
+  )
+}
+
+// Plugins compile at build time, so installing one means committing it to
+// this deployment's repo. Vercel already tells us which repo that is; the
+// token is the only thing a human supplies, and it lives in app_secrets so
+// setting it needs no redeploy.
+function PluginInstallConnection() {
+  const { t } = useDashTheme()
+  const [token, setToken] = useState('')
+  const [busy, startBusy] = useTransition()
+  const { data: status, refetch } = useQuery({
+    queryKey: ['pluginInstallStatus'],
+    queryFn: () => getInstallStatus()
+  })
+  const refresh = () => void refetch()
+
+  if (!status) return null
+
+  if (!status.repo) {
+    return (
+      <Row label="Plugin installs">
+        <span className={`text-xs ${t.textMuted}`}>
+          Unavailable — this deployment&apos;s repo could not be determined.
+        </span>
+      </Row>
+    )
+  }
+
+  if (status.connected) {
+    return (
+      <Row label="Plugin installs">
+        <div className="flex items-center gap-2">
+          <span className={`text-xs ${t.textMuted}`}>
+            Installing to {status.repo}
+          </span>
+          {!status.managedByEnv && (
+            <button
+              type="button"
+              disabled={busy}
+              className={`text-xs underline ${t.textMuted}`}
+              onClick={() =>
+                startBusy(async () => {
+                  await clearInstallToken()
+                  toast.success('GitHub disconnected.')
+                  refresh()
+                })
+              }
+            >
+              Disconnect
+            </button>
+          )}
+        </div>
+      </Row>
+    )
+  }
+
+  return (
+    <Row label="Plugin installs">
+      <div className="flex flex-col items-end gap-1">
+        <div className="flex items-center gap-2">
+          <input
+            type="password"
+            value={token}
+            placeholder="GitHub token"
+            onChange={(e) => setToken(e.target.value)}
+            className={`w-44 rounded-md border px-2 py-1 text-xs ${t.border}`}
+          />
+          <button
+            type="button"
+            disabled={busy || !token.trim()}
+            className={`text-xs underline ${t.textMuted}`}
+            onClick={() =>
+              startBusy(async () => {
+                const res = await setInstallToken(token)
+                if ('error' in res) {
+                  toast.error(res.error)
+                  return
+                }
+                setToken('')
+                toast.success('GitHub connected. One-click install is on.')
+                refresh()
+              })
+            }
+          >
+            Connect
+          </button>
+        </div>
+        <span className={`text-[11px] ${t.textMuted}`}>
+          Fine-grained token, Contents: read and write on {status.repo}.
+        </span>
+      </div>
+    </Row>
   )
 }
 
