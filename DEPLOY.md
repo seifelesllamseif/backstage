@@ -1,23 +1,25 @@
 # Deploying Backstage
 
-One click gets you a live Backstage tied to a fresh Supabase project.
+One click gets you a live Backstage tied to a fresh Supabase
+project and a Resend email account.
 
-## One-click: Vercel + Supabase
+## One-click: Vercel + Supabase + Resend
 
 Use the Deploy button in the repo README, or paste this URL:
 
 ```
-https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fseifelesllamseif%2Fbackstage&integration-ids=oac_VqOgBHqhEoFTPzGkPd7L0iH6&env=NEXT_PUBLIC_APP_NAME&envDescription=Your%20app%20name%20(e.g.%20Backstage).%20Everything%20else%20is%20configured%20post-deploy.
+https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fseifelesllamseif%2Fbackstage&integration-ids=oac_VqOgBHqhEoFTPzGkPd7L0iH6,oac_KfIFnjXqCl4YJCHnt1bDTBI1&env=NEXT_PUBLIC_APP_NAME&envDescription=Your%20app%20name%20(e.g.%20Backstage).%20Everything%20else%20is%20configured%20post-deploy.
 ```
 
 What happens when you click:
 
 1. Vercel clones the repo into your account.
-2. The Supabase integration (`integration-ids=oac_...`) opens a modal
-   to create a new Supabase project.
-3. Supabase auto-writes `NEXT_PUBLIC_SUPABASE_URL`,
-   `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and
-   the `POSTGRES_URL` family into your Vercel env vars.
+2. Two integrations open modals (`integration-ids=oac_...,oac_...`):
+   Supabase creates a database, Resend creates an email account.
+3. They auto-write their env vars for you — Supabase writes
+   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+   `SUPABASE_SERVICE_ROLE_KEY` and the `POSTGRES_URL` family; Resend
+   writes `RESEND_API_KEY`.
 4. You type your app name.
 5. Vercel builds. The build step (`scripts/migrate.mjs`) applies every
    SQL file in `supabase/migrations/` against the fresh database, then
@@ -134,7 +136,24 @@ deployment:
 
 Authoring your own: see `PLUGINS.md`.
 
-## Optional integrations
+## Email
+
+Resend is provisioned during deploy, so `RESEND_API_KEY` is already set.
+Two things it cannot do for you:
+
+- **Verify a sending domain.** Until you add and verify a domain in the
+  Resend dashboard, you can only send to your own address. Invites and
+  notifications to teammates will fail until this is done.
+- **Pick a from-address.** `EMAIL_FROM` defaults to
+  `<app name> <noreply@NEXT_PUBLIC_APP_EMAIL_DOMAIN>`, which must be on
+  the domain you verified. Set `EMAIL_FROM` (and optionally
+  `EMAIL_REPLY_TO`) once the domain is live.
+
+Skipping the Resend modal is fine. Without `RESEND_API_KEY`, `sendEmail`
+logs what it would have sent and returns cleanly (`lib/email/send.ts`),
+so nothing breaks — invited teammates just never get the mail.
+
+## Other optional integrations
 
 - **Google Calendar / Meet**: set `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`
   in Vercel env vars. Add the redirect URI (see `.env.example`) to your
