@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#0E1414"/>
+  <!-- Two offset nodes joined by a teal edge: Backstage on one side, the
+       model on the other. Offset rather than level so the mark doesn't
+       collapse into a letter H. The edge is drawn first (nodes sit on top)
+       and kept thinner than the nodes so it reads as a link, not a third
+       bar. Geometry: edge runs node-center to node-center, (150,194) to
+       (362,318) — 246 long at 30.3 degrees. -->
+  <rect x="150" y="164" width="246" height="60" rx="30" fill="#00A89E"
+        transform="rotate(30.3 150 194)"/>
+  <rect x="112" y="104" width="76" height="180" rx="26" fill="#EDE8DC"/>
+  <rect x="324" y="228" width="76" height="180" rx="26" fill="#566868"/>
+</svg>

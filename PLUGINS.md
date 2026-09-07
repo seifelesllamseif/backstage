@@ -82,6 +82,55 @@ Dispatch already guards the session and the plugin's enabled flag; your
 handler still owns input validation and any tier checks
 (`ctx.member.accessTier`).
 
+## HTTP routes
+
+Server actions cover anything the panel calls. A plugin that has to speak
+a wire protocol — MCP, an inbound webhook, an OAuth callback — needs a
+real URL, so `server.ts` may also export `routes`:
+
+```ts
+export default {
+  actions: { ... },
+  routes: {
+    '': { POST: handleMcp },              // /api/p/<id>
+    'oauth/consent': { GET: renderConsent } // /api/p/<id>/oauth/consent
+  }
+}
+```
+
+Keys are the subpath below the mount (`''` is the plugin root), values
+map HTTP method to a handler taking a `Request` and returning a
+`Response`. Mounted by the catch-all at `app/api/p/[id]/[[...path]]`.
+
+**Routes are not server actions, and the difference is the security
+model.** `invokePluginAction` has already checked the session and the
+plugin's enabled flag before your handler runs. A route has had *none* of
+that: `/api/p/*` is absent from `protectedRoutes`, so `proxy.ts` waves it
+through unauthenticated. That is deliberate — a protocol client carries a
+bearer token or a signed webhook body, not a browser cookie — but it
+means **your handler owns its own authentication**, and a route that
+forgets is an open endpoint. There is no `PluginContext` at this
+boundary because there is no member yet.
+
+Anything a route does after authenticating still owes the same
+`.eq('company_id', ...)` scoping as an action.
+
+### `.well-known`
+
+Discovery documents are specified at fixed root-relative paths, so they
+cannot live under `/api/p/<id>`. A plugin may claim one with `wellKnown`,
+which mounts at the domain root:
+
+```ts
+wellKnown: {
+  'oauth-protected-resource': { GET: metadata }  // /.well-known/oauth-protected-resource
+}
+```
+
+This namespace is shared across plugins and the first claim wins
+(iteration order is `plugins.config.server.ts`). Use it only where a spec
+demands the path; everything else belongs in `routes`.
+
 ## Migrations
 
 - Files run in filename order: `0001_*.sql`, `0002_*.sql`, ...
