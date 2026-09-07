@@ -9,7 +9,22 @@ export function resolveRoute(
   subpath: readonly string[],
   method: string
 ) {
-  return routes?.[subpath.join('/')]?.[method as PluginRouteMethod]
+  if (!routes) return undefined
+  const m = method as PluginRouteMethod
+
+  const exact = routes[subpath.join('/')]?.[m]
+  if (exact) return exact
+
+  // Wildcard fallback: a key ending in '*' matches any remainder, so
+  // 'w/*' serves /w/<companyId>. Longest prefix wins, so a concrete key
+  // always beats a wildcard. Handlers receive the raw Request and read
+  // the concrete segment off request.url — there is no params object at
+  // this boundary to thread one through.
+  for (let i = subpath.length - 1; i >= 0; i--) {
+    const handler = routes[[...subpath.slice(0, i), '*'].join('/')]?.[m]
+    if (handler) return handler
+  }
+  return undefined
 }
 
 // 404 covers "no such plugin", "plugin has no routes", "no such subpath"

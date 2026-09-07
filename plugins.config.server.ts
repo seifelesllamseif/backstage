@@ -5,8 +5,10 @@
 import 'server-only'
 
 import type { PluginServerModule } from '@/lib/plugins/types'
+import mcpServer from '@/plugins/mcp/server'
 import pollsServer from '@/plugins/polls/server'
 
 export const PLUGIN_SERVERS: Record<string, PluginServerModule> = {
-  polls: pollsServer
+  polls: pollsServer,
+  mcp: mcpServer
 }

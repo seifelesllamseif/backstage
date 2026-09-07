@@ -5,6 +5,7 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/supabase/server'
 import { createAdminClient } from '@/supabase/admin'
+import { getRequestIdentity } from '@/lib/requestIdentity'
 import type { Database } from '@/supabase/types'
 import {
   DEFAULT_LOGIN_ROUTE,
@@ -79,6 +80,13 @@ export function toTeamMember(row: TeamMemberRow): TeamMember {
 }
 
 export const verifySession = cache(async () => {
+  // Protocol clients (MCP bearer tokens) have already been verified at the
+  // route boundary and carry no cookie. redirect() would throw a Next
+  // redirect out of a route handler, so short-circuit before touching the
+  // session client. See lib/requestIdentity.ts.
+  const identity = getRequestIdentity()
+  if (identity) return { sub: identity.userId }
+
   const supabase = await createClient()
   const { data, error } = await supabase.auth.getClaims()
 
@@ -101,6 +109,28 @@ export const getCurrentTeamMember = cache(
     // history (decisions 0002, 0016). A miss here means a writer used the
     // wrong id, not that the user is logged in wrong.
     const userId = claims.sub as string
+
+    // Overridden identity names its workspace explicitly, so there is
+    // nothing to disambiguate: select that one membership. The admin client
+    // is required — a bearer request has no cookie session for RLS to key
+    // on, so the session client would return zero rows. Safe: both ids come
+    // from a verified credential, and (user_id, company_id) is unique
+    // (team_members_user_company_uidx).
+    const identity = getRequestIdentity()
+    if (identity) {
+      const { data: row } = await createAdminClient()
+        .from('team_members')
+        .select('*')
+        .eq('user_id', identity.userId)
+        .eq('company_id', identity.companyId)
+        .maybeSingle()
+      if (!row) return null
+      const member = toTeamMember(row)
+      // A removed member's access token stays signature-valid until it
+      // expires, so the ban is invisible to signature checks. Browsers are
+      // covered by requireOnboardingComplete(); this is the token analogue.
+      return member.activityStatus === 'left' ? null : member
+    }
 
     const supabase = await createClient()
     const { data: rows } = await supabase

@@ -83,3 +83,20 @@ export async function isFeatureEnabled(key: AnyFeatureKey): Promise<boolean> {
 export async function requireFeature(key: AnyFeatureKey): Promise<void> {
   if (!(await isFeatureEnabled(key))) notFound()
 }
+
+// Company-scoped variant for callers that already know the workspace and
+// have no session: plugin HTTP routes (see PLUGINS.md). The functions above
+// all resolve the company from the session cookie via getCurrentTeamMember(),
+// whose verifySession() redirects to /login — which would throw a Next
+// redirect out of a route handler rather than returning false.
+export async function isFeatureEnabledForCompany(
+  companyId: string,
+  key: AnyFeatureKey
+): Promise<boolean> {
+  const { data } = await createAdminClient()
+    .from('companies')
+    .select('enabled_features')
+    .eq('id', companyId)
+    .maybeSingle()
+  return (data?.enabled_features ?? []).includes(key)
+}

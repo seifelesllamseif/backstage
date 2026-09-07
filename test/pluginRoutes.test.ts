@@ -45,3 +45,28 @@ describe('notFound', () => {
     expect(await res.text()).toBe('Not found')
   })
 })
+
+describe('resolveRoute wildcards', () => {
+  const wild: PluginRoutes = {
+    'w/*': { POST: ok },
+    'w/fixed': { POST: () => new Response('fixed') }
+  }
+
+  it("matches a dynamic segment via 'w/*'", () => {
+    expect(resolveRoute(wild, ['w', 'company-123'], 'POST')).toBe(ok)
+  })
+
+  it('prefers a concrete key over the wildcard', () => {
+    // Ordering matters: if the wildcard won, a plugin could never carve
+    // out a special case under its own dynamic prefix.
+    expect(resolveRoute(wild, ['w', 'fixed'], 'POST')).not.toBe(ok)
+  })
+
+  it('still honours the method on a wildcard match', () => {
+    expect(resolveRoute(wild, ['w', 'company-123'], 'GET')).toBeUndefined()
+  })
+
+  it('does not let a wildcard swallow a shorter path', () => {
+    expect(resolveRoute(wild, ['w'], 'POST')).toBeUndefined()
+  })
+})
