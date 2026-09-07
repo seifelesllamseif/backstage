@@ -55,7 +55,7 @@ async function requireMember() {
 // MCP returns text content; JSON is what models parse most reliably.
 function json(value: unknown) {
   return {
-    content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }]
+    content: [{ type: 'text' as const, text: JSON.stringify(value) }]
   }
 }
 

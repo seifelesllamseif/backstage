@@ -5,9 +5,8 @@ import { Plug } from 'lucide-react'
 
 import { CopyButton } from '@/components/ui/copy-button'
 import { invokePluginAction } from '@/app/(workspace)/dashboard/plugin-actions'
-import type { PluginPanelProps } from '@/lib/plugins/types'
 
-type ConnectInfo = { url: string; authServerConfigured: boolean }
+type ConnectInfo = { url: string }
 
 async function call<T>(action: string, payload?: unknown): Promise<T> {
   const result = await invokePluginAction('mcp', action, payload)
@@ -15,13 +14,11 @@ async function call<T>(action: string, payload?: unknown): Promise<T> {
   return result.data as T
 }
 
-export default function McpPanel({ member }: PluginPanelProps) {
+export default function McpPanel() {
   const { data, isPending, error } = useQuery({
     queryKey: ['plugin:mcp'],
     queryFn: () => call<ConnectInfo>('connectInfo')
   })
-
-  const isAdmin = member.accessTier === 'admin' || member.isOwner
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6">
@@ -62,19 +59,6 @@ export default function McpPanel({ member }: PluginPanelProps) {
               connects that assistant to this workspace only.
             </p>
           </section>
-
-          {/* Setup is admin-only; connecting is not. A member seeing this
-              panel can always copy their own URL. */}
-          {isAdmin && !data.authServerConfigured && (
-            <section className="rounded-md border border-amber-500/40 p-3 text-sm">
-              <p className="font-medium">Finish setup in Supabase</p>
-              <p className="text-muted-foreground mt-1 text-xs">
-                Enable the OAuth 2.1 server and dynamic client registration, and
-                set the authorization path to <code>/oauth/consent</code>. See
-                docs/MCP.md.
-              </p>
-            </section>
-          )}
         </>
       )}
     </div>

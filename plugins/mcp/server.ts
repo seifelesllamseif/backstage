@@ -89,12 +89,7 @@ async function connectInfo(ctx: PluginContext) {
   const host = h.get('x-forwarded-host') ?? h.get('host')
   const proto = h.get('x-forwarded-proto') ?? 'https'
   const origin = host ? `${proto}://${host}` : config.appUrl
-  return {
-    url: `${origin}/api/p/mcp/w/${ctx.companyId}`,
-    // Blank means the deployment never set it; the panel tells an admin to
-    // configure Supabase rather than showing a URL that cannot work.
-    authServerConfigured: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL)
-  }
+  return { url: `${origin}/api/p/mcp/w/${ctx.companyId}` }
 }
 
 const mcpServer: PluginServerModule = {
