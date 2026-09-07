@@ -15,8 +15,6 @@ export function isValidPluginId(id: string): boolean {
   return /^[a-z][a-z0-9-]{1,30}$/.test(id)
 }
 
-class ConfigEditError extends Error {}
-
 // Both files list their plugin imports in one contiguous block, so a new
 // import goes after the last existing one. Anchoring on the block (rather
 // than a line number) keeps this working as the list grows.
@@ -24,13 +22,13 @@ function addImport(source: string, line: string, importRe: RegExp): string {
   if (source.includes(line)) return source
   const matches = [...source.matchAll(importRe)]
   const last = matches.at(-1)
-  if (!last) throw new ConfigEditError('No plugin import block found.')
+  if (!last) throw new Error('No plugin import block found.')
   const end = last.index + last[0].length
   return `${source.slice(0, end)}\n${line}${source.slice(end)}`
 }
 
 export function addToClientConfig(source: string, id: string): string {
-  if (!isValidPluginId(id)) throw new ConfigEditError(`Bad plugin id: ${id}`)
+  if (!isValidPluginId(id)) throw new Error(`Bad plugin id: ${id}`)
   const ident = identifierFor(id)
   const withImport = addImport(
     source,
@@ -40,7 +38,7 @@ export function addToClientConfig(source: string, id: string): string {
 
   const arrayRe = /(export const PLUGINS[^=]*=\s*\[)([^\]]*)\]/
   const m = arrayRe.exec(withImport)
-  if (!m) throw new ConfigEditError('PLUGINS array not found.')
+  if (!m) throw new Error('PLUGINS array not found.')
   const existing = m[2].trim()
   // Idempotent: re-installing must not add a duplicate entry.
   if (new RegExp(`\\b${ident}\\b`).test(existing)) return withImport
@@ -49,7 +47,7 @@ export function addToClientConfig(source: string, id: string): string {
 }
 
 export function addToServerConfig(source: string, id: string): string {
-  if (!isValidPluginId(id)) throw new ConfigEditError(`Bad plugin id: ${id}`)
+  if (!isValidPluginId(id)) throw new Error(`Bad plugin id: ${id}`)
   const ident = `${identifierFor(id)}Server`
   const withImport = addImport(
     source,
@@ -59,7 +57,7 @@ export function addToServerConfig(source: string, id: string): string {
 
   const objRe = /(export const PLUGIN_SERVERS[^=]*=\s*\{)([^}]*)\}/
   const m = objRe.exec(withImport)
-  if (!m) throw new ConfigEditError('PLUGIN_SERVERS object not found.')
+  if (!m) throw new Error('PLUGIN_SERVERS object not found.')
   const body = m[2]
   if (new RegExp(`^\\s*'?${id}'?\\s*:`, 'm').test(body)) return withImport
   const entries = body.trim().replace(/,\s*$/, '')

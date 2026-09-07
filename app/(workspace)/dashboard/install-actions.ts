@@ -1,7 +1,7 @@
 'use server'
 
 import { z } from 'zod'
-import { requireAccessTier } from '@/lib/dal'
+import { getCurrentTeamMember, requireAccessTier } from '@/lib/dal'
 import {
   INSTALL_TOKEN_KEY,
   getInstallRepo,
@@ -16,7 +16,11 @@ import { getMarketplaceCatalog } from './marketplace-actions'
 // the platform rebuild. Plugins compile at build time (PLUGINS.md), so a
 // commit is the install — there is nothing to load at runtime.
 
+// Read by every member's Marketplace panel to decide whether to show an
+// Install button, so it is not admin-gated — but it must still require a
+// session rather than answering for anonymous callers.
 export async function canInstallPlugins(): Promise<boolean> {
+  if (!(await getCurrentTeamMember())) return false
   return (await getInstallTarget()) !== null
 }
 
