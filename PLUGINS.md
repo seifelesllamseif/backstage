@@ -20,6 +20,11 @@ plugins/<id>/
     0001_<slug>.sql
 ```
 
+Install from the in-app Marketplace with one click when the deployment sets
+`GITHUB_INSTALL_REPO` and `GITHUB_INSTALL_TOKEN`: the button commits the
+plugin folder plus the two lines below into your repo and the platform
+rebuilds. Without those set, do it by hand.
+
 Install = two lines, then redeploy:
 
 ```ts

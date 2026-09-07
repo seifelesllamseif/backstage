@@ -24,6 +24,7 @@ import {
   requestPlugin,
   type MarketplaceCatalogEntry
 } from '../marketplace-actions'
+import { canInstallPlugins, installPlugin } from '../install-actions'
 
 type EntryState = 'enabled' | 'installed' | 'not-installed'
 
@@ -52,6 +53,14 @@ export default function MarketplacePanel({ isAdmin }: { isAdmin: boolean }) {
     queryKey: ['marketplaceCatalog'],
     queryFn: () => getMarketplaceCatalog(),
     staleTime: 60 * 60 * 1000
+  })
+
+  // Whether this deployment has a repo + token to commit into. Static per
+  // deployment, so it never needs refetching.
+  const { data: canInstall = false } = useQuery({
+    queryKey: ['canInstallPlugins'],
+    queryFn: () => canInstallPlugins(),
+    staleTime: Infinity
   })
 
   const entries = useMemo<Entry[]>(() => {
@@ -146,6 +155,7 @@ export default function MarketplacePanel({ isAdmin }: { isAdmin: boolean }) {
                 key={entry.id}
                 entry={entry}
                 isAdmin={isAdmin}
+                canInstall={canInstall}
                 onOpen={() => setSelected(entry)}
                 onChanged={() => router.refresh()}
               />
@@ -160,6 +170,7 @@ export default function MarketplacePanel({ isAdmin }: { isAdmin: boolean }) {
             <DetailSheet
               entry={selected}
               isAdmin={isAdmin}
+              canInstall={canInstall}
               onChanged={() => {
                 router.refresh()
                 setSelected(null)
@@ -203,11 +214,13 @@ function StateBadge({
 function PluginCard({
   entry,
   isAdmin,
+  canInstall,
   onOpen,
   onChanged
 }: {
   entry: Entry
   isAdmin: boolean
+  canInstall: boolean
   onOpen: () => void
   onChanged: () => void
 }) {
@@ -243,7 +256,12 @@ function PluginCard({
           : `v${entry.version} · ${entry.author}`}
       </p>
       <div onClick={(e) => e.stopPropagation()}>
-        <ActionButton entry={entry} isAdmin={isAdmin} onChanged={onChanged} />
+        <ActionButton
+          entry={entry}
+          isAdmin={isAdmin}
+          canInstall={canInstall}
+          onChanged={onChanged}
+        />
       </div>
     </button>
   )
@@ -252,10 +270,12 @@ function PluginCard({
 function ActionButton({
   entry,
   isAdmin,
+  canInstall,
   onChanged
 }: {
   entry: Entry
   isAdmin: boolean
+  canInstall: boolean
   onChanged: () => void
 }) {
   const [pending, startTransition] = useTransition()
@@ -285,14 +305,42 @@ function ActionButton({
     })
   }
 
+  function install() {
+    startTransition(async () => {
+      const res = await installPlugin(entry.id)
+      if ('error' in res) {
+        toast.error(res.error)
+        return
+      }
+      // The commit triggers a rebuild; the plugin only exists once that
+      // finishes, so promise a wait rather than a result.
+      toast.success(
+        `${entry.name} committed. It appears here once the redeploy finishes.`
+      )
+      onChanged()
+    })
+  }
+
   if (entry.state === 'not-installed') {
-    // Installing means adding code to the deployment — the detail sheet
-    // explains it for admins; members can only request either way.
-    return isAdmin ? null : (
-      <Button variant="outline" size="sm" disabled={pending} onClick={request}>
-        Request
+    if (!isAdmin) {
+      return (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={pending}
+          onClick={request}
+        >
+          Request
+        </Button>
+      )
+    }
+    // Without an install target configured there is nothing to commit to;
+    // the detail sheet still explains the manual route.
+    return canInstall ? (
+      <Button variant="outline" size="sm" disabled={pending} onClick={install}>
+        {pending ? 'Installing…' : 'Install'}
       </Button>
-    )
+    ) : null
   }
   if (isAdmin) {
     return entry.state === 'enabled' ? (
@@ -320,10 +368,12 @@ function ActionButton({
 function DetailSheet({
   entry,
   isAdmin,
+  canInstall,
   onChanged
 }: {
   entry: Entry
   isAdmin: boolean
+  canInstall: boolean
   onChanged: () => void
 }) {
   return (
@@ -360,7 +410,9 @@ function DetailSheet({
           entry.state === 'not-installed' &&
           isAdmin && (
             <div className="bg-muted/50 flex flex-col gap-2 rounded-md border p-3">
-              <p className="font-medium">Install (one redeploy)</p>
+              <p className="font-medium">
+                {canInstall ? 'What Install does' : 'Install (one redeploy)'}
+              </p>
               <ol className="text-muted-foreground list-decimal space-y-1 pl-4 text-xs">
                 <li>
                   Copy <code>plugins/{entry.id}/</code> from the plugin repo
@@ -379,7 +431,12 @@ function DetailSheet({
             </div>
           )}
 
-        <ActionButton entry={entry} isAdmin={isAdmin} onChanged={onChanged} />
+        <ActionButton
+          entry={entry}
+          isAdmin={isAdmin}
+          canInstall={canInstall}
+          onChanged={onChanged}
+        />
       </div>
     </>
   )
