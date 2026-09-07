@@ -92,9 +92,27 @@ async function connectInfo(ctx: PluginContext) {
   return { url: `${origin}/api/p/mcp/w/${ctx.companyId}` }
 }
 
+// MCP Streamable HTTP reserves GET for resumable SSE sessions, which this
+// stateless server does not run — the spec's answer for that is 405, not the
+// dispatcher's default 404. It also stops a human who pastes the connect URL
+// into a browser from concluding the endpoint is broken.
+function methodNotAllowed(): Response {
+  return new Response(
+    'This is an MCP endpoint, not a web page. Add this URL to an MCP client ' +
+      '(Claude, Cursor) and it will connect over POST.\n',
+    { status: 405, headers: { allow: 'POST' } }
+  )
+}
+
 const mcpServer: PluginServerModule = {
   actions: { connectInfo },
-  routes: { 'w/*': { POST: handleMcp } },
+  routes: {
+    'w/*': {
+      POST: handleMcp,
+      GET: methodNotAllowed,
+      DELETE: methodNotAllowed
+    }
+  },
   wellKnown: {
     'oauth-protected-resource': {
       GET: resourceMetadata,
