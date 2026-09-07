@@ -25,6 +25,9 @@ const CatalogEntry = z.object({
   author: z.string().max(60),
   group: z.string().max(30),
   repoUrl: z.string().url(),
+  // Optional square logo shown on the card. Absent = today's text-only
+  // layout, so older registries keep rendering unchanged.
+  iconUrl: z.string().url().optional(),
   screenshots: z.array(z.string().url()).optional()
 })
 const Catalog = z.object({ plugins: z.array(CatalogEntry) })

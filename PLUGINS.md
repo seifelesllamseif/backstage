@@ -115,6 +115,10 @@ boundary because there is no member yet.
 Anything a route does after authenticating still owes the same
 `.eq('company_id', ...)` scoping as an action.
 
+> A worked example of all of this ships in `plugins/mcp/` — it mounts a
+> workspace-scoped MCP endpoint plus RFC 9728 discovery metadata. See
+> `docs/MCP.md`.
+
 ### `.well-known`
 
 Discovery documents are specified at fixed root-relative paths, so they

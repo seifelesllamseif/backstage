@@ -36,9 +36,7 @@ export default function McpPanel({ member }: PluginPanelProps) {
         </p>
       </header>
 
-      {isPending && (
-        <p className="text-muted-foreground text-sm">Loading…</p>
-      )}
+      {isPending && <p className="text-muted-foreground text-sm">Loading…</p>}
       {error && (
         <p className="text-sm text-red-600">{(error as Error).message}</p>
       )}
@@ -71,9 +69,9 @@ export default function McpPanel({ member }: PluginPanelProps) {
             <section className="rounded-md border border-amber-500/40 p-3 text-sm">
               <p className="font-medium">Finish setup in Supabase</p>
               <p className="text-muted-foreground mt-1 text-xs">
-                Enable the OAuth 2.1 server and dynamic client registration,
-                and set the authorization path to <code>/oauth/consent</code>.
-                See docs/MCP.md.
+                Enable the OAuth 2.1 server and dynamic client registration, and
+                set the authorization path to <code>/oauth/consent</code>. See
+                docs/MCP.md.
               </p>
             </section>
           )}

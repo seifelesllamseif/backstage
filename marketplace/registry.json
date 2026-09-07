@@ -8,6 +8,16 @@
       "author": "Backstage",
       "group": "Team",
       "repoUrl": "https://github.com/seifelesllamseif/backstage/tree/main/plugins/polls"
+    },
+    {
+      "id": "mcp",
+      "name": "AI Assistant (MCP)",
+      "description": "Let Claude, Cursor, or any MCP client work in this workspace.",
+      "version": "0.1.0",
+      "author": "Backstage",
+      "group": "Advanced",
+      "repoUrl": "https://github.com/seifelesllamseif/backstage/tree/main/plugins/mcp",
+      "iconUrl": "https://raw.githubusercontent.com/seifelesllamseif/backstage/main/public/logos/mcp.svg"
     }
   ]
 }

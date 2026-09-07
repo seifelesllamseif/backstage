@@ -39,6 +39,7 @@ type Entry = {
   author?: string
   group: string
   repoUrl?: string
+  iconUrl?: string
   state: EntryState
 }
 
@@ -87,6 +88,7 @@ export default function MarketplacePanel({ isAdmin }: { isAdmin: boolean }) {
           author: local?.author ?? c.author,
           group: local?.group ?? c.group,
           repoUrl: c.repoUrl,
+          iconUrl: c.iconUrl,
           state: stateFor(c.id)
         }
       }
@@ -216,7 +218,22 @@ function PluginCard({
       className="hover:bg-muted/40 flex flex-col gap-2 rounded-lg border p-4 text-left transition"
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="font-medium">{entry.name}</p>
+        <div className="flex min-w-0 items-center gap-2">
+          {/* Plain <img>: a registry icon can point anywhere, and
+              next/image would need every host in next.config remotePatterns. */}
+          {entry.iconUrl && (
+            // A registry icon URL is arbitrary; next/image would need every
+            // possible host in next.config remotePatterns.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={entry.iconUrl}
+              alt=""
+              className="size-6 shrink-0 rounded"
+              loading="lazy"
+            />
+          )}
+          <p className="truncate font-medium">{entry.name}</p>
+        </div>
         <StateBadge state={entry.state} kind={entry.kind} />
       </div>
       <p className="text-muted-foreground text-sm">{entry.description}</p>

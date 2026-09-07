@@ -52,13 +52,13 @@ describe('parseCompanyId', () => {
 
   it('rejects a non-uuid so path input never reaches the query', () => {
     expect(parseCompanyId('https://x.test/api/p/mcp/w/not-a-uuid')).toBeNull()
-    expect(
-      parseCompanyId("https://x.test/api/p/mcp/w/' or 1=1--")
-    ).toBeNull()
+    expect(parseCompanyId("https://x.test/api/p/mcp/w/' or 1=1--")).toBeNull()
   })
 
   it('rejects a deeper path that merely starts with the mount', () => {
-    expect(parseCompanyId(`https://x.test/api/p/mcp/w/${UUID}/extra`)).toBeNull()
+    expect(
+      parseCompanyId(`https://x.test/api/p/mcp/w/${UUID}/extra`)
+    ).toBeNull()
   })
 
   it('returns null on an unparseable url', () => {
