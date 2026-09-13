@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -22,6 +22,7 @@ import {
   Plus,
   Rabbit,
   Table as TableIcon,
+  Users,
   X
 } from 'lucide-react'
 import { BoardTask, BoardAssignee } from './boardData'
@@ -44,8 +45,11 @@ import { defaultExternalRefLabel, parseExternalRef } from '@/lib/externalRef'
 import StatusIcon from './StatusIcon'
 import { useDashTheme } from './theme'
 import {
+  addProjectMember,
   archiveProjectInPlace,
   createProjectInPlace,
+  listProjectMembers,
+  removeProjectMember,
   renameProject,
   unarchiveProject
 } from '../actions'
@@ -123,6 +127,7 @@ export function ProjectsPanel({
   const [showNew, setShowNew] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [pendingArchive, setPendingArchive] = useState<ProjectRow | null>(null)
+  const [membersFor, setMembersFor] = useState<ProjectRow | null>(null)
   const [view, setView] = useState<'grid' | 'table' | 'list'>('grid')
 
   // Group tasks by projectId so each card can show real progress for the
@@ -250,6 +255,7 @@ export function ProjectsPanel({
         onStartEdit={() => setEditingId(project.id)}
         onCancelEdit={() => setEditingId(null)}
         onRename={(name) => handleRename(project.id, name)}
+        onManageMembers={() => setMembersFor(project)}
         onArchive={() => setPendingArchive(project)}
         onRestore={() => handleRestore(project.id)}
         onOpen={() => onOpenProject(project.id)}
@@ -331,6 +337,17 @@ export function ProjectsPanel({
             onSubmit={handleCreate}
             onCancel={() => setShowNew(false)}
             disabled={pending}
+          />
+        )}
+
+        {membersFor && (
+          <ProjectMembersDialog
+            key={membersFor.id}
+            project={membersFor}
+            allMembers={allMembers}
+            canEdit={canEdit}
+            onClose={() => setMembersFor(null)}
+            onChanged={refreshDashboard}
           />
         )}
 
@@ -473,6 +490,7 @@ function ProjectCard({
   onStartEdit,
   onCancelEdit,
   onRename,
+  onManageMembers,
   onArchive,
   onRestore,
   onOpen,
@@ -493,6 +511,7 @@ function ProjectCard({
   onStartEdit: () => void
   onCancelEdit: () => void
   onRename: (name: string) => void
+  onManageMembers: () => void
   onArchive: () => void
   onRestore: () => void
   onOpen: () => void
@@ -647,6 +666,16 @@ function ProjectCard({
                       className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs ${t.tab}`}
                     >
                       <Pencil className="size-3.5" /> Rename
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        stop(e)
+                        setMenuOpen(false)
+                        onManageMembers()
+                      }}
+                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs ${t.tab}`}
+                    >
+                      <Users className="size-3.5" /> Members
                     </button>
                     {project.isArchived ? (
                       <button
@@ -1585,5 +1614,179 @@ function EmptyState({ canEdit }: { canEdit: boolean }) {
           : 'When a task is assigned to you, the project it belongs to will show up here.'}
       </p>
     </div>
+  )
+}
+
+// Roster editor for one project. Membership is what makes a project (and
+// its tasks) visible to a member — admins and leads see everything anyway,
+// so this only ever changes what members see. Everyone can read the roster;
+// only admins and leads get the add/remove controls, matching the server
+// gate in addProjectMember/removeProjectMember.
+function ProjectMembersDialog({
+  project,
+  allMembers,
+  canEdit,
+  onClose,
+  onChanged
+}: {
+  project: ProjectRow
+  allMembers: BoardAssignee[]
+  canEdit: boolean
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const { t } = useDashTheme()
+  const [memberIds, setMemberIds] = useState<string[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [dirty, setDirty] = useState(false)
+
+  // Load once on mount. Not React Query: this modal opens rarely and must
+  // always show the server's current answer rather than a cached one.
+  // Resetting to the loading state on a project change is handled by the
+  // caller keying this component on project.id, which remounts it — doing
+  // it with a setState here would fire synchronously inside the effect.
+  useEffect(() => {
+    let live = true
+    listProjectMembers(project.id).then((res) => {
+      if (!live) return
+      if ('error' in res && res.error) {
+        toast.error(res.error)
+        setMemberIds([])
+        return
+      }
+      setMemberIds((res.members ?? []).map((m) => m.memberId))
+    })
+    return () => {
+      live = false
+    }
+  }, [project.id])
+
+  const { onRoster, offRoster } = useMemo(() => {
+    const ids = new Set(memberIds ?? [])
+    return {
+      onRoster: allMembers.filter((m) => ids.has(m.id)),
+      offRoster: allMembers.filter((m) => !ids.has(m.id))
+    }
+  }, [allMembers, memberIds])
+
+  // Optimistic: flip the local list first, roll back if the server says no.
+  const mutate = async (
+    memberId: string,
+    action: 'add' | 'remove'
+  ): Promise<void> => {
+    if (busy || memberIds === null) return
+    const before = memberIds
+    setBusy(true)
+    setMemberIds(
+      action === 'add'
+        ? [...before, memberId]
+        : before.filter((id) => id !== memberId)
+    )
+    const res =
+      action === 'add'
+        ? await addProjectMember({ projectId: project.id, memberId })
+        : await removeProjectMember({ projectId: project.id, memberId })
+    setBusy(false)
+    if (res && 'error' in res && res.error) {
+      setMemberIds(before)
+      toast.error(res.error)
+      return
+    }
+    setDirty(true)
+  }
+
+  // One dashboard refetch when the dialog closes rather than one per
+  // toggle: putting five people on a project should cost one refresh, not
+  // five. Radix routes the Done button, Esc and the overlay all through
+  // onOpenChange, so this is the only close path to cover.
+  const close = () => {
+    if (dirty) onChanged()
+    onClose()
+  }
+
+  return (
+    <AlertDialog open onOpenChange={(open) => !open && !busy && close()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Members of {project.name}</AlertDialogTitle>
+          <AlertDialogDescription>
+            Members on a project can see it and everything in it. Admins and
+            leads always see every project.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        {memberIds === null ? (
+          <p className={`py-4 text-xs ${t.textSubtle}`}>Loading…</p>
+        ) : (
+          <div className="max-h-72 space-y-4 overflow-y-auto py-2">
+            <div>
+              <p className={`mb-2 text-[11px] uppercase ${t.textSubtle}`}>
+                On this project ({onRoster.length})
+              </p>
+              {onRoster.length === 0 ? (
+                <p className={`text-xs ${t.textSubtle}`}>
+                  Nobody yet. Members with a task here still see their own work.
+                </p>
+              ) : (
+                <ul className="space-y-1">
+                  {onRoster.map((m) => (
+                    <li
+                      key={m.id}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <span className="flex items-center gap-2 text-xs">
+                        <Avatar user={m} size={20} />
+                        {m.name}
+                      </span>
+                      {canEdit && (
+                        <button
+                          onClick={() => mutate(m.id, 'remove')}
+                          disabled={busy}
+                          className={`rounded px-2 py-1 text-[11px] disabled:opacity-50 ${t.tab}`}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {canEdit && offRoster.length > 0 && (
+              <div>
+                <p className={`mb-2 text-[11px] uppercase ${t.textSubtle}`}>
+                  Add someone
+                </p>
+                <ul className="space-y-1">
+                  {offRoster.map((m) => (
+                    <li
+                      key={m.id}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <span className="flex items-center gap-2 text-xs">
+                        <Avatar user={m} size={20} />
+                        {m.name}
+                      </span>
+                      <button
+                        onClick={() => mutate(m.id, 'add')}
+                        disabled={busy}
+                        className={`rounded px-2 py-1 text-[11px] disabled:opacity-50 ${t.tab}`}
+                      >
+                        Add
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Done</AlertDialogCancel>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }

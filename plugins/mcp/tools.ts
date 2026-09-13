@@ -139,7 +139,13 @@ export function registerTools(server: McpServer) {
         id: me.companyId,
         name: company?.name ?? null,
         enabledFeatures: company?.enabled_features ?? [],
-        projects: d.allActiveProjects,
+        // d.projects, not d.allActiveProjects: the latter is fetch.ts's
+        // deliberately unscoped list, so returning it here handed every
+        // member every project name in the workspace while the dashboard's
+        // own list stayed scoped. Same active-only shape as before.
+        projects: d.projects
+          .filter((p) => !p.isArchived)
+          .map((p) => ({ id: p.id, name: p.name })),
         sprints: d.sprints,
         labels: d.labels
       })
@@ -520,6 +526,35 @@ export function registerTools(server: McpServer) {
         return json(unwrap(await m.editComment(args.commentId, args.body)))
       }
       return json(unwrap(await m.deleteComment(args.commentId)))
+    }
+  )
+
+  server.registerTool(
+    'manage_project_members',
+    {
+      title: 'Manage project members',
+      description:
+        'List, add, or remove the members on a project. Being on a project is what lets a member see it and its tasks; admins and leads see every project regardless. Adding and removing require admin or lead. Removing only drops the explicit grant — someone still holding a task in the project keeps the narrower access that gives them.',
+      inputSchema: z.object({
+        action: z.enum(['list', 'add', 'remove']),
+        projectId: Uuid,
+        memberId: Uuid.optional().describe('Required for add and remove')
+      })
+    },
+    async (args) => {
+      await requireMember()
+      if (args.action === 'list') {
+        return json(unwrap(await m.listProjectMembers(args.projectId)))
+      }
+      if (!args.memberId) throw new Error(`${args.action} requires memberId.`)
+      const input = { projectId: args.projectId, memberId: args.memberId }
+      return json(
+        unwrap(
+          args.action === 'add'
+            ? await m.addProjectMember(input)
+            : await m.removeProjectMember(input)
+        )
+      )
     }
   )
 

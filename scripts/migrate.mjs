@@ -21,10 +21,20 @@ if (!url) {
 // pg >= 8.16 treats sslmode=require in the URL as full cert verification,
 // which fails on Supabase's cert chain. Drop the param so the ssl config
 // object below (encrypt, don't verify) is what actually applies.
+//
+// Split on the query string by hand instead of `new URL(url)`: WHATWG URL
+// parsing is strict about the userinfo (credentials) section and throws on
+// passwords containing characters like `@` or `#` that `pg` itself parses
+// fine. URLSearchParams only touches the query string, so it can't trip
+// over the credentials at all.
 {
-  const u = new URL(url)
-  u.searchParams.delete('sslmode')
-  url = u.toString()
+  const [base, query] = url.split('?')
+  if (query) {
+    const params = new URLSearchParams(query)
+    params.delete('sslmode')
+    const rest = params.toString()
+    url = rest ? `${base}?${rest}` : base
+  }
 }
 
 const client = new pg.Client({

@@ -23,22 +23,47 @@ export function validateOauthClaims(claims: unknown): McpClaims | null {
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-// /api/p/mcp/w/<companyId> -> companyId, or null for any other shape.
-// Returning null (never a guess) is what keeps the endpoint from falling
-// back to "whichever workspace was used last" — the ambiguity this whole
-// path segment exists to remove. The UUID check keeps unvalidated path input
-// out of the query below it.
-export function parseCompanyId(url: string): string | null {
-  let pathname: string
-  try {
-    pathname = new URL(url).pathname
-  } catch {
-    return null
-  }
-  const id = /^\/api\/p\/mcp\/w\/([^/]+)\/?$/.exec(pathname)?.[1]
+// Shared by both path shapes below. Returning null (never a guess) is what
+// keeps either endpoint from falling back to "whichever workspace was used
+// last" — the ambiguity this segment exists to remove. The UUID check keeps
+// unvalidated path input out of the query that follows it.
+function extractCompanyId(pathname: string, pattern: RegExp): string | null {
+  const id = pattern.exec(pathname)?.[1]
   if (!id) return null
   const decoded = decodeURIComponent(id)
   return UUID.test(decoded) ? decoded : null
+}
+
+function parsePathname(url: string): string | null {
+  try {
+    return new URL(url).pathname
+  } catch {
+    return null
+  }
+}
+
+// /api/p/mcp/w/<companyId> -> companyId, or null for any other shape.
+export function parseCompanyId(url: string): string | null {
+  const pathname = parsePathname(url)
+  if (!pathname) return null
+  return extractCompanyId(pathname, /^\/api\/p\/mcp\/w\/([^/]+)\/?$/)
+}
+
+// /.well-known/oauth-protected-resource/api/p/mcp/w/<companyId> ->
+// companyId. RFC 9728 discovery documents live at a path formed by
+// inserting the well-known segment before the protected resource's own
+// path, since one shared /.well-known/oauth-protected-resource can't
+// describe more than one resource — and every workspace here is a distinct
+// resource with its own metadata document.
+export function parseCompanyIdFromResourceMetadataPath(
+  url: string
+): string | null {
+  const pathname = parsePathname(url)
+  if (!pathname) return null
+  return extractCompanyId(
+    pathname,
+    /^\/\.well-known\/oauth-protected-resource\/api\/p\/mcp\/w\/([^/]+)\/?$/
+  )
 }
 
 // Stateless and reused across requests — verification runs on every MCP

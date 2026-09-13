@@ -87,6 +87,9 @@ import {
   removeTaskExternalRef as removeTaskExternalRefImpl,
   removeTaskFromSprint as removeTaskFromSprintImpl,
   renameProject as renameProjectImpl,
+  addProjectMember as addProjectMemberImpl,
+  removeProjectMember as removeProjectMemberImpl,
+  listProjectMembers as listProjectMembersImpl,
   saveHandoffDraft as saveHandoffDraftImpl,
   setProjectGithubRepo as setProjectGithubRepoImpl,
   submitHandoffForReview as submitHandoffForReviewImpl,
@@ -758,4 +761,22 @@ export async function listAllTemplates(
   ...args: Parameters<typeof listAllTemplatesImpl>
 ) {
   return listAllTemplatesImpl(...args)
+}
+
+export async function listProjectMembers(
+  ...args: Parameters<typeof listProjectMembersImpl>
+) {
+  return listProjectMembersImpl(...args)
+}
+
+export async function addProjectMember(
+  ...args: Parameters<typeof addProjectMemberImpl>
+) {
+  return addProjectMemberImpl(...args)
+}
+
+export async function removeProjectMember(
+  ...args: Parameters<typeof removeProjectMemberImpl>
+) {
+  return removeProjectMemberImpl(...args)
 }
