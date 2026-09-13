@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { parseCompanyId, validateOauthClaims } from '@/plugins/mcp/auth'
+import {
+  parseCompanyId,
+  parseCompanyIdFromResourceMetadataPath,
+  validateOauthClaims
+} from '@/plugins/mcp/auth'
 
 const UUID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301'
 
@@ -63,5 +67,33 @@ describe('parseCompanyId', () => {
 
   it('returns null on an unparseable url', () => {
     expect(parseCompanyId('not a url')).toBeNull()
+  })
+})
+
+describe('parseCompanyIdFromResourceMetadataPath', () => {
+  it('extracts the workspace id from the RFC 9728 discovery path', () => {
+    expect(
+      parseCompanyIdFromResourceMetadataPath(
+        `https://x.test/.well-known/oauth-protected-resource/api/p/mcp/w/${UUID}`
+      )
+    ).toBe(UUID)
+  })
+
+  it('does not match the bare (unscoped) well-known path', () => {
+    // The whole point of moving off the shared path: a document with no
+    // workspace id can't be this workspace's resource metadata.
+    expect(
+      parseCompanyIdFromResourceMetadataPath(
+        'https://x.test/.well-known/oauth-protected-resource'
+      )
+    ).toBeNull()
+  })
+
+  it('rejects a non-uuid', () => {
+    expect(
+      parseCompanyIdFromResourceMetadataPath(
+        'https://x.test/.well-known/oauth-protected-resource/api/p/mcp/w/not-a-uuid'
+      )
+    ).toBeNull()
   })
 })

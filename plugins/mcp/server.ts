@@ -2,6 +2,7 @@ import 'server-only'
 
 import {
   createMcpHandler,
+  getPublicOrigin,
   metadataCorsOptionsRequestHandler,
   protectedResourceHandler,
   withMcpAuth
@@ -17,7 +18,11 @@ import {
   type PluginServerModule
 } from '@/lib/plugins/types'
 import { setRequestIdentity } from '@/lib/requestIdentity'
-import { parseCompanyId, verifyMcpToken } from './auth'
+import {
+  parseCompanyId,
+  parseCompanyIdFromResourceMetadataPath,
+  verifyMcpToken
+} from './auth'
 import { registerTools } from './tools'
 
 // MCP endpoint, mounted per workspace at /api/p/mcp/w/<companyId>.
@@ -32,33 +37,29 @@ const mcp = createMcpHandler(registerTools, {
 // the WWW-Authenticate header that points clients at the metadata below —
 // that header is what starts the OAuth flow, so failures here must stay 401
 // rather than 404.
-const authed = withMcpAuth(
-  mcp,
-  async (request, token) => {
-    if (!token) return undefined
-    const companyId = parseCompanyId(request.url)
-    if (!companyId) return undefined
+async function verify(request: Request, token?: string) {
+  if (!token) return undefined
+  const companyId = parseCompanyId(request.url)
+  if (!companyId) return undefined
 
-    const claims = await verifyMcpToken(token)
-    if (!claims) return undefined
+  const claims = await verifyMcpToken(token)
+  if (!claims) return undefined
 
-    // Pin identity before resolving the member: getCurrentTeamMember() reads
-    // this override, and it is the only thing that stops the cookie-less
-    // fallback from picking an arbitrary workspace.
-    setRequestIdentity({ userId: claims.sub, companyId })
+  // Pin identity before resolving the member: getCurrentTeamMember() reads
+  // this override, and it is the only thing that stops the cookie-less
+  // fallback from picking an arbitrary workspace.
+  setRequestIdentity({ userId: claims.sub, companyId })
 
-    // Resolves the (user, workspace) membership and fails closed on a
-    // removed member whose token has not expired yet.
-    const member = await getCurrentTeamMember()
-    if (!member) return undefined
+  // Resolves the (user, workspace) membership and fails closed on a
+  // removed member whose token has not expired yet.
+  const member = await getCurrentTeamMember()
+  if (!member) return undefined
 
-    // No scopes: authorisation is by access tier, resolved per request from
-    // the member row, so tools inherit the UI's rules rather than a second
-    // parallel permission model.
-    return { token, clientId: claims.clientId, scopes: [] }
-  },
-  { required: true }
-)
+  // No scopes: authorisation is by access tier, resolved per request from
+  // the member row, so tools inherit the UI's rules rather than a second
+  // parallel permission model.
+  return { token, clientId: claims.clientId, scopes: [] }
+}
 
 // Pre-auth gates. These run before withMcpAuth so an uninstalled plugin or a
 // bad workspace id is a bare 404 — indistinguishable from an unmounted path,
@@ -70,15 +71,31 @@ async function handleMcp(request: Request): Promise<Response> {
   if (!(await isFeatureEnabledForCompany(companyId, pluginFeatureKey('mcp')))) {
     return notFound()
   }
+  const authed = withMcpAuth(mcp, verify, {
+    required: true,
+    // Every workspace is its own RFC 9728 protected resource, so the 401
+    // challenge has to point at that workspace's own discovery document —
+    // a single shared /.well-known/oauth-protected-resource can only ever
+    // describe one resource, and would mislabel every workspace's token as
+    // scoped to the bare origin instead of its own endpoint below.
+    resourceMetadataPath: `/.well-known/oauth-protected-resource/api/p/mcp/w/${companyId}`
+  })
   return authed(request)
 }
 
-// RFC 9728 Protected Resource Metadata. Public by design (no secrets): MCP
-// clients fetch it to discover that this project's Supabase OAuth server
-// guards the endpoint.
-const resourceMetadata = protectedResourceHandler({
-  authServerUrls: [`${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1`]
-})
+// RFC 9728 Protected Resource Metadata, one document per workspace. Public
+// by design (no secrets): MCP clients fetch it to discover that this
+// project's Supabase OAuth server guards the endpoint, and to learn the
+// endpoint's own canonical URL (`resource`) so they can bind the token they
+// get back to it rather than to the whole origin.
+function resourceMetadata(request: Request): Response {
+  const companyId = parseCompanyIdFromResourceMetadataPath(request.url)
+  if (!companyId) return notFound()
+  return protectedResourceHandler({
+    authServerUrls: [`${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1`],
+    resourceUrl: `${getPublicOrigin(request)}/api/p/mcp/w/${companyId}`
+  })(request)
+}
 
 // The panel needs the workspace-scoped URL, and PluginPanelProps carries no
 // companyId — so the server supplies it. Origin comes from the request
@@ -114,7 +131,7 @@ const mcpServer: PluginServerModule = {
     }
   },
   wellKnown: {
-    'oauth-protected-resource': {
+    'oauth-protected-resource/api/p/mcp/w/*': {
       GET: resourceMetadata,
       OPTIONS: metadataCorsOptionsRequestHandler()
     }
