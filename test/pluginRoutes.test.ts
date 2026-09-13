@@ -70,3 +70,31 @@ describe('resolveRoute wildcards', () => {
     expect(resolveRoute(wild, ['w'], 'POST')).toBeUndefined()
   })
 })
+
+describe('resolveRoute: bare key alongside a deeper wildcard', () => {
+  // The shape plugins/mcp/server.ts registers for RFC 9728 discovery: the
+  // bare well-known path explains itself, while each workspace's real
+  // document sits under the wildcard. Neither may shadow the other.
+  const root = () => new Response('root')
+  const scoped = () => new Response('scoped')
+  const wellKnown: PluginRoutes = {
+    'oauth-protected-resource': { GET: root },
+    'oauth-protected-resource/api/p/mcp/w/*': { GET: scoped }
+  }
+
+  it('serves the bare path from the exact key', () => {
+    expect(resolveRoute(wellKnown, ['oauth-protected-resource'], 'GET')).toBe(
+      root
+    )
+  })
+
+  it('serves a workspace document from the wildcard', () => {
+    const path = 'oauth-protected-resource/api/p/mcp/w/abc'.split('/')
+    expect(resolveRoute(wellKnown, path, 'GET')).toBe(scoped)
+  })
+
+  it('does not let the bare key swallow the deeper path', () => {
+    const path = 'oauth-protected-resource/api/p/mcp/w/abc'.split('/')
+    expect(resolveRoute(wellKnown, path, 'GET')).not.toBe(root)
+  })
+})

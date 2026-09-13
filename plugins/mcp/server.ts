@@ -97,6 +97,32 @@ function resourceMetadata(request: Request): Response {
   })(request)
 }
 
+// RFC 9728 puts a resource's metadata at the well-known path with the
+// resource's own path appended, so the bare path describes a resource
+// mounted at the origin. Nothing is mounted there: every MCP server here
+// lives at /api/p/mcp/w/<companyId> and publishes its own document above.
+//
+// Deliberately still a 404 rather than a document describing the origin —
+// that document is what broke audience binding before, because clients
+// bound their token to the origin and then called a workspace URL the
+// token did not cover. The body just names the real pattern so a stale
+// client or a human mid-handshake isn't left guessing. It leaks nothing:
+// you need the companyId already for the URL to be any use.
+function resourceMetadataRoot(): Response {
+  return Response.json(
+    {
+      error: 'not_found',
+      error_description:
+        'No protected resource is mounted at the origin. Each workspace ' +
+        'publishes its own metadata at /.well-known/oauth-protected-' +
+        'resource/api/p/mcp/w/<companyId>. The 401 from an MCP endpoint ' +
+        'names the exact URL in its WWW-Authenticate resource_metadata ' +
+        'parameter.'
+    },
+    { status: 404 }
+  )
+}
+
 // The panel needs the workspace-scoped URL, and PluginPanelProps carries no
 // companyId — so the server supplies it. Origin comes from the request
 // rather than config.appUrl so the URL is correct on preview deployments and
@@ -131,6 +157,7 @@ const mcpServer: PluginServerModule = {
     }
   },
   wellKnown: {
+    'oauth-protected-resource': { GET: resourceMetadataRoot },
     'oauth-protected-resource/api/p/mcp/w/*': {
       GET: resourceMetadata,
       OPTIONS: metadataCorsOptionsRequestHandler()
