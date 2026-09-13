@@ -139,7 +139,13 @@ export function registerTools(server: McpServer) {
         id: me.companyId,
         name: company?.name ?? null,
         enabledFeatures: company?.enabled_features ?? [],
-        projects: d.allActiveProjects,
+        // d.projects, not d.allActiveProjects: the latter is fetch.ts's
+        // deliberately unscoped list, so returning it here handed every
+        // member every project name in the workspace while the dashboard's
+        // own list stayed scoped. Same active-only shape as before.
+        projects: d.projects
+          .filter((p) => !p.isArchived)
+          .map((p) => ({ id: p.id, name: p.name })),
         sprints: d.sprints,
         labels: d.labels
       })
