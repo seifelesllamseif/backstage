@@ -70,6 +70,7 @@ import {
 } from '../actions'
 import { parseExternalRef as parseExternalRefClient } from '@/lib/externalRef'
 import type { BoardAssignee, BoardTask, Sprint } from './boardData'
+import { COL_PREFIX, dropTargetStatus } from './boardData'
 import {
   STATUSES,
   STATUS_BY_ID,
@@ -1827,7 +1828,6 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   // drop-slot follows the cursor (instead of staying in the source
   // column). onDragCancel restores the pre-drag snapshot.
 
-  const COL_PREFIX = 'col:'
   const SORT_STEP = 1024
   const dragSnapshotRef = useRef<BoardTask[] | null>(null)
 
@@ -1851,15 +1851,8 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       const activeTask = cur.find((t) => t.id === activeId)
       if (!activeTask) return cur
 
-      let targetStatus: TaskStatus
-      if (overId.startsWith(COL_PREFIX)) {
-        targetStatus = overId.slice(COL_PREFIX.length) as TaskStatus
-      } else {
-        const overTask = cur.find((t) => t.id === overId)
-        if (!overTask) return cur
-        targetStatus = overTask.status
-      }
-
+      const targetStatus = dropTargetStatus(overId, cur)
+      if (!targetStatus) return cur
       if (activeTask.status === targetStatus) return cur
 
       return cur.map((t) =>
@@ -1888,10 +1881,12 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       return
     }
 
-    // Use the post-onDragOver state for the target column.
     const moved = tasks.find((t) => t.id === activeId)
     if (!moved) return
-    const toStatus = moved.status
+    // Read the destination off the drop target rather than off the status
+    // onDragOver wrote — see dropTargetStatus. Falling back to the card's
+    // own status keeps a drop on nothing-in-particular a plain reorder.
+    const toStatus = dropTargetStatus(overId, tasks) ?? moved.status
 
     // Compute insertion index within the destination column.
     const colSiblings = tasks
@@ -3630,7 +3625,11 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
                                 }}
                                 density={density}
                                 wipLimit={wipLimit}
-                                droppableId={`col:${status?.id ?? g.key}`}
+                                droppableId={
+                                  status
+                                    ? `${COL_PREFIX}${status.id}`
+                                    : undefined
+                                }
                               />
                             )
                           })}

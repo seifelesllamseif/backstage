@@ -3,7 +3,7 @@
 // app/(authenticated)/dashboard/actions.ts + mappers.ts. The real values flow
 // in through DashboardShell props and TeamContext.
 
-import { RelationKind, TaskPriority, TaskStatus } from './status'
+import { RelationKind, STATUSES, TaskPriority, TaskStatus } from './status'
 
 export interface BoardAssignee {
   id: string
@@ -127,4 +127,32 @@ export interface ProjectExternalRef {
   url: string
   label: string | null
   createdAt: string
+}
+
+// ─── Board drag and drop ────────────────────────────────────────────────
+// Column droppable ids are `col:<status>`.
+export const COL_PREFIX = 'col:'
+
+// The destination status of a drop, read from the drop target itself.
+//
+// onDragEnd must not read it back off the status onDragOver wrote into
+// React state: dnd-kit fires its final onDragOver in the same batch as
+// onDragEnd when the pointer is released just after crossing into a new
+// column, so the state the handler closes over still carries the pre-drag
+// status. The move then collapses into a same-column reorder and the
+// status silently never changes.
+//
+// Returns null when the target names something that isn't a status — the
+// board's non-status groupings (priority, assignee, lead) build column ids
+// out of the same `col:` namespace, and writing one of those into
+// tasks.status is a Postgres enum error.
+export function dropTargetStatus(
+  overId: string,
+  tasks: Pick<BoardTask, 'id' | 'status'>[]
+): TaskStatus | null {
+  if (overId.startsWith(COL_PREFIX)) {
+    const raw = overId.slice(COL_PREFIX.length)
+    return STATUSES.some((s) => s.id === raw) ? (raw as TaskStatus) : null
+  }
+  return tasks.find((t) => t.id === overId)?.status ?? null
 }
