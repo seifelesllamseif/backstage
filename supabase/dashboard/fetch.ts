@@ -271,9 +271,10 @@ export async function fetchDashboardData(
   const quickMeetUrl = ownerRow?.quick_meet_url ?? null
 
   // Admins and leads see everything in the company. Members see only "their
-  // projects" - projects where they have >=1 assigned task OR where they're
-  // a watcher on a task (Slice B). There is no ProjectMember table yet, so
-  // member-project membership is derived from task assignments + watchers.
+  // projects": an explicit project_members row, OR >=1 assigned task, OR
+  // watching a task there (Slice B). The derived halves predate the table
+  // and are kept unioned with it, so adding the table took nothing away
+  // from anyone who could already see a project.
   const seesAllProjects =
     member.accessTier === 'admin' || member.accessTier === 'lead'
   let myProjectIds: string[] | null = null
@@ -292,6 +293,21 @@ export async function fetchDashboardData(
     const t = Array.isArray(r.task) ? r.task[0] : r.task
     if (t?.project_id) watcherProjectIds.add(t.project_id)
   }
+  // Explicit membership. Fetched for every role — admins and leads skip the
+  // scoping below, but the UI still needs to know which projects they are
+  // formally on. It is also the axis that widens task visibility further
+  // down: being put on a project shows you the whole project, where merely
+  // holding a task there still shows you only your own work.
+  const explicitRes = await supabase
+    .from('project_members')
+    .select('project_id')
+    .eq('company_id', member.companyId)
+    .eq('member_id', member.id)
+  if (explicitRes.error) throw explicitRes.error
+  const explicitProjectIds = new Set(
+    (explicitRes.data ?? []).map((r) => r.project_id)
+  )
+
   if (!seesAllProjects) {
     const assignedRes = await supabase
       .from('tasks')
@@ -301,6 +317,7 @@ export async function fetchDashboardData(
       .is('deleted_at', null)
     if (assignedRes.error) throw assignedRes.error
     const ids = new Set<string>(watcherProjectIds)
+    for (const id of explicitProjectIds) ids.add(id)
     for (const r of assignedRes.data ?? []) ids.add(r.project_id)
     myProjectIds = [...ids]
     if (projectId && !myProjectIds.includes(projectId)) {
@@ -330,18 +347,26 @@ export async function fetchDashboardData(
     }
   }
 
-  // Members see only tasks they're personally assigned OR tasks they've
-  // been invited to watch (Slice B). Admins and leads still see the full
-  // project. The two axes are unioned via PostgREST .or() so a single
-  // query covers both cases.
+  // Members see tasks they're personally assigned, tasks they've been
+  // invited to watch (Slice B), or anything inside a project they were
+  // explicitly added to. Admins and leads still see the full company.
+  //
+  // That third axis is what makes explicit membership worth having: being
+  // put on a project shows you the project's work, where merely holding a
+  // task there keeps showing you only your own. The axes are unioned in one
+  // PostgREST .or() so this stays a single query.
   if (!seesAllProjects) {
-    if (watcherTaskIds.length === 0) {
-      taskQuery = taskQuery.eq('assignee_id', member.id)
-    } else {
-      taskQuery = taskQuery.or(
-        `assignee_id.eq.${member.id},id.in.(${watcherTaskIds.join(',')})`
-      )
+    const axes = [`assignee_id.eq.${member.id}`]
+    if (watcherTaskIds.length > 0) {
+      axes.push(`id.in.(${watcherTaskIds.join(',')})`)
     }
+    if (explicitProjectIds.size > 0) {
+      axes.push(`project_id.in.(${[...explicitProjectIds].join(',')})`)
+    }
+    taskQuery =
+      axes.length === 1
+        ? taskQuery.eq('assignee_id', member.id)
+        : taskQuery.or(axes.join(','))
   }
 
   const { data: rawTasks, error: tasksError } = await taskQuery

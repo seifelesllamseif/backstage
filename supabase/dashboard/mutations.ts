@@ -3426,3 +3426,162 @@ export async function toggleTaskReaction(input: {
   revalidatePath('/dashboard')
   return { ok: true as const, added: true }
 }
+
+// ─── Project members ────────────────────────────────────────────────────
+// Explicit "who is on this project", unioned in fetch.ts with the older
+// derived rules (assigned a task / watching one). Admin and lead only:
+// managing access is an access-control act, and it matches every other
+// project mutation above.
+
+const ProjectMemberInput = z.object({
+  projectId: z.string().uuid(),
+  memberId: z.string().uuid()
+})
+
+// Both ids must belong to the caller's company before anything is written.
+// Returns the resolved names so callers can log and render without a
+// second round trip.
+async function ensureProjectAndMember(
+  supabase: ReturnType<typeof createAdminClient>,
+  companyId: string,
+  projectId: string,
+  memberId: string
+) {
+  const [{ data: project }, { data: target }] = await Promise.all([
+    supabase
+      .from('projects')
+      .select('id, name')
+      .eq('id', projectId)
+      .eq('company_id', companyId)
+      .maybeSingle(),
+    supabase
+      .from('team_members')
+      .select('id, full_name')
+      .eq('id', memberId)
+      .eq('company_id', companyId)
+      .maybeSingle()
+  ])
+  if (!project) return { error: 'Project not found.' as const }
+  if (!target) return { error: 'Member not found.' as const }
+  return { project, target }
+}
+
+export async function listProjectMembers(projectId: string) {
+  const member = await requireAccessTier(['admin', 'lead', 'member'])
+  const parsed = z.string().uuid().safeParse(projectId)
+  if (!parsed.success) return { error: 'Invalid project id.' }
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('project_members')
+    .select(
+      'project_id, member_id, created_at, member:team_members!project_members_member_id_fkey(id, full_name, access_tier)'
+    )
+    .eq('company_id', member.companyId)
+    .eq('project_id', parsed.data)
+  if (error) return { error: error.message }
+  return {
+    members: (data ?? []).map((r) => {
+      const m = Array.isArray(r.member) ? r.member[0] : r.member
+      return {
+        memberId: r.member_id,
+        fullName: m?.full_name ?? null,
+        accessTier: m?.access_tier ?? null,
+        addedAt: r.created_at
+      }
+    })
+  }
+}
+
+export async function addProjectMember(
+  input: z.input<typeof ProjectMemberInput>
+) {
+  const actor = await requireAccessTier(['admin', 'lead'])
+  const parsed = ProjectMemberInput.safeParse(input)
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
+  }
+  const supabase = createAdminClient()
+  const gate = await ensureProjectAndMember(
+    supabase,
+    actor.companyId,
+    parsed.data.projectId,
+    parsed.data.memberId
+  )
+  if ('error' in gate) return { error: gate.error }
+
+  // ignoreDuplicates so re-adding is a no-op rather than an error: the UI
+  // and the MCP tool can both call this without checking first.
+  const { error } = await supabase.from('project_members').upsert(
+    {
+      project_id: parsed.data.projectId,
+      member_id: parsed.data.memberId,
+      company_id: actor.companyId,
+      added_by: actor.id
+    },
+    { onConflict: 'project_id,member_id', ignoreDuplicates: true }
+  )
+  if (error) return { error: error.message }
+
+  await logActivity(
+    supabase,
+    actor.companyId,
+    actor.id,
+    'project.member_added',
+    'project',
+    parsed.data.projectId,
+    { memberId: parsed.data.memberId, memberName: gate.target.full_name }
+  )
+  // Never ping yourself, and never let a push failure fail the grant -
+  // same guard every other sendPushToMember call in this file uses.
+  if (parsed.data.memberId !== actor.id) {
+    await sendPushToMember(parsed.data.memberId, {
+      title: `Added to ${gate.project.name}`,
+      body: `${actor.fullName} added you to the project.`,
+      url: `/dashboard?project=${parsed.data.projectId}`,
+      tag: `project:${parsed.data.projectId}`
+    }).catch(() => undefined)
+  }
+  revalidatePath('/dashboard')
+  return { ok: true as const }
+}
+
+export async function removeProjectMember(
+  input: z.input<typeof ProjectMemberInput>
+) {
+  const actor = await requireAccessTier(['admin', 'lead'])
+  const parsed = ProjectMemberInput.safeParse(input)
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' }
+  }
+  const supabase = createAdminClient()
+  const gate = await ensureProjectAndMember(
+    supabase,
+    actor.companyId,
+    parsed.data.projectId,
+    parsed.data.memberId
+  )
+  if ('error' in gate) return { error: gate.error }
+
+  const { error } = await supabase
+    .from('project_members')
+    .delete()
+    .eq('company_id', actor.companyId)
+    .eq('project_id', parsed.data.projectId)
+    .eq('member_id', parsed.data.memberId)
+  if (error) return { error: error.message }
+
+  // Deliberately not a hard revoke: if they still hold a task in the
+  // project, the derived rules in fetch.ts keep that narrower access. This
+  // removes the explicit grant, nothing else.
+  await logActivity(
+    supabase,
+    actor.companyId,
+    actor.id,
+    'project.member_removed',
+    'project',
+    parsed.data.projectId,
+    { memberId: parsed.data.memberId, memberName: gate.target.full_name }
+  )
+  revalidatePath('/dashboard')
+  return { ok: true as const }
+}
