@@ -17,7 +17,10 @@ import {
   type PluginContext,
   type PluginServerModule
 } from '@/lib/plugins/types'
-import { setRequestIdentity } from '@/lib/requestIdentity'
+import {
+  runWithRequestIdentity,
+  setRequestIdentity
+} from '@/lib/requestIdentity'
 import {
   parseCompanyId,
   parseCompanyIdFromResourceMetadataPath,
@@ -108,7 +111,9 @@ async function handleMcp(request: Request): Promise<Response> {
     // scoped to the bare origin instead of its own endpoint below.
     resourceMetadataPath: `/.well-known/oauth-protected-resource/api/p/mcp/w/${companyId}`
   })
-  return authed(request)
+  // Opens the identity scope verify() writes into; everything the tools do
+  // runs inside it.
+  return runWithRequestIdentity(() => authed(request))
 }
 
 // RFC 9728 Protected Resource Metadata, one document per workspace. Public
