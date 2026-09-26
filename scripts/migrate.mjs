@@ -18,6 +18,22 @@ if (!url) {
   process.exit(0)
 }
 
+// Only production builds migrate on Vercel. The Supabase integration gives
+// Preview the same database as Production, so otherwise every pull request -
+// including the update PR opened by update-from-upstream.yml - would apply
+// its migrations to the live database before anyone reviewed or merged it.
+// Set MIGRATE_ON_PREVIEW=1 if your previews have a database of their own.
+if (
+  process.env.VERCEL_ENV &&
+  process.env.VERCEL_ENV !== 'production' &&
+  !process.env.MIGRATE_ON_PREVIEW
+) {
+  console.log(
+    `[migrate] ${process.env.VERCEL_ENV} build, skipping (MIGRATE_ON_PREVIEW=1 to run)`
+  )
+  process.exit(0)
+}
+
 // pg >= 8.16 treats sslmode=require in the URL as full cert verification,
 // which fails on Supabase's cert chain. Drop the param so the ssl config
 // object below (encrypt, don't verify) is what actually applies.

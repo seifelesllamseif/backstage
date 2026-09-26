@@ -4,7 +4,7 @@ import { X } from 'lucide-react'
 import { STATUSES, TaskPriority, TaskStatus, PRIORITY_LABEL } from './status'
 import StatusIcon from './StatusIcon'
 import PriorityIcon from './PriorityIcon'
-import { useTeam } from './TeamContext'
+import { useDirectory, useTeam } from './TeamContext'
 import { useDashTheme } from './theme'
 
 // Multi-select filter panel. Each category (status / priority / assignee /
@@ -76,6 +76,9 @@ export default function FilterPanel({
 }: FilterPanelProps) {
   const { t } = useDashTheme()
   const team = useTeam()
+  // Pill labels resolve an id that is already in the URL, which may well
+  // belong to someone who has since left - name them rather than echo a uuid.
+  const directory = useDirectory()
   if (!open) return null
 
   const activePills: { id: string; label: string; onRemove: () => void }[] = []
@@ -95,7 +98,7 @@ export default function FilterPanel({
     })
   }
   for (const id of assigneeFilter) {
-    const member = team.find((m) => m.id === id)
+    const member = directory.find((m) => m.id === id)
     activePills.push({
       id: `assignee-${id}`,
       label: `Assignee: ${member?.name ?? id}`,
@@ -103,7 +106,7 @@ export default function FilterPanel({
     })
   }
   for (const id of leadFilter) {
-    const member = team.find((m) => m.id === id)
+    const member = directory.find((m) => m.id === id)
     activePills.push({
       id: `lead-${id}`,
       label: `Lead: ${member?.name ?? id}`,

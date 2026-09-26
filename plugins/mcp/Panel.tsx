@@ -5,6 +5,7 @@ import { Plug } from 'lucide-react'
 
 import { CopyButton } from '@/components/ui/copy-button'
 import { invokePluginAction } from '@/app/(workspace)/dashboard/plugin-actions'
+import { MCP_VERSION } from './version'
 
 type ConnectInfo = { url: string }
 
@@ -57,6 +58,11 @@ export default function McpPanel() {
             <p className="text-muted-foreground text-xs">
               This URL is specific to this workspace. Adding it elsewhere
               connects that assistant to this workspace only.
+            </p>
+            <p className="text-muted-foreground text-xs">
+              Server version {MCP_VERSION}. Clients cache the tool list for a
+              session — if your assistant is missing a tool it should have,
+              reconnect or restart it.
             </p>
           </section>
         </>

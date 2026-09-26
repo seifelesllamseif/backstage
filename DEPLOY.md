@@ -38,6 +38,81 @@ Migrations re-run on every deploy but are recorded in
 CLI uses), so already-applied files are skipped and `supabase db push`
 stays interchangeable with the build-time runner.
 
+## Updating
+
+A one-click deploy is a copy of this repo taken the moment you clicked.
+Fixes made here after that don't reach it on their own. This is how they do.
+
+### What you'll see
+
+Admins get a card in the bottom-left of the dashboard when a new release is
+out. **Update available** can be dismissed until the next release. **Update
+required** can't: it means your version is below the oldest one still
+considered safe (for example, a security fix shipped since). The card's
+button opens the updater in your own repo.
+
+### Running the updater
+
+Your repo includes `.github/workflows/update-from-upstream.yml`. It runs every
+Monday, or on demand from **Actions → Update from upstream → Run workflow**.
+
+1. It opens a pull request, `backstage-update`, with everything that changed
+   upstream since your last update. Your own edits are kept. If you and
+   upstream changed the same lines, it stops and lists the files instead of
+   guessing.
+2. Vercel builds a preview of that branch. Preview builds **don't** run
+   database migrations, so your live data is untouched until you merge. A
+   release that adds tables may show errors in the preview; that's expected.
+3. Merge it. Vercel deploys to production, and the build applies any new
+   migrations first, in order, even if you're several releases behind.
+
+One-time setting, so the updater can open the pull request itself:
+**Settings → Actions → General → Allow GitHub Actions to create and approve
+pull requests.** Without it, you get an issue linking to the pull request
+instead.
+
+### Deployed before version 0.2.0
+
+Check `version` in your repo's `package.json`. If it says `0.1.0`, your copy
+predates the updater and needs a one-time setup. If you deployed before
+13 Sep 2026 it also has a security problem: six tables
+(`comment_reactions`, `task_reactions`, `onboarding_step_completions`,
+`onboarding_step_templates`, `polls`, `poll_votes`) accept reads and writes
+from anyone holding your public anon key. Update now:
+
+1. In your GitHub repo: **Add file → Create new file**, name it
+   `.github/workflows/update-from-upstream.yml`, and paste in
+   [this file](https://raw.githubusercontent.com/seifelesllamseif/backstage/main/.github/workflows/update-from-upstream.yml).
+   Commit it to your main branch.
+2. Allow Actions to open pull requests (the setting above).
+3. **Actions → Update from upstream → Run workflow**, then merge the pull
+   request it opens.
+
+A Vercel copy shares no git history with this repo. The updater works out
+which commit you were copied from on its own. If it reports it can't, run it
+again with **base** set to `331fe494d2a637333adf90a9f4789ee7bea79cfe`
+(v0.1.0).
+
+### Settings
+
+- `MIGRATE_ON_PREVIEW=1`: also migrate on preview builds. Only set this if
+  your previews use a separate database. By default Preview and Production
+  share one.
+- `BACKSTAGE_RELEASE_URL`: where the dashboard checks for releases. Set it to
+  an empty string to turn the check off, e.g. for a fork you maintain
+  yourself.
+
+### Releasing (maintainers)
+
+1. Bump `version` in `package.json`.
+2. In `release.json`, set `latest`. If the release fixes something a
+   deployment must not keep running, also raise `minSupported` to it and
+   say why in `reason`. That turns everyone below it red.
+3. Merge to main and tag `vX.Y.Z`.
+
+Migrations have to be forward-only and safe to apply to a database that's
+several releases behind, because that's exactly what an update does.
+
 ## Installing plugins
 
 The catalog is served by the public marketplace site

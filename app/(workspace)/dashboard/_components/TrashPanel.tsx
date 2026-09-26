@@ -66,7 +66,7 @@ export default function TrashPanel({ accessTier }: TrashPanelProps) {
   }
 
   return (
-    <div className="flex h-full flex-col gap-4 p-4">
+    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4">
       <div className="flex items-center gap-2">
         <Trash2 className="h-5 w-5 text-rose-500" />
         <h1 className="text-lg font-semibold">Trash</h1>

@@ -1,26 +1,24 @@
 import { Suspense } from 'react'
-import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
-import { dashboardMetadata, fetchInitial } from '../_components/fetchInitial'
+import { fetchInitial } from '../_components/fetchInitial'
+import { panelMetadata } from '../_components/panelMetadata'
 import { requireFeature } from '@/lib/features/server'
 
 type RawSearchParams = Promise<Record<string, string | string[] | undefined>>
 
-export async function generateMetadata({
-  searchParams
-}: {
-  searchParams: RawSearchParams
-}): Promise<Metadata> {
-  const params = await searchParams
-  const project =
-    typeof params.project === 'string' ? params.project : undefined
-  return dashboardMetadata(project)
-}
+export const metadata = panelMetadata('Sprints')
 
 // The shell + panel are rendered by <DashboardChrome /> in the layout.
 // This page only runs the server-side redirect guard: Sprints is
 // project-scoped, so without a valid ?project= we send the user back to
-// /dashboard/board (preserving other filter params).
+// /dashboard/board (preserving other filter params). The guard sits inside
+// Suspense so it never blocks the panel swap.
+//
+// ponytail: the guard pulls the whole workspace payload (~30 queries) to
+// read one field, initial.currentProjectId. Fine while it is off the
+// navigation path; if it shows up in the logs, replace it with a single
+// visibility-scoped projects query rather than reimplementing the scoping
+// rules in supabase/dashboard/fetch.ts by hand.
 export default function SprintsPage({
   searchParams
 }: {

@@ -3,6 +3,7 @@ import { after } from 'next/server'
 import { requireOnboardingComplete, touchLastSeen } from '@/lib/dal'
 import { getWorkspaceBranding } from '@/lib/features/server'
 import { FeaturesProvider } from '@/lib/features/client'
+import DashboardSkeleton from './dashboard/_components/DashboardSkeleton'
 
 // (workspace) — shell-less authenticated route group.
 //
@@ -21,9 +22,11 @@ import { FeaturesProvider } from '@/lib/features/client'
 //
 // next.config.ts has cacheComponents: true, so the auth gate runs inside
 // a Suspense boundary - the await on supabase.auth.getClaims() is
-// uncached and would otherwise block route rendering. Fallback is null
-// because the child page's own Suspense (DashboardSkeleton) supplies the
-// visible loading state.
+// uncached and would otherwise block route rendering. The skeleton is the
+// fallback HERE, at the boundary a cold page load actually waits on. It
+// used to live in dashboard/loading.tsx, which also wrapped the (null)
+// page segment, so every client navigation painted a second screenful of
+// skeleton underneath the live shell while waiting on a round trip.
 
 export default function WorkspaceLayout({
   children
@@ -31,7 +34,7 @@ export default function WorkspaceLayout({
   children: React.ReactNode
 }) {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<DashboardSkeleton />}>
       <Gated>{children}</Gated>
     </Suspense>
   )

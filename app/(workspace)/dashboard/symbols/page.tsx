@@ -1,16 +1,6 @@
-import type { Metadata } from 'next'
-import { dashboardMetadata } from '../_components/fetchInitial'
+import { panelMetadata } from '../_components/panelMetadata'
 
-type SearchParams = Promise<{ project?: string }>
-
-export async function generateMetadata({
-  searchParams
-}: {
-  searchParams: SearchParams
-}): Promise<Metadata> {
-  const { project } = await searchParams
-  return dashboardMetadata(project)
-}
+export const metadata = panelMetadata('Symbols')
 
 export default function SymbolsPage() {
   return null

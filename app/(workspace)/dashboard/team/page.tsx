@@ -1,28 +1,31 @@
-import type { Metadata } from 'next'
+import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
 import { requireOnboardingComplete } from '@/lib/dal'
 import { createAdminClient } from '@/supabase/admin'
 import { canSeeTeamPage } from '@/lib/teamGate'
 import { DEFAULT_REDIRECT_ROUTE } from '@/routes'
-import { dashboardMetadata } from '../_components/fetchInitial'
+import { panelMetadata } from '../_components/panelMetadata'
 
-type SearchParams = Promise<{ project?: string }>
-
-export async function generateMetadata({
-  searchParams
-}: {
-  searchParams: SearchParams
-}): Promise<Metadata> {
-  const { project } = await searchParams
-  return dashboardMetadata(project)
-}
+export const metadata = panelMetadata('Team')
 
 // Server-side gate so members never see the empty "Not allowed" state
 // from listTeamRoster. The DashboardShell hides the sidebar Team entry
 // for members; this is the defense-in-depth path when somebody types
 // the URL or follows an old bookmark. Listed in `staffOnlyRoutes` in
 // /routes.ts as the single source of truth for tier-gated paths.
-export default async function TeamPage() {
+//
+// Inside Suspense so the two round trips it costs don't sit in front of
+// the panel swap - the gate still runs, it just runs while the (already
+// client-rendered) panel is on screen.
+export default function TeamPage() {
+  return (
+    <Suspense fallback={null}>
+      <StaffGate />
+    </Suspense>
+  )
+}
+
+async function StaffGate() {
   const member = await requireOnboardingComplete()
   const supabase = createAdminClient()
   const { data: company } = await supabase

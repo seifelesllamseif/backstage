@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { X, MessageSquare, Paperclip, GitBranch } from 'lucide-react'
 import { BoardTask } from './boardData'
-import { useTeam } from './TeamContext'
+import { useDirectory, useTeam } from './TeamContext'
 import {
   STATUS_BY_ID,
   STATUSES,
@@ -74,6 +74,7 @@ export default function TaskDetailContent({
 }: Props) {
   const { t } = useDashTheme()
   const team = useTeam()
+  const directory = useDirectory()
   const isPlanner = accessTier === 'admin' || accessTier === 'lead'
   const isAssignee = task.assignee?.id === currentUserId
   const canEditPlanner = isPlanner
@@ -323,7 +324,7 @@ export default function TaskDetailContent({
                 <span className={`text-[10px] ${t.textSubtle}`}>{c.at}</span>
               </div>
               <p className={`${t.textMuted} leading-snug`}>
-                {renderMentionedBody(c.body, team)}
+                {renderMentionedBody(c.body, directory)}
               </p>
             </div>
           ))}

@@ -2,6 +2,7 @@ import dynamic from 'next/dynamic'
 import { Plug } from 'lucide-react'
 
 import type { PluginManifest } from '@/lib/plugins/types'
+import { MCP_VERSION } from './version'
 
 const mcp: PluginManifest = {
   id: 'mcp',
@@ -13,7 +14,7 @@ const mcp: PluginManifest = {
     'OAuth, so an assistant can never do more than the member could in the ' +
     'UI. An admin enables the plugin and configures the Supabase OAuth ' +
     'server once; after that the whole team can connect. See docs/MCP.md.',
-  version: '0.1.0',
+  version: MCP_VERSION,
   author: 'Backstage',
   group: 'Advanced',
   icon: Plug,

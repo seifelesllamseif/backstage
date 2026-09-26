@@ -418,10 +418,7 @@ function StepAttendees({
   const { t } = useDashTheme()
   const team = useTeam()
   const candidates = team.filter(
-    (m) =>
-      m.id !== currentUserId &&
-      m.activityStatus !== 'on_vacation' &&
-      m.activityStatus !== 'left'
+    (m) => m.id !== currentUserId && m.activityStatus !== 'on_vacation'
   )
   const [query, setQuery] = useState('')
   const filtered = candidates.filter(
@@ -437,10 +434,7 @@ function StepAttendees({
   function addEveryone() {
     onChange(
       candidates
-        .filter(
-          (m) =>
-            m.activityStatus !== 'on_vacation' && m.activityStatus !== 'left'
-        )
+        .filter((m) => m.activityStatus !== 'on_vacation')
         .map((m) => m.id)
     )
   }

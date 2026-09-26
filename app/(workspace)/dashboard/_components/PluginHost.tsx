@@ -26,5 +26,12 @@ export default function PluginHost({
     )
   }
 
-  return <plugin.Panel member={member} />
+  // The scroll container lives here, not in each plugin: <main> in the
+  // shell is overflow-hidden, so a panel without one is simply unscrollable
+  // past the fold. Doing it once means a plugin author cannot forget.
+  return (
+    <div className="h-full overflow-y-auto">
+      <plugin.Panel member={member} />
+    </div>
+  )
 }

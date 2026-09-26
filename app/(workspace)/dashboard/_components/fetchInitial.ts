@@ -1,7 +1,4 @@
 import 'server-only'
-import { createAdminClient } from '@/supabase/admin'
-import { getCurrentTeamMember } from '@/lib/dal'
-import { config } from '@/lib/config'
 import { fetchDashboardData } from '../actions'
 import { listTaskAttachmentsForTasks } from '@/supabase/dashboard/taskAttachments'
 import { runDueWarningsIfDue } from '@/supabase/dashboard/dueWarnings'
@@ -121,42 +118,5 @@ export async function fetchInitial(
     },
     currentProjectId,
     defaultProjectId
-  }
-}
-
-export async function resolveProjectTitle(
-  projectParam: string | undefined
-): Promise<string | null> {
-  if (!projectParam) return null
-  const member = await getCurrentTeamMember()
-  if (!member) return null
-  const supabase = createAdminClient()
-  const { data } = await supabase
-    .from('projects')
-    .select('name')
-    .eq('id', projectParam)
-    .eq('company_id', member.companyId)
-    .maybeSingle()
-  return data?.name ?? null
-}
-
-const DASHBOARD_DESCRIPTION =
-  'Hand off, receive and track tasks across the team.'
-
-export async function dashboardMetadata(
-  projectParam: string | undefined
-): Promise<{ title: string; description: string }> {
-  if (!projectParam) {
-    return {
-      title: `All Projects · ${config.appName}`,
-      description: DASHBOARD_DESCRIPTION
-    }
-  }
-  const projectName = await resolveProjectTitle(projectParam)
-  return {
-    title: projectName
-      ? `${projectName} · ${config.appName}`
-      : `Dashboard · ${config.appName}`,
-    description: DASHBOARD_DESCRIPTION
   }
 }

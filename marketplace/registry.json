@@ -1,6 +1,15 @@
 {
   "plugins": [
     {
+      "id": "update-required",
+      "name": "Security update required",
+      "description": "Deployed before 13 Sep 2026? Six of your tables are readable and writable with the public anon key. Open this card for the two-minute fix.",
+      "version": "0.2.0",
+      "author": "Backstage",
+      "group": "Team",
+      "repoUrl": "https://github.com/seifelesllamseif/backstage/blob/main/DEPLOY.md#updating"
+    },
+    {
       "id": "polls",
       "name": "Team Polls",
       "description": "Quick team polls with live results.",
@@ -13,7 +22,7 @@
       "id": "mcp",
       "name": "AI Assistant (MCP)",
       "description": "Let Claude, Cursor, or any MCP client work in this workspace.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "author": "Backstage",
       "group": "Advanced",
       "repoUrl": "https://github.com/seifelesllamseif/backstage/tree/main/plugins/mcp",

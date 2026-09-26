@@ -23,6 +23,10 @@ integration, provisions env vars per environment, and deploys. See
 [DEPLOY.md](DEPLOY.md) for post-deploy migration steps and optional
 integrations.
 
+Already deployed? Your copy doesn't update itself when this repo does. See
+[Updating](DEPLOY.md#updating). If your `package.json` says `0.1.0`, do it
+now: older copies have a security fix to pick up.
+
 ## Stack
 
 - **Next.js 16** (App Router, Turbopack, Partial Prerender)

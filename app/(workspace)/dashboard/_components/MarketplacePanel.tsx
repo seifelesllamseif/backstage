@@ -130,7 +130,7 @@ export default function MarketplacePanel({ isAdmin }: { isAdmin: boolean }) {
   }, [entries])
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 p-4 sm:p-6">
+    <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-8 overflow-y-auto p-4 sm:p-6">
       <div>
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           <Store className="size-5" /> Marketplace

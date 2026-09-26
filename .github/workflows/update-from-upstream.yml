@@ -1,0 +1,51 @@
+name: Update from upstream
+
+# Brings this deployment up to date with the Backstage repo it came from, as a
+# pull request. Nothing reaches your main branch until you merge it; merging
+# deploys it, and the build applies any new database migrations first.
+#
+# Works on "Deploy with Vercel" copies, which start with no shared history.
+# The logic lives in scripts/update-from-upstream.sh and is always taken from
+# upstream main, so this file never needs editing to pick up updater fixes.
+#
+# Runs weekly, or on demand: Actions -> Update from upstream -> Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Advanced: the upstream commit this repo was created from. Leave empty to detect it."
+        required: false
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency: update-from-upstream
+
+jobs:
+  update:
+    # Never in the upstream repo itself.
+    if: github.repository != 'seifelesllamseif/backstage'
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM: https://github.com/seifelesllamseif/backstage.git
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream into backstage-update
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_INPUT: ${{ inputs.base }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch --quiet "$UPSTREAM" main
+          git show FETCH_HEAD:scripts/update-from-upstream.sh > "$RUNNER_TEMP/update.sh"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          bash "$RUNNER_TEMP/update.sh"

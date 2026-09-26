@@ -395,9 +395,7 @@ export default function CommandPalette({
 
     const orderedMembers = [
       ...members.filter((m) => m.id === currentUserId),
-      ...members.filter(
-        (m) => m.id !== currentUserId && m.activityStatus !== 'left'
-      )
+      ...members.filter((m) => m.id !== currentUserId)
     ]
     // Members are scoped server-side to assignee + watcher; mirror that here
     // so search can never widen the visible task set, even if the server

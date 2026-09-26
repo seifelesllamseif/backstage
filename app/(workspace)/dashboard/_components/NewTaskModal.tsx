@@ -252,10 +252,7 @@ function ManualTab({
   // Assignee / Lead pickers - they shouldn't pick up fresh work. Keep
   // active and away members (away just means offline at the moment).
   const assignableMembers = useMemo(
-    () =>
-      members.filter(
-        (m) => m.activityStatus !== 'left' && m.activityStatus !== 'on_vacation'
-      ),
+    () => members.filter((m) => m.activityStatus !== 'on_vacation'),
     [members]
   )
 
@@ -917,11 +914,7 @@ function DraftRow({
         >
           <option value="">Unassigned</option>
           {members
-            .filter(
-              (m) =>
-                m.activityStatus !== 'left' &&
-                m.activityStatus !== 'on_vacation'
-            )
+            .filter((m) => m.activityStatus !== 'on_vacation')
             .map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}

@@ -17,20 +17,51 @@ import {
   type PluginContext,
   type PluginServerModule
 } from '@/lib/plugins/types'
-import { setRequestIdentity } from '@/lib/requestIdentity'
+import {
+  runWithRequestIdentity,
+  setRequestIdentity
+} from '@/lib/requestIdentity'
 import {
   parseCompanyId,
   parseCompanyIdFromResourceMetadataPath,
   verifyMcpToken
 } from './auth'
 import { registerTools } from './tools'
+import { MCP_VERSION } from './version'
 
 // MCP endpoint, mounted per workspace at /api/p/mcp/w/<companyId>.
 // Stateless Streamable HTTP: POST only. GET/DELETE are for resumable SSE
 // sessions we don't run — add them with the first tool that streams.
 
+// `instructions` is the one piece of text an MCP client puts in front of the
+// model before it picks a tool - per-tool descriptions are only read once a
+// tool is already being considered. Everything here is a rule that a model
+// otherwise gets wrong: inventing ids, filing bare titles, editing without
+// reading, or treating a write as a draft.
+const INSTRUCTIONS = `Backstage is the team's task tracker: projects hold tasks, tasks carry status, assignee, priority, due date, checklist, comments and links, and sprints group tasks into time boxes.
+
+You are connected as one real member. Every write is immediately visible to the whole team, is attributed to that member, and sends them notifications - there is no draft mode and no undo for most of it. Act like you are typing into their account, because you are.
+
+Start of a session:
+- Call whoami to see who you are acting as and your access tier.
+- Call get_workspace for project, sprint and label ids, and list_team for member ids. Ids are UUIDs: read them from these tools, never guess one, never pass a name where an id is asked for.
+
+Before you write:
+- search_tasks first. Filing a duplicate is worse than asking.
+- get_task before editing an existing one - it returns the description, checklist, comments and links that the search result omits.
+
+When you write:
+- Fill every field the request implies: assigneeId, priority, dueDate. A title-only task makes a human chase the detail you already had. Do not invent a field that was not stated.
+- Use create_tasks_bulk for more than one task, not a loop of create_task.
+- update_task takes only the fields that change.
+- A URL worth keeping goes on the task or project with manage_links, not just in your reply.
+- Tasks have a human ref like WEB-12. Use it when you talk to the user; pass ids to tools.
+
+Access: every member can read the workspace and manage their own work. Creating or archiving projects, creating and running sprints, deleting tasks and managing project members need lead or admin. If a tool says you lack the tier, say so - do not retry.`
+
 const mcp = createMcpHandler(registerTools, {
-  serverInfo: { name: 'Backstage', version: '0.1.0' }
+  serverInfo: { name: 'Backstage', version: MCP_VERSION },
+  instructions: INSTRUCTIONS
 })
 
 // Token verification. Returning undefined makes withMcpAuth answer 401 with
@@ -80,7 +111,9 @@ async function handleMcp(request: Request): Promise<Response> {
     // scoped to the bare origin instead of its own endpoint below.
     resourceMetadataPath: `/.well-known/oauth-protected-resource/api/p/mcp/w/${companyId}`
   })
-  return authed(request)
+  // Opens the identity scope verify() writes into; everything the tools do
+  // runs inside it.
+  return runWithRequestIdentity(() => authed(request))
 }
 
 // RFC 9728 Protected Resource Metadata, one document per workspace. Public

@@ -25,7 +25,7 @@ import {
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { VisuallyHidden } from 'radix-ui'
 import { useDashTheme } from './theme'
-import { useTeam } from './TeamContext'
+import { useDirectory } from './TeamContext'
 import { formatTimeIn } from '@/lib/timezone'
 import {
   appendMeetingContext,
@@ -302,8 +302,9 @@ export function MeetingsSheetProvider({
   const [focus, setFocus] = useState<FocusKey | null>(null)
 
   const isPlanner = accessTier === 'admin' || accessTier === 'lead'
-  const team = useTeam()
-  const viewerTz = team.find((m) => m.id === currentUserId)?.timezone ?? null
+  const directory = useDirectory()
+  const viewerTz =
+    directory.find((m) => m.id === currentUserId)?.timezone ?? null
 
   const pendingQuery = useQuery({
     queryKey: ['meetingRequests', 'pending'],
@@ -961,9 +962,9 @@ function PickCard({
   onResolved: () => void
 }) {
   const { t } = useDashTheme()
-  const team = useTeam()
+  const directory = useDirectory()
   const requesterTz =
-    team.find((m) => m.id === request.requesterId)?.timezone ?? null
+    directory.find((m) => m.id === request.requesterId)?.timezone ?? null
   function requesterPreview(iso: string): string | null {
     if (!requesterTz || requesterTz === viewerTz) return null
     return formatTimeIn(iso, requesterTz, {
