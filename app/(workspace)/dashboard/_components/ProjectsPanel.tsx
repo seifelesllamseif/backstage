@@ -44,6 +44,7 @@ import type { ProjectExternalRef, TaskExternalRefKind } from './boardData'
 import { defaultExternalRefLabel, parseExternalRef } from '@/lib/externalRef'
 import StatusIcon from './StatusIcon'
 import { useDashTheme } from './theme'
+import { Favicon } from './Favicon'
 import {
   addProjectMember,
   archiveProjectInPlace,
@@ -1420,7 +1421,15 @@ function LinkRow({
     <li
       className={`group flex items-center gap-2 rounded-md border px-2 py-1 ${palette.wrapper}`}
     >
-      <Icon className={`size-3 shrink-0 ${palette.icon}`} />
+      {brand === 'link' ? (
+        <Favicon
+          url={refData.url}
+          fallback={Icon}
+          className={`size-3 shrink-0 ${palette.icon}`}
+        />
+      ) : (
+        <Icon className={`size-3 shrink-0 ${palette.icon}`} />
+      )}
       {editing ? (
         <input
           autoFocus
