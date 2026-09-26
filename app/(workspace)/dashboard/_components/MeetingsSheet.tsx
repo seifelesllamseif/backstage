@@ -303,7 +303,8 @@ export function MeetingsSheetProvider({
 
   const isPlanner = accessTier === 'admin' || accessTier === 'lead'
   const directory = useDirectory()
-  const viewerTz = directory.find((m) => m.id === currentUserId)?.timezone ?? null
+  const viewerTz =
+    directory.find((m) => m.id === currentUserId)?.timezone ?? null
 
   const pendingQuery = useQuery({
     queryKey: ['meetingRequests', 'pending'],

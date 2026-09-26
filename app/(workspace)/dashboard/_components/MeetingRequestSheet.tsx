@@ -413,8 +413,7 @@ export function MeetingRequestSheetProvider({
                   const everyoneElse = team
                     .filter(
                       (m) =>
-                        m.id !== openId &&
-                        m.activityStatus !== 'on_vacation'
+                        m.id !== openId && m.activityStatus !== 'on_vacation'
                     )
                     .map((m) => m.id)
                   setExtraAttendees(everyoneElse)

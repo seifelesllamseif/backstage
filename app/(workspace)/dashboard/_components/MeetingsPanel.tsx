@@ -85,7 +85,8 @@ export function MeetingsPanel({
   const { open: openPortfolio } = usePortfolioSheet()
   const directory = useDirectory()
   const isPlanner = accessTier === 'admin' || accessTier === 'lead'
-  const viewerTz = directory.find((m) => m.id === currentUserId)?.timezone ?? null
+  const viewerTz =
+    directory.find((m) => m.id === currentUserId)?.timezone ?? null
 
   const [view, setView] = useState<ViewMode>('month')
   const [anchor, setAnchor] = useState<Date>(() => startOfDay(new Date()))

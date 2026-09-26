@@ -198,7 +198,9 @@ export default function QuickRoomButton({
   )
   const invitableMembers = useMemo(
     () =>
-      activeMembers(team).filter((m) => m.id !== me.id && !presentIds.has(m.id)),
+      activeMembers(team).filter(
+        (m) => m.id !== me.id && !presentIds.has(m.id)
+      ),
     [team, me.id, presentIds]
   )
 
