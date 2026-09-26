@@ -76,6 +76,7 @@ import { Globe, Rabbit } from 'lucide-react'
 import { config } from '@/lib/config'
 import { BoardAssignee, BoardTask } from './boardData'
 import { useDirectory, useTeam } from './TeamContext'
+import { Favicon } from './Favicon'
 import {
   STATUS_BY_ID,
   STATUSES,
@@ -1854,7 +1855,11 @@ function LinksSection({
                   }
                   aria-hidden="true"
                 >
-                  <Icon className={isOwnBrand ? 'size-8' : 'size-3.5'} />
+                  {ref.kind === 'link' ? (
+                    <Favicon url={ref.url} fallback={Icon} className="size-4" />
+                  ) : (
+                    <Icon className={isOwnBrand ? 'size-8' : 'size-3.5'} />
+                  )}
                 </span>
                 <a
                   href={ref.url}

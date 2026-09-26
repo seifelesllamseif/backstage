@@ -31,6 +31,7 @@ import {
   submitHandoffForReview
 } from '../actions'
 import { useDashTheme } from './theme'
+import { Favicon } from './Favicon'
 import type {
   BoardAssignee,
   TaskExternalRef,
@@ -456,9 +457,17 @@ export default function HandoffSheet({
                               key={ref.id}
                               className={`group flex items-center gap-2 rounded-md border px-2.5 py-1.5 ${t.column}`}
                             >
-                              <Icon
-                                className={`size-3.5 shrink-0 ${t.textMuted}`}
-                              />
+                              {ref.kind === 'link' ? (
+                                <Favicon
+                                  url={ref.url}
+                                  fallback={Icon}
+                                  className={`size-3.5 shrink-0 ${t.textMuted}`}
+                                />
+                              ) : (
+                                <Icon
+                                  className={`size-3.5 shrink-0 ${t.textMuted}`}
+                                />
+                              )}
                               <a
                                 href={ref.url}
                                 target="_blank"
