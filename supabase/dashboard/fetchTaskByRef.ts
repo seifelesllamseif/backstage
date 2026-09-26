@@ -34,6 +34,17 @@ export interface SharedTaskView {
 // crawlers. Refs are unique across the single-tenant company (each
 // project has its own prefix + seq), so no company filter is needed.
 // When Backstage goes multi-tenant, swap this for a tokenized share URL.
+// Tasks inserted outside the app (a SQL seed, a restored dump) can land
+// with a null `ref`. mappers.ts fills the gap for display with the first
+// eight hex digits of the uuid, and the share button copies whatever ref
+// the card is showing — so those links arrived here as "D6B41504" and
+// matched no row. Resolve that shape against the id instead.
+//
+// A uuid's first block is its leading text, and Postgres orders uuids
+// lexically, so a half-open range on the primary key finds it without a
+// cast (PostgREST filters can't cast) and without a scan.
+const ID_PREFIX = /^[0-9a-f]{8}$/i
+
 export async function fetchTaskByRef(
   ref: string
 ): Promise<SharedTaskView | null> {
@@ -53,7 +64,22 @@ export async function fetchTaskByRef(
     .is('deleted_at', null)
     .maybeSingle()
 
-  if (error || !data) return null
+  if (error) return null
+  if (!data) {
+    if (!ID_PREFIX.test(ref)) return null
+    const p = ref.toLowerCase()
+    const { data: byId } = await supabase
+      .from('tasks')
+      .select('ref')
+      .gte('id', `${p}-0000-0000-0000-000000000000`)
+      .lte('id', `${p}-ffff-ffff-ffff-ffffffffffff`)
+      .is('deleted_at', null)
+      .limit(2)
+    // Two hits means the prefix is ambiguous; refuse rather than guess.
+    if (!byId || byId.length !== 1) return null
+    const resolved = byId[0].ref
+    return resolved && resolved !== ref ? fetchTaskByRef(resolved) : null
+  }
 
   const projectRel = data.project as
     | { id: string; name: string }

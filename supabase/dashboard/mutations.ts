@@ -1434,7 +1434,18 @@ export async function moveDashboardTask(
   // Status flip first (the moved row only), then renumber the destination
   // column. No transaction available; on partial failure the next move
   // (or a router.refresh) restores consistent ordering.
-  await supabase.from('tasks').update({ status: toStatus }).eq('id', task.id)
+  const { error: statusError } = await supabase
+    .from('tasks')
+    .update({ status: toStatus })
+    .eq('id', task.id)
+  // Unchecked, a rejected status write (bad enum value, constraint) left the
+  // caller with a success result and a card that snapped back on next load.
+  if (statusError)
+    return {
+      ok: false,
+      reason: 'generic',
+      message: 'Could not move the task.'
+    }
   for (let i = 0; i < newOrder.length; i++) {
     await supabase
       .from('tasks')
