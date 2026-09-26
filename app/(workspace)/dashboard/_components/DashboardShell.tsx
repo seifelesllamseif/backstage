@@ -114,7 +114,7 @@ import TimezoneGate from './TimezoneGate'
 import { DashboardThemeProvider, useDashTheme } from './theme'
 import { ContextMenuProvider, useContextMenu } from './ContextMenu'
 import { TaskActionsProvider } from './actions'
-import { TeamProvider } from './TeamContext'
+import { activeMembers, TeamProvider } from './TeamContext'
 import { PortfolioSheetProvider, usePortfolioSheet } from './PortfolioSheet'
 import { QuickNoteSheetProvider } from './QuickNoteSheet'
 import { MeetingRequestSheetProvider } from './MeetingRequestSheet'
@@ -463,6 +463,11 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   )
 
   const team = initial.members
+  // Anything a user picks from gets this, never `team`: departed members
+  // stay in `team` so old tasks, comments and watchers still resolve to a
+  // name, but they must never be offerable. Same rule useTeam() applies for
+  // components that read the roster from context instead of a prop.
+  const roster = useMemo(() => activeMembers(team), [team])
   // Local copy of the viewer's saved timezone so TimezoneGate can dismiss
   // itself after a successful save without triggering a server refetch.
   const [savedTimezone, setSavedTimezone] = useState(
@@ -489,10 +494,9 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
   // stays stable as the team grows.
   const NEW_JOINER_CAP = 3
   const newJoinerNames = useMemo(() => {
-    return team
+    return roster
       .filter((m) => {
         if (m.id === currentUserId) return false
-        if (m.activityStatus === 'left') return false
         if (m.activityStatus === 'on_vacation') return false
         if (!m.joinedAt) return false
         return true
@@ -500,7 +504,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
       .sort((a, b) => (b.joinedAt ?? '').localeCompare(a.joinedAt ?? ''))
       .slice(0, NEW_JOINER_CAP)
       .map((m) => m.name.split(/\s+/)[0])
-  }, [team, currentUserId])
+  }, [roster, currentUserId])
   // Cycles the centered wordmark through phases: time-banded greeting,
   // the static brand mark, and a "Welcome, <name>!" beat for each
   // recent joiner. Slow cadence so the swap feels ambient.
@@ -4015,7 +4019,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           }
           onAddRef={addExternalRef}
           onRemoveRef={removeExternalRef}
-          members={team}
+          members={roster}
           onClose={() => setHandoffTaskTarget(null)}
           onDone={(taskId) => {
             // Task status is intentionally not flipped here. The handoff
@@ -4031,7 +4035,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
           defaultStatus={newTaskColumn}
           defaultAssigneeId={newTaskAssigneeId}
           defaultPriority={newTaskPriority}
-          members={team}
+          members={roster}
           labels={initial.labels}
           projects={initial.allActiveProjects}
           defaultProjectId={initial.currentProjectId}
@@ -4118,7 +4122,7 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
             .filter((p) => !p.isArchived)
             .map((p) => ({ id: p.id, name: p.name }))}
           currentProjectId={initial.currentProjectId}
-          members={team}
+          members={roster}
           currentUserId={currentUserId}
           currentUserAccessTier={initial.currentMember.accessTier}
           currentUserWatcherTaskIds={initial.currentMember.watcherTaskIds}

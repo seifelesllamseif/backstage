@@ -420,8 +420,7 @@ function StepAttendees({
   const candidates = team.filter(
     (m) =>
       m.id !== currentUserId &&
-      m.activityStatus !== 'on_vacation' &&
-      m.activityStatus !== 'left'
+      m.activityStatus !== 'on_vacation'
   )
   const [query, setQuery] = useState('')
   const filtered = candidates.filter(
@@ -439,7 +438,7 @@ function StepAttendees({
       candidates
         .filter(
           (m) =>
-            m.activityStatus !== 'on_vacation' && m.activityStatus !== 'left'
+            m.activityStatus !== 'on_vacation'
         )
         .map((m) => m.id)
     )

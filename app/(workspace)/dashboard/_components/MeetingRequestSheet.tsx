@@ -414,8 +414,7 @@ export function MeetingRequestSheetProvider({
                     .filter(
                       (m) =>
                         m.id !== openId &&
-                        m.activityStatus !== 'on_vacation' &&
-                        m.activityStatus !== 'left'
+                        m.activityStatus !== 'on_vacation'
                     )
                     .map((m) => m.id)
                   setExtraAttendees(everyoneElse)
@@ -703,8 +702,7 @@ function AttendeePicker({
     (m) =>
       m.id !== primaryId &&
       !attendeeIds.includes(m.id) &&
-      m.activityStatus !== 'on_vacation' &&
-      m.activityStatus !== 'left'
+      m.activityStatus !== 'on_vacation'
   )
   return (
     <div className="flex flex-wrap items-center gap-1.5">

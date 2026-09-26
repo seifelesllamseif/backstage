@@ -12,7 +12,7 @@ import { toast } from 'sonner'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { VisuallyHidden } from 'radix-ui'
 import Avatar from './Avatar'
-import { useTeam } from './TeamContext'
+import { useDirectory } from './TeamContext'
 import { useDashTheme } from './theme'
 import { addComment } from '../actions'
 import type { BoardTask } from './boardData'
@@ -53,7 +53,7 @@ export function QuickNoteSheetProvider({
   currentUserId: string
   children: React.ReactNode
 }) {
-  const team = useTeam()
+  const directory = useDirectory()
   const { t } = useDashTheme()
   const [openId, setOpenId] = useState<string | null>(null)
   const [body, setBody] = useState('')
@@ -69,7 +69,7 @@ export function QuickNoteSheetProvider({
     [tasks, currentUserId]
   )
 
-  const target = openId ? team.find((m) => m.id === openId) : null
+  const target = openId ? directory.find((m) => m.id === openId) : null
 
   const open = useCallback((args: OpenArgs) => {
     setOpenId(args.memberId)

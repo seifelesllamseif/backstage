@@ -396,7 +396,7 @@ export default function CommandPalette({
     const orderedMembers = [
       ...members.filter((m) => m.id === currentUserId),
       ...members.filter(
-        (m) => m.id !== currentUserId && m.activityStatus !== 'left'
+        (m) => m.id !== currentUserId
       )
     ]
     // Members are scoped server-side to assignee + watcher; mirror that here

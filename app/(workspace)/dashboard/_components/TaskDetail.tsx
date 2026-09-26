@@ -75,7 +75,7 @@ import {
 import { Globe, Rabbit } from 'lucide-react'
 import { config } from '@/lib/config'
 import { BoardAssignee, BoardTask } from './boardData'
-import { useTeam } from './TeamContext'
+import { useDirectory, useTeam } from './TeamContext'
 import {
   STATUS_BY_ID,
   STATUSES,
@@ -244,6 +244,7 @@ export default function TaskDetail({
 }: TaskDetailProps) {
   const { t } = useDashTheme()
   const team = useTeam()
+  const directory = useDirectory()
   const isPlanner = accessTier === 'admin' || accessTier === 'lead'
   const isAssignee = task?.assignee?.id === currentUserId
   const isCreator = task?.createdById === currentUserId
@@ -761,6 +762,7 @@ export default function TaskDetail({
               canInvite={canEditOwner}
               currentUserId={currentUserId}
               team={team}
+              directory={directory}
               watchers={spectators}
               loading={spectatorsLoading}
               onChanged={refreshSpectators}
@@ -904,7 +906,7 @@ export default function TaskDetail({
                     <p
                       className={`${t.textMuted} leading-snug whitespace-pre-wrap`}
                     >
-                      {renderMentionedBody(c.body, team)}
+                      {renderMentionedBody(c.body, directory)}
                     </p>
                   )}
                   <div className="mt-1">
@@ -2430,6 +2432,7 @@ function WatchersSection({
   canInvite,
   currentUserId,
   team,
+  directory,
   watchers,
   loading,
   onChanged
@@ -2440,7 +2443,10 @@ function WatchersSection({
   // can still leave (handled inside) but can't add others.
   canInvite: boolean
   currentUserId: string
+  // Invite candidates: people still here.
   team: BoardAssignee[]
+  // Name resolution for existing watchers, who may since have left.
+  directory: BoardAssignee[]
   // State + refresh callback are owned by TaskDetail so the @-mention
   // input can share the list (prioritized at the top of the dropdown).
   watchers: WatcherRow[]
@@ -2532,7 +2538,7 @@ function WatchersSection({
       ) : (
         <div className="flex flex-col gap-1">
           {watchers.map((w) => {
-            const teamMember = team.find((m) => m.id === w.memberId)
+            const teamMember = directory.find((m) => m.id === w.memberId)
             const canRemove = canInvite || w.memberId === currentUserId
             return (
               <div key={w.memberId} className="flex items-center gap-2 text-xs">

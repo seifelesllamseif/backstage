@@ -11,7 +11,7 @@ import { AtSign, Briefcase, Mail, MessageCircle, Link2 } from 'lucide-react'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { VisuallyHidden } from 'radix-ui'
 import Avatar from './Avatar'
-import { useTeam } from './TeamContext'
+import { useDirectory } from './TeamContext'
 import {
   getLocalTime,
   getPresence,
@@ -64,7 +64,7 @@ export function PortfolioSheetProvider({
 }: {
   children: React.ReactNode
 }) {
-  const team = useTeam()
+  const directory = useDirectory()
   const { t } = useDashTheme()
   const [openId, setOpenId] = useState<string | null>(null)
   const [data, setData] = useState<MemberPortfolio | null>(null)
@@ -111,7 +111,7 @@ export function PortfolioSheetProvider({
     }
   }, [openId])
 
-  const assignee = openId ? team.find((m) => m.id === openId) : null
+  const assignee = openId ? directory.find((m) => m.id === openId) : null
   const presence = assignee ? getPresence(assignee) : null
   const localTime = assignee ? getLocalTime(assignee) : null
   const quiet = assignee ? isQuietHours(assignee) : null

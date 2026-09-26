@@ -21,7 +21,7 @@ import { useDashTheme } from './theme'
 import { useMeetingsSheet } from './MeetingsSheet'
 import { useMeetingCreateWizard } from './MeetingCreateWizard'
 import { usePortfolioSheet } from './PortfolioSheet'
-import { useTeam } from './TeamContext'
+import { useDirectory } from './TeamContext'
 import { listMyMeetingRequests, listPendingApprovals } from '../actions'
 import type { Sprint } from './boardData'
 
@@ -83,9 +83,9 @@ export function MeetingsPanel({
   const meetingsSheet = useMeetingsSheet()
   const wizard = useMeetingCreateWizard()
   const { open: openPortfolio } = usePortfolioSheet()
-  const team = useTeam()
+  const directory = useDirectory()
   const isPlanner = accessTier === 'admin' || accessTier === 'lead'
-  const viewerTz = team.find((m) => m.id === currentUserId)?.timezone ?? null
+  const viewerTz = directory.find((m) => m.id === currentUserId)?.timezone ?? null
 
   const [view, setView] = useState<ViewMode>('month')
   const [anchor, setAnchor] = useState<Date>(() => startOfDay(new Date()))
@@ -207,7 +207,7 @@ export function MeetingsPanel({
       openPortfolio(currentUserId)
       return
     }
-    if (team.some((m) => m.id === memberId)) {
+    if (directory.some((m) => m.id === memberId)) {
       openPortfolio(memberId)
     }
   }

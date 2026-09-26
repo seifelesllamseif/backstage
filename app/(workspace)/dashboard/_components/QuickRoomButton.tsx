@@ -14,6 +14,7 @@ import {
   leaveQuickRoom
 } from '../actions'
 import type { BoardAssignee } from './boardData'
+import { activeMembers } from './TeamContext'
 import Avatar from './Avatar'
 
 interface PresenceRow {
@@ -196,7 +197,8 @@ export default function QuickRoomButton({
     [present]
   )
   const invitableMembers = useMemo(
-    () => team.filter((m) => m.id !== me.id && !presentIds.has(m.id)),
+    () =>
+      activeMembers(team).filter((m) => m.id !== me.id && !presentIds.has(m.id)),
     [team, me.id, presentIds]
   )
 

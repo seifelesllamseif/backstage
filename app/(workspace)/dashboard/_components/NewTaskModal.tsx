@@ -254,7 +254,7 @@ function ManualTab({
   const assignableMembers = useMemo(
     () =>
       members.filter(
-        (m) => m.activityStatus !== 'left' && m.activityStatus !== 'on_vacation'
+        (m) => m.activityStatus !== 'on_vacation'
       ),
     [members]
   )
@@ -919,7 +919,6 @@ function DraftRow({
           {members
             .filter(
               (m) =>
-                m.activityStatus !== 'left' &&
                 m.activityStatus !== 'on_vacation'
             )
             .map((m) => (

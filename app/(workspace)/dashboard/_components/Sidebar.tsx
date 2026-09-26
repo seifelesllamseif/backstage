@@ -238,7 +238,7 @@ export default function Sidebar({
   const orderedTeam = [
     ...team.filter((m) => m.id === currentUserId),
     ...team
-      .filter((m) => m.id !== currentUserId && m.activityStatus !== 'left')
+      .filter((m) => m.id !== currentUserId)
       .sort((a, b) => {
         const dr = presenceRank(a) - presenceRank(b)
         if (dr !== 0) return dr
