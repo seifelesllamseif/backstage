@@ -52,6 +52,22 @@ async function requireMember() {
   return member
 }
 
+// The mutations enforce their own tier, but they do it with requireAccessTier,
+// which redirect()s - a Next control-flow throw that reaches an MCP client as
+// an opaque NEXT_REDIRECT digest rather than a reason. Check first so the
+// model is told what it lacks and stops retrying.
+function requireTier(
+  member: { accessTier: string },
+  allowed: readonly string[]
+) {
+  if (!allowed.includes(member.accessTier)) {
+    throw new Error(
+      `Requires ${allowed.join(' or ')} access; this connection is ${member.accessTier}.`
+    )
+  }
+}
+const STAFF = ['admin', 'lead'] as const
+
 // MCP returns text content; JSON is what models parse most reliably.
 function json(value: unknown) {
   return {
@@ -121,7 +137,10 @@ export function registerTools(server: McpServer) {
     {
       title: 'Get workspace',
       description:
-        'Name, enabled features, projects and sprints of the workspace this connection is scoped to.',
+        'Name, enabled features, projects, sprints and labels of the workspace this connection is ' +
+        'scoped to. This is where every id you need comes from - project ids for create_task, sprint ' +
+        'ids, label ids. Call it before your first write instead of guessing an id or inventing a ' +
+        'project name; ids are UUIDs and cannot be derived from a name.',
       inputSchema: z.object({}),
       annotations: read
     },
@@ -159,7 +178,10 @@ export function registerTools(server: McpServer) {
     {
       title: 'Search tasks',
       description:
-        'Find tasks by text, status, priority, assignee, project, or due date. Omit every filter to list all open work.',
+        'Find tasks by text, status, priority, assignee, project, or due date. Omit every filter to ' +
+        'list all open work. Search before creating: the task you are about to file often already ' +
+        'exists, and duplicates are expensive for the team to untangle. Returns a trimmed row - call ' +
+        'get_task for description, checklist, comments and links.',
       inputSchema: z.object({
         query: z.string().optional().describe('Matches title and ref'),
         status: z.array(Status).optional(),
@@ -206,7 +228,10 @@ export function registerTools(server: McpServer) {
     {
       title: 'Get task',
       description:
-        'Full detail for one task: description, checklist, labels, dependencies, sprint links, and comments.',
+        'Full detail for one task: description, checklist, labels, dependencies, sprint membership, ' +
+        'comments, and the links attached to it. Read this before you answer anything specific about ' +
+        'a task or edit it - the trimmed row from search_tasks is not enough to judge what is already ' +
+        'done or already linked. Takes the UUID or the human ref (WEB-12).',
       inputSchema: z.object({
         taskId: Uuid.optional(),
         ref: z.string().optional().describe('Human ref such as WEB-12')
@@ -225,7 +250,11 @@ export function registerTools(server: McpServer) {
       if (!task) throw new Error('Task not found.')
       return json({
         ...task,
-        comments: d.comments.filter((c) => c.taskId === task.id)
+        comments: d.comments.filter((c) => c.taskId === task.id),
+        // Links were the one thing on the card a model could not see: it
+        // would answer "no design attached" while a Figma chip sat on the
+        // task. Same shape manage_links returns.
+        links: d.externalRefs.filter((r) => r.taskId === task.id)
       })
     }
   )
@@ -240,7 +269,7 @@ export function registerTools(server: McpServer) {
       annotations: read
     },
     async () => {
-      await requireMember()
+      requireTier(await requireMember(), STAFF)
       return json(unwrap(await m.listTrashedTasks()))
     }
   )
@@ -251,17 +280,30 @@ export function registerTools(server: McpServer) {
     'create_task',
     {
       title: 'Create task',
-      description: 'Create a single task in a project.',
+      description:
+        'Create a single task in a project. Fill in every field the request actually implies - ' +
+        'assigneeId, priority and dueDate especially. A title-only task lands on the board with no ' +
+        'owner and no date, and a human has to chase down what you already knew. If the request does ' +
+        'not say who or when, leave those out rather than inventing them, but do not skip a detail ' +
+        'that was stated. Put the one-line summary in title and the context, links and acceptance ' +
+        'criteria in description. Creating more than one task? Use create_tasks_bulk instead.',
       inputSchema: z.object({
-        title: z.string().min(1).max(280),
-        projectId: Uuid,
-        description: z.string().nullish(),
-        status: Status.optional(),
+        title: z
+          .string()
+          .min(1)
+          .max(280)
+          .describe('One line, imperative: "Fix the checkout redirect"'),
+        projectId: Uuid.describe('From get_workspace'),
+        description: z
+          .string()
+          .nullish()
+          .describe('Markdown. Context, acceptance criteria, links.'),
+        status: Status.optional().describe('Defaults to the backlog'),
         priority: Priority.optional(),
-        assigneeId: Uuid.nullish(),
-        leadId: Uuid.nullish(),
+        assigneeId: Uuid.nullish().describe('Member id from list_team'),
+        leadId: Uuid.nullish().describe('Reviewer / owner, from list_team'),
         dueDate: IsoDate.nullish(),
-        labelIds: z.array(Uuid).optional()
+        labelIds: z.array(Uuid).optional().describe('From get_workspace')
       })
     },
     async (args) => {
@@ -275,7 +317,11 @@ export function registerTools(server: McpServer) {
     {
       title: 'Create several tasks',
       description:
-        'Create many tasks in one project at once. Prefer this over repeated create_task.',
+        'Create many tasks in one project at once - always prefer this over repeated create_task, ' +
+        'it is one write and one activity entry instead of N. The same rule applies per task: set ' +
+        'priority, assignee and dueDate where the request implies them rather than filing a wall of ' +
+        'bare titles. newLabelNames creates labels that do not exist yet, so you do not need label ' +
+        'ids up front.',
       inputSchema: z.object({
         projectId: Uuid,
         tasks: z
@@ -307,7 +353,10 @@ export function registerTools(server: McpServer) {
     {
       title: 'Update task',
       description:
-        "Change any combination of a task's fields. Only the fields you pass are touched; pass null to clear assignee, lead or due date.",
+        "Change any combination of a task's fields. Only the fields you pass are touched, so send " +
+        'just what changes - never re-send the whole task. Pass null to clear assignee, lead or due ' +
+        'date. Read the task first if you are editing description or status off the back of a ' +
+        'conversation; overwriting a description someone else wrote is not recoverable from here.',
       inputSchema: z.object({
         taskId: Uuid,
         title: z.string().min(1).max(500).optional(),
@@ -401,7 +450,7 @@ export function registerTools(server: McpServer) {
       annotations: destructive
     },
     async (args) => {
-      await requireMember()
+      requireTier(await requireMember(), STAFF)
       return json(unwrap(await m.deleteDashboardTask(args.taskId)))
     }
   )
@@ -492,11 +541,16 @@ export function registerTools(server: McpServer) {
     {
       title: 'Comment on a task',
       description:
-        'Post a comment. Mention teammates by passing their member ids.',
+        'Post a comment. Mention teammates by passing their member ids in `mentions` - a mention is ' +
+        'what actually notifies them, writing "@sara" in the body does nothing. Comments are visible ' +
+        'to the whole team and attributed to the member this connection acts as, so write as them.',
       inputSchema: z.object({
         taskId: Uuid,
-        body: z.string().min(1),
-        mentions: z.array(Uuid).optional()
+        body: z.string().min(1).describe('Markdown'),
+        mentions: z
+          .array(Uuid)
+          .optional()
+          .describe('Member ids to notify, from list_team')
       })
     },
     async (args) => {
@@ -542,10 +596,11 @@ export function registerTools(server: McpServer) {
       })
     },
     async (args) => {
-      await requireMember()
+      const me = await requireMember()
       if (args.action === 'list') {
         return json(unwrap(await m.listProjectMembers(args.projectId)))
       }
+      requireTier(me, STAFF)
       if (!args.memberId) throw new Error(`${args.action} requires memberId.`)
       const input = { projectId: args.projectId, memberId: args.memberId }
       return json(
@@ -553,6 +608,209 @@ export function registerTools(server: McpServer) {
           args.action === 'add'
             ? await m.addProjectMember(input)
             : await m.removeProjectMember(input)
+        )
+      )
+    }
+  )
+
+  server.registerTool(
+    'manage_project',
+    {
+      title: 'Manage projects',
+      description:
+        'Create, rename, archive, unarchive a project, or point it at a GitHub repo. ' +
+        'Projects are the containers every task and sprint lives in, so create one here ' +
+        'before creating tasks for work that has no home yet - do not stuff unrelated work ' +
+        'into an existing project. Create returns the new project id, ready to pass to ' +
+        'create_task. Archiving hides a project and its tasks from the board without ' +
+        'deleting anything; there is deliberately no hard delete. Admin or lead only. ' +
+        'Use manage_project_members to control who can see a project.',
+      inputSchema: z.object({
+        action: z.enum([
+          'create',
+          'rename',
+          'archive',
+          'unarchive',
+          'set_github_repo'
+        ]),
+        projectId: Uuid.optional().describe(
+          'Required for everything except create. Get it from get_workspace.'
+        ),
+        name: z
+          .string()
+          .trim()
+          .min(2)
+          .max(80)
+          .optional()
+          .describe('Required for create and rename'),
+        kind: z
+          .enum(['standard', 'operations'])
+          .optional()
+          .describe(
+            "For create. 'operations' is for continuous ops work rather than a delivery project; defaults to standard."
+          ),
+        githubRepo: z
+          .string()
+          .trim()
+          .nullish()
+          .describe('owner/repo, for set_github_repo. Pass null to unlink.')
+      })
+    },
+    async (args) => {
+      const me = await requireMember()
+      requireTier(me, STAFF)
+
+      if (args.action === 'create') {
+        if (!args.name) throw new Error('create requires name.')
+        const form = new FormData()
+        form.set('name', args.name)
+        form.set('kind', args.kind ?? 'standard')
+        unwrap(await m.createProjectInPlace(form))
+        // createProjectInPlace returns nothing on success, and a model that
+        // just made a project immediately needs its id to file tasks into it.
+        // Name is unique per company (that is what the 23505 branch above is
+        // about), so this reads back exactly the row we inserted.
+        const { data: project } = await createAdminClient()
+          .from('projects')
+          .select('id, name, kind, is_archived')
+          .eq('company_id', me.companyId)
+          .eq('name', args.name)
+          .maybeSingle()
+        return json({ ok: true, project })
+      }
+
+      if (!args.projectId) {
+        throw new Error(`${args.action} requires projectId.`)
+      }
+
+      if (args.action === 'rename') {
+        if (!args.name) throw new Error('rename requires name.')
+        const form = new FormData()
+        form.set('projectId', args.projectId)
+        form.set('name', args.name)
+        return json(unwrap(await m.renameProject(form)) ?? { ok: true })
+      }
+
+      if (args.action === 'set_github_repo') {
+        return json(
+          unwrap(
+            await m.setProjectGithubRepo({
+              projectId: args.projectId,
+              githubRepo: args.githubRepo ?? ''
+            })
+          )
+        )
+      }
+
+      const form = new FormData()
+      form.set('projectId', args.projectId)
+      return json(
+        unwrap(
+          args.action === 'archive'
+            ? await m.archiveProjectInPlace(form)
+            : await m.unarchiveProject(form)
+        ) ?? { ok: true }
+      )
+    }
+  )
+
+  server.registerTool(
+    'manage_links',
+    {
+      title: 'Manage links',
+      description:
+        'The links attached to a task or a project - the same "+ Link" chips a member sees in the UI: ' +
+        'a Figma file, a PR, a Google Doc, a spec. Read them with list (or get_task, which returns ' +
+        'them inline) BEFORE answering a question about where something lives, and attach one with ' +
+        'add whenever the conversation produces a URL worth keeping: a link left only in chat is lost ' +
+        'to everyone else. Pass a label when the URL is not self-describing; without one the title is ' +
+        'fetched from the page. remove and relabel take the refId from list - you do not need to say ' +
+        'whether it is a task or project link, it is resolved from the id.',
+      inputSchema: z.object({
+        action: z.enum(['list', 'add', 'remove', 'relabel']),
+        taskId: Uuid.optional().describe('For task links, on list and add'),
+        projectId: Uuid.optional().describe(
+          'For project links, on list and add'
+        ),
+        url: z.string().url().max(2048).optional().describe('Required for add'),
+        label: z
+          .string()
+          .trim()
+          .max(120)
+          .nullish()
+          .describe('Display text. Pass null on relabel to clear it.'),
+        refId: Uuid.optional().describe('Required for remove and relabel')
+      })
+    },
+    async (args) => {
+      await requireMember()
+
+      if (args.action === 'list') {
+        const d = await fetchDashboardData()
+        if (args.taskId) {
+          return json(d.externalRefs.filter((r) => r.taskId === args.taskId))
+        }
+        if (args.projectId) {
+          return json(
+            d.projectExternalRefs.filter((r) => r.projectId === args.projectId)
+          )
+        }
+        return json({
+          taskLinks: d.externalRefs,
+          projectLinks: d.projectExternalRefs
+        })
+      }
+
+      if (args.action === 'add') {
+        if (!args.url) throw new Error('add requires url.')
+        if (args.taskId) {
+          return json(
+            unwrap(
+              await m.addTaskExternalRef({
+                taskId: args.taskId,
+                url: args.url,
+                label: args.label ?? null
+              })
+            )
+          )
+        }
+        if (args.projectId) {
+          return json(
+            unwrap(
+              await m.addProjectExternalRef({
+                projectId: args.projectId,
+                url: args.url,
+                label: args.label ?? null
+              })
+            )
+          )
+        }
+        throw new Error('add requires taskId or projectId.')
+      }
+
+      if (!args.refId) throw new Error(`${args.action} requires refId.`)
+      // Which table the ref lives in is knowable, so don't make the model
+      // declare it - and don't let it guess wrong and get "Ref not found".
+      const d = await fetchDashboardData()
+      const onTask = d.externalRefs.some((r) => r.id === args.refId)
+      const onProject = d.projectExternalRefs.some((r) => r.id === args.refId)
+      if (!onTask && !onProject) throw new Error('Link not found.')
+
+      if (args.action === 'remove') {
+        return json(
+          unwrap(
+            onTask
+              ? await m.removeTaskExternalRef(args.refId)
+              : await m.removeProjectExternalRef(args.refId)
+          )
+        )
+      }
+      const input = { refId: args.refId, label: args.label ?? null }
+      return json(
+        unwrap(
+          onTask
+            ? await m.updateTaskExternalRefLabel(input)
+            : await m.updateProjectExternalRefLabel(input)
         )
       )
     }
@@ -636,7 +894,7 @@ export function registerTools(server: McpServer) {
       })
     },
     async (args) => {
-      await requireMember()
+      requireTier(await requireMember(), STAFF)
       return json(unwrap(await m.createSprint(args)))
     }
   )
@@ -676,7 +934,7 @@ export function registerTools(server: McpServer) {
       annotations: destructive
     },
     async (args) => {
-      await requireMember()
+      requireTier(await requireMember(), STAFF)
       if (args.action === 'start') {
         return json(unwrap(await m.startSprint(args.sprintId)))
       }
