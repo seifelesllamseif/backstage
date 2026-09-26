@@ -24,6 +24,7 @@ import {
   verifyMcpToken
 } from './auth'
 import { registerTools } from './tools'
+import { MCP_VERSION } from './version'
 
 // MCP endpoint, mounted per workspace at /api/p/mcp/w/<companyId>.
 // Stateless Streamable HTTP: POST only. GET/DELETE are for resumable SSE
@@ -56,7 +57,7 @@ When you write:
 Access: every member can read the workspace and manage their own work. Creating or archiving projects, creating and running sprints, deleting tasks and managing project members need lead or admin. If a tool says you lack the tier, say so - do not retry.`
 
 const mcp = createMcpHandler(registerTools, {
-  serverInfo: { name: 'Backstage', version: '0.2.0' },
+  serverInfo: { name: 'Backstage', version: MCP_VERSION },
   instructions: INSTRUCTIONS
 })
 
