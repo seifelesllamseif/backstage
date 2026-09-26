@@ -38,6 +38,21 @@ Migrations re-run on every deploy but are recorded in
 CLI uses), so already-applied files are skipped and `supabase db push`
 stays interchangeable with the build-time runner.
 
+**Put your functions next to your database.** Vercel runs functions in
+`iad1` (Virginia) unless told otherwise, and the Supabase integration lets
+you pick any region. If you picked Frankfurt, every query crosses the
+Atlantic. One measured install paid a 94ms floor on each one, and the
+dashboard makes about 30 of them per load. Add a `vercel.json` with your
+database's region:
+
+```json
+{ "regions": ["fra1"] }
+```
+
+Supabase `eu-central-1` → `fra1`, `eu-west-1` → `dub1`, `us-east-1` →
+`iad1`, `ap-southeast-1` → `sin1`. Your Supabase region is on the project's
+settings page.
+
 ## Updating
 
 A one-click deploy is a copy of this repo taken the moment you clicked.
