@@ -61,17 +61,8 @@ if [ -z "$base" ]; then
 fi
 
 if [ -z "$base" ]; then
-  # Not a snapshot at all (first commit edited before it was pushed?). Fall
-  # back to the release it says it is. Approximate: a line upstream changed
-  # both before and after the copy will conflict - but a conflict stops the
-  # run, so this can only fail loudly, never merge wrong.
-  created_at=$(version_of "$root")
-  if git fetch --quiet "$UPSTREAM" "refs/tags/v$created_at" 2>/dev/null; then
-    base=$(git rev-parse 'FETCH_HEAD^{commit}')
-  fi
-fi
-
-if [ -z "$base" ]; then
+  # Not a snapshot at all (first commit edited before it was pushed?). The
+  # workflow's `base` input is the escape hatch; DEPLOY.md gives the SHA.
   summary "Could not work out which Backstage commit this repo was created from."
   summary "Re-run the workflow with **base** set to that upstream commit (DEPLOY.md#updating)."
   exit 1

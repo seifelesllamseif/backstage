@@ -13,14 +13,11 @@ import type { UpdateStatus } from '@/lib/updates'
 
 const DISMISSED_KEY = 'dashboard.update.dismissed'
 
-function subscribe(onChange: () => void) {
-  window.addEventListener('storage', onChange)
-  return () => window.removeEventListener('storage', onChange)
-}
+const noSubscribe = () => () => {}
 
 export function UpdateNotice({ status }: { status: UpdateStatus }) {
   const dismissedVersion = useSyncExternalStore(
-    subscribe,
+    noSubscribe,
     () => localStorage.getItem(DISMISSED_KEY),
     () => null
   )

@@ -108,8 +108,7 @@ again with **base** set to `331fe494d2a637333adf90a9f4789ee7bea79cfe`
 2. In `release.json`, set `latest`. If the release fixes something a
    deployment must not keep running, also raise `minSupported` to it and
    say why in `reason`. That turns everyone below it red.
-3. Merge to main and tag `vX.Y.Z`. The tag is the updater's fallback when it
-   can't match a copy to an exact commit.
+3. Merge to main and tag `vX.Y.Z`.
 
 Migrations have to be forward-only and safe to apply to a database that's
 several releases behind, because that's exactly what an update does.

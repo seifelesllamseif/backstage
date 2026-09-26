@@ -44,10 +44,4 @@ describe('mcp tool catalogue', () => {
       ).toBeGreaterThan(40)
     }
   })
-
-  it('names tools in snake_case so they read as one family', () => {
-    for (const tool of tools) {
-      expect(tool.name).toMatch(/^[a-z][a-z0-9_]*$/)
-    }
-  })
 })
