@@ -1,6 +1,15 @@
 {
   "plugins": [
     {
+      "id": "update-required",
+      "name": "Security update required",
+      "description": "Deployed before 13 Sep 2026? Six of your tables are readable and writable with the public anon key. Open this card for the two-minute fix.",
+      "version": "0.2.0",
+      "author": "Backstage",
+      "group": "Team",
+      "repoUrl": "https://github.com/seifelesllamseif/backstage/blob/main/DEPLOY.md#updating"
+    },
+    {
       "id": "polls",
       "name": "Team Polls",
       "description": "Quick team polls with live results.",

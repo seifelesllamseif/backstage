@@ -41,14 +41,20 @@ export async function getMarketplaceCatalog(): Promise<
   if (!member) return []
 
   const url = process.env.MARKETPLACE_REGISTRY_URL ?? DEFAULT_REGISTRY_URL
+  let plugins: MarketplaceCatalogEntry[]
   try {
     const res = await fetch(url, { next: { revalidate: 3600 } })
     if (!res.ok) throw new Error(`registry fetch ${res.status}`)
     // The URL is remote input — validate the shape before it reaches UI.
-    return Catalog.parse(await res.json()).plugins
+    plugins = Catalog.parse(await res.json()).plugins
   } catch {
-    return Catalog.parse(bundledRegistry).plugins
+    plugins = Catalog.parse(bundledRegistry).plugins
   }
+  // 'update-required' is not a plugin but a notice riding the catalog:
+  // deployments older than 0.2.0 have no update check, and the catalog is the
+  // one thing they still fetch from us. Anything new enough to run this line
+  // has lib/updates.ts instead.
+  return plugins.filter((p) => p.id !== 'update-required')
 }
 
 // Member "request this module/plugin" — notifies every admin in the workspace.
