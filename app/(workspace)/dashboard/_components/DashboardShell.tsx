@@ -814,6 +814,17 @@ function DashboardShellInner({ initial }: { initial: DashboardInitial }) {
     [tasks, initial.currentProjectId]
   )
 
+  // Active project name in the browser tab title - same string the old
+  // generateMetadata produced, minus the DB round trip it cost on every
+  // single tab click (which also made every /dashboard/* route dynamic, so
+  // none of them could be prefetched). The name is already in this payload.
+  useEffect(() => {
+    const name = initial.projects.find(
+      (p) => p.id === initial.currentProjectId
+    )?.name
+    document.title = `${name ?? 'All Projects'} · ${config.appName}`
+  }, [initial.projects, initial.currentProjectId])
+
   // Task IDs where the current user is @mentioned AND hasn't replied yet.
   // The rule: a task stays in the Mentions feed until the user posts a
   // comment newer than the most recent comment that mentioned them.
