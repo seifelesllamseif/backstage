@@ -45,14 +45,6 @@ export interface SharedTaskView {
 // cast (PostgREST filters can't cast) and without a scan.
 const ID_PREFIX = /^[0-9a-f]{8}$/i
 
-function idRange(prefix: string): [string, string] {
-  const p = prefix.toLowerCase()
-  return [
-    `${p}-0000-0000-0000-000000000000`,
-    `${p}-ffff-ffff-ffff-ffffffffffff`
-  ]
-}
-
 export async function fetchTaskByRef(
   ref: string
 ): Promise<SharedTaskView | null> {
@@ -75,12 +67,12 @@ export async function fetchTaskByRef(
   if (error) return null
   if (!data) {
     if (!ID_PREFIX.test(ref)) return null
-    const [lo, hi] = idRange(ref)
+    const p = ref.toLowerCase()
     const { data: byId } = await supabase
       .from('tasks')
       .select('ref')
-      .gte('id', lo)
-      .lte('id', hi)
+      .gte('id', `${p}-0000-0000-0000-000000000000`)
+      .lte('id', `${p}-ffff-ffff-ffff-ffffffffffff`)
       .is('deleted_at', null)
       .limit(2)
     // Two hits means the prefix is ambiguous; refuse rather than guess.
